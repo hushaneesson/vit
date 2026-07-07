@@ -1,0 +1,111 @@
+@import '../../../../vendor/filament/filament/resources/css/theme.css';
+
+@config './tailwind.config.js';
+
+@source '../../../../app/Filament/**/*';
+@source '../../../../resources/views/filament/**/*';
+
+
+
+/* =====================================================
+   SIDEBAR BACKGROUND (LIGHT + DARK)
+===================================================== */
+.fi-sidebar {
+    background: linear-gradient(
+        180deg,
+        rgb(1 172 214) 0%,
+        rgb(1 119 148) 100%
+    ) !important;
+}
+
+/* =====================================================
+   SIDEBAR HEADER / APP NAME
+===================================================== */
+.fi-sidebar-header {
+    background: transparent !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.fi-sidebar-header-heading,
+.fi-sidebar-header-title,
+.fi-sidebar-header a,
+.fi-logo,
+
+
+/* =====================================================
+   SIDEBAR ITEM LINKS
+===================================================== */
+.fi-sidebar-item a {
+    color: rgba(255, 255, 255, 0.95) !important;
+    border-radius: 0.75rem;
+    transition:
+        background-color 0.2s ease,
+        color 0.2s ease;
+    margin-bottom: 0.7rem;
+}
+
+/* =====================================================
+   LABELS / GROUP HEADERS
+===================================================== */
+.fi-sidebar-item-label,
+.fi-sidebar-group-label,
+.fi-sidebar-item-description {
+    color: rgba(255, 255, 255, 0.9) !important;
+}
+
+/* =====================================================
+   ICONS
+===================================================== */
+.fi-sidebar-item-icon {
+    color: rgba(255, 255, 255, 0.9) !important;
+}
+
+/* =====================================================
+   HOVER STATE
+===================================================== */
+.fi-sidebar-item a:hover {
+    background-color: rgba(255, 255, 255, 0.14) !important;
+    color: #ffffff !important;
+}
+
+/* =====================================================
+   ACTIVE STATE
+===================================================== */
+.fi-sidebar-item.fi-active .fi-sidebar-item-btn {
+    background-color: rgba(255, 255, 255, 0.24) !important;
+    color: #ffffff !important;
+    font-weight: 600;
+}
+
+/* =====================================================
+   GROUP LABEL POLISH
+===================================================== */
+.fi-sidebar-group-label {
+    opacity: 0.85;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+}
+
+.fi-in-entry-wrp-label > span {
+    font-weight: 600 !important;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+    width: 7px;
+    height: 4px;
+}
+
+::-webkit-scrollbar-track {
+    @apply bg-slate-400;
+}
+
+::-webkit-scrollbar-thumb {
+    @apply bg-slate-300;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-300;
+}
