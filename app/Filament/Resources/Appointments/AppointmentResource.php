@@ -10,6 +10,7 @@ use Filament\Resources\Resource;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use UnitEnum;
 
 class AppointmentResource extends Resource
 {
@@ -22,6 +23,8 @@ class AppointmentResource extends Resource
     protected static ?string $modelLabel = 'Appointment';
 
     protected static ?string $pluralModelLabel = 'Appointments';
+
+    protected static string|UnitEnum|null $navigationGroup = 'Appointments';
 
     public static function table(Table $table): Table
     {

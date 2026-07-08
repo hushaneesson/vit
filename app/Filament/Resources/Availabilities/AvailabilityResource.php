@@ -14,6 +14,7 @@ use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use UnitEnum;
 
 class AvailabilityResource extends Resource
 {
@@ -26,6 +27,8 @@ class AvailabilityResource extends Resource
     protected static ?string $modelLabel = 'Availability';
 
     protected static ?string $pluralModelLabel = 'Availabilities';
+
+    protected static string|UnitEnum|null $navigationGroup = 'Appointments';
 
     public static function form(Schema $schema): Schema
     {
