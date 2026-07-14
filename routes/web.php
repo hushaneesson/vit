@@ -37,17 +37,12 @@ Route::prefix('vendor')->name('vendor.')->group(function () {
         Route::get('submissions/{submission}/download', SubmissionDownloadController::class)
             ->name('submissions.download');
 
-        // Phase 4/5/6/12 — catalog data entry (standard + complex fields,
-        // hierarchy/classification, edit & add-items workflows).
         Route::get('catalog', [CatalogItemController::class, 'index'])->name('catalog.index');
         Route::get('catalog/create', [CatalogItemController::class, 'create'])->name('catalog.create');
         Route::get('catalog/{catalogItem}/edit', [CatalogItemController::class, 'edit'])->name('catalog.edit');
         Route::delete('catalog/{catalogItem}', [CatalogItemController::class, 'destroy'])->name('catalog.destroy');
         Route::post('catalog/submit', [CatalogItemController::class, 'submit'])->name('catalog.submit');
 
-        // Authenticated, vendor-scoped preview of a catalog item's uploaded
-        // image (used by the entry form and catalog list — images live on
-        // the private disk, never a public URL).
         Route::get('catalog-images/{catalogItemImage}', CatalogItemImageController::class)
             ->name('catalog-images.show');
     });
