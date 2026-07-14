@@ -47,7 +47,7 @@ class CreateAvailability extends CreateRecord
                     'schedule' => [
                         'schedulable_type' => User::class,
                         'schedulable_id' => $data['schedulable_id'],
-                        'name' => $data['name'],
+                        'name' => "Office Availability",
                         'description' => $data['description'] ?? null,
                         'schedule_type' => ScheduleTypes::AVAILABILITY->value,
                         'start_date' => $data['start_date'],

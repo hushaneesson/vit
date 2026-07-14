@@ -19,10 +19,9 @@ class UnitOfMeasureResource extends Resource
 {
     protected static ?string $model = UnitOfMeasure::class;
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedRectangleStack;
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedScale;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Catalog';
-
+    protected static string|UnitEnum|null $navigationGroup = 'Catalog Management';
 
 
     public static function form(Schema $schema): Schema

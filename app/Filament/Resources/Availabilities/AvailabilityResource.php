@@ -20,9 +20,9 @@ class AvailabilityResource extends Resource
 {
     protected static ?string $model = Availability::class;
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCalendar;
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedAdjustmentsVertical;
 
-    protected static ?string $navigationLabel = 'Availabilities';
+    protected static ?string $navigationLabel = 'Availability Settings';
 
     protected static ?string $modelLabel = 'Availability';
 

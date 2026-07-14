@@ -118,7 +118,6 @@ class EditAvailability extends EditRecord
                     'schedule' => [
                         'schedulable_type' => User::class,
                         'schedulable_id' => $data['schedulable_id'],
-                        'name' => $data['name'],
                         'description' => $data['description'] ?? null,
                         'schedule_type' => ScheduleTypes::AVAILABILITY->value,
                         'start_date' => $data['start_date'],
