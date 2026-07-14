@@ -21,23 +21,11 @@ class AvailabilitiesTable
                     ->label('User')
                     ->searchable()
                     ->sortable(),
-                TextColumn::make('name')
-                    ->searchable()
-                    ->wrap(),
                 TextColumn::make('frequency_config.days')
-                    ->label('Days')
+                    ->label('Day')
                     ->formatStateUsing(function ($state): string {
-                        $days = is_array($state) ? $state : [];
-
-                        if ($days === []) {
-                            return 'None';
-                        }
-
-                        return collect($days)
-                            ->map(fn(string $day): string => ucfirst(substr($day, 0, 3)))
-                            ->join(', ');
-                    })
-                    ->wrap(),
+                        return ucfirst($state);
+                    }),
                 TextColumn::make('time_range')
                     ->label('Time Range')
                     ->state(function ($record): string {
@@ -70,14 +58,6 @@ class AvailabilitiesTable
                     ->date()
                     ->sortable()
                     ->placeholder('No end date'),
-                TextColumn::make('frequency')
-                    ->badge()
-                    ->formatStateUsing(fn($state): string => $state ? ucfirst((string) $state) : 'N/A')
-                    ->color('gray'),
-                TextColumn::make('updated_at')
-                    ->dateTime()
-                    ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
                 SelectFilter::make('schedulable_id')

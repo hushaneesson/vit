@@ -24,9 +24,6 @@ class AvailabilityForm
                     ->searchable()
                     ->preload()
                     ->required(),
-                TextInput::make('name')
-                    ->placeholder('Office Hours')
-                    ->required(),
                 DatePicker::make('start_date')
                     ->required(),
                 DatePicker::make('end_date')
