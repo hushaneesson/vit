@@ -2,11 +2,12 @@
 
 namespace Database\Seeders;
 
+use App\Models\CatalogItem;
 use App\Models\Client;
 use App\Models\Vendor;
 use Illuminate\Database\Seeder;
 
-class VendorClientSeeder extends Seeder
+class VendorSeeder extends Seeder
 {
     public function run(): void
     {
@@ -117,6 +118,9 @@ class VendorClientSeeder extends Seeder
                     ]
                 );
             }
+
+            // catalog items for this vendor
+            CatalogItem::factory(30)->create(['vendor_id' => $vendor->id]);
         }
     }
 }

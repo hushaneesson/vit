@@ -41,7 +41,6 @@ Route::prefix('vendor')->name('vendor.')->group(function () {
         Route::get('catalog/create', [CatalogItemController::class, 'create'])->name('catalog.create');
         Route::get('catalog/{catalogItem}/edit', [CatalogItemController::class, 'edit'])->name('catalog.edit');
         Route::delete('catalog/{catalogItem}', [CatalogItemController::class, 'destroy'])->name('catalog.destroy');
-        Route::post('catalog/submit', [CatalogItemController::class, 'submit'])->name('catalog.submit');
 
         Route::get('catalog-images/{catalogItemImage}', CatalogItemImageController::class)
             ->name('catalog-images.show');

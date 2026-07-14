@@ -15,7 +15,7 @@ return new class extends Migration
     {
         Schema::create('catalog_item_images', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('catalog_item_id')->constrained('catalog_items')->cascadeOnDelete();
+            $table->foreignUuid('catalog_item_id')->constrained('catalog_items')->cascadeOnDelete();
             $table->string('disk')->default('local');
             $table->string('path'); // storage path to the stored image file
             $table->unsignedInteger('sort_order')->default(0); // 0 = Primary, 1 = #2, ...

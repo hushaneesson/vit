@@ -2,42 +2,51 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-/**
- * One product/catalog item. Traceable to both the client (who did it) and
- * the vendor (which company it belongs to). Vendor-level data isolation is
- * enforced by vendor_id so multiple clients under the same vendor see the
- * same catalog data.
- */
 class CatalogItem extends Model
 {
+    use HasUuids, HasFactory;
+
     protected $fillable = [
         'vendor_id',
-        'client_id',
-        'catalog_name',
-        'vendor_part_number',
-        'field_values',
-        'status',
+        'name',
+        'description',
+        'manufacturer_sku',
+        'manufacturer_name',
+        'brand_name',
+        'vendor_sku',
+        'unspsc_code',
+        'product_type',
+        'unit_of_measure',
+        'quantity_per_unit',
+        'weight',
+        'min_order_quantity',
+        'max_order_quantity',
+        'multiples',
+        'search_terms',
+        'classifications',
+        'specifications',
+        'selling_points',
+        'msds_link',
+        'list_price',
+        'selling_price'
     ];
 
-    protected function casts(): array
-    {
-        return [
-            'field_values' => 'array',
-        ];
-    }
+    protected $casts = [
+        'search_terms' => 'array',
+        'specifications' => 'array',
+        'selling_points' => 'array',
+        'classifications' => 'array',
 
-    public function vendor(): BelongsTo
+    ];
+
+    public function vendor()
     {
         return $this->belongsTo(Vendor::class);
-    }
-
-    public function client(): BelongsTo
-    {
-        return $this->belongsTo(Client::class);
     }
 
     public function images(): HasMany
