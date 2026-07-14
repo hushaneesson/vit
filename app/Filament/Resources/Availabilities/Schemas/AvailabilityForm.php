@@ -7,7 +7,6 @@ use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
-use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TimePicker;
 use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Schema;
@@ -23,9 +22,6 @@ class AvailabilityForm
                     ->options(fn() => User::query()->orderBy('name')->pluck('name', 'id'))
                     ->searchable()
                     ->preload()
-                    ->required(),
-                TextInput::make('name')
-                    ->placeholder('Office Hours')
                     ->required(),
                 DatePicker::make('start_date')
                     ->required(),

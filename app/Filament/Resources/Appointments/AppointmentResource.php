@@ -10,12 +10,15 @@ use Filament\Resources\Resource;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use UnitEnum;
 
 class AppointmentResource extends Resource
 {
     protected static ?string $model = Appointment::class;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCalendar;
+
+    protected static string|UnitEnum|null $navigationGroup = 'Appointments';
 
     protected static ?string $navigationLabel = 'Appointments';
 

@@ -1,7 +1,9 @@
 <x-layouts.vendor title="Enter Login Code">
     <div class="max-w-md p-8 mx-auto bg-white border border-gray-100 shadow-sm rounded-2xl ring-1 ring-sky-950/5">
         <div class="mb-8 text-center">
-            <img src="{{ asset('/logo.png') }}" alt="VIT Vendor Portal" class="w-auto h-20 mx-auto">
+            <a href="{{ route('home') }}">
+                <img src="{{ asset('/logo.png') }}" alt="VIT Vendor Portal" class="w-auto h-20 mx-auto">
+            </a>
             <h1 class="mt-2 text-2xl font-semibold tracking-tight text-gray-950">Enter your code</h1>
             <p class="mt-2 text-sm text-gray-500">
                 We emailed a 6-digit code to <span class="font-medium text-gray-700">{{ $email }}</span>. Enter it

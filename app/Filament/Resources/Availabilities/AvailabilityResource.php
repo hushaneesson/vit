@@ -14,14 +14,17 @@ use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use UnitEnum;
 
 class AvailabilityResource extends Resource
 {
     protected static ?string $model = Availability::class;
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCalendar;
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedAdjustmentsVertical;
 
-    protected static ?string $navigationLabel = 'Availabilities';
+    protected static string|UnitEnum|null $navigationGroup = 'Appointments';
+
+    protected static ?string $navigationLabel = 'Availability Settings';
 
     protected static ?string $modelLabel = 'Availability';
 
