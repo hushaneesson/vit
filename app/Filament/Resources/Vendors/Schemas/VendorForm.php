@@ -15,13 +15,6 @@ class VendorForm
             ->components([
                 TextInput::make('name')
                     ->required(),
-                TextInput::make('legal_company_name'),
-                TextInput::make('address_line_1'),
-                TextInput::make('address_line_2'),
-                TextInput::make('city'),
-                TextInput::make('state'),
-                TextInput::make('postal_code'),
-                TextInput::make('country'),
                 TextInput::make('primary_contact_name'),
                 TextInput::make('primary_contact_email')
                     ->email(),
@@ -31,8 +24,6 @@ class VendorForm
                     ->options(['active' => 'Active', 'inactive' => 'Inactive', 'pending' => 'Pending'])
                     ->default('pending')
                     ->required(),
-                Textarea::make('notes')
-                    ->columnSpanFull(),
             ]);
     }
 }
