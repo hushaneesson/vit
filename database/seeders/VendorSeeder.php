@@ -2,11 +2,12 @@
 
 namespace Database\Seeders;
 
+use App\Models\CatalogItem;
 use App\Models\Client;
 use App\Models\Vendor;
 use Illuminate\Database\Seeder;
 
-class VendorClientSeeder extends Seeder
+class VendorSeeder extends Seeder
 {
     public function run(): void
     {
@@ -14,12 +15,6 @@ class VendorClientSeeder extends Seeder
             [
                 'vendor' => [
                     'name' => 'Acme Office Supply Co.',
-                    'legal_company_name' => 'Acme Office Supply Company LLC',
-                    'address_line_1' => '1200 Commerce Blvd',
-                    'city' => 'Richmond',
-                    'state' => 'VA',
-                    'postal_code' => '23219',
-                    'country' => 'US',
                     'primary_contact_name' => 'Sandra McNeil',
                     'primary_contact_email' => 'sandra.mcneil@acmeoffice.test',
                     'primary_contact_phone' => '804-555-0101',
@@ -45,12 +40,6 @@ class VendorClientSeeder extends Seeder
             [
                 'vendor' => [
                     'name' => 'Blue Ridge Furniture',
-                    'legal_company_name' => 'Blue Ridge Furniture Inc.',
-                    'address_line_1' => '4550 Market Street',
-                    'city' => 'Roanoke',
-                    'state' => 'VA',
-                    'postal_code' => '24011',
-                    'country' => 'US',
                     'primary_contact_name' => 'Caleb Dawson',
                     'primary_contact_email' => 'caleb.dawson@blueridgefurniture.test',
                     'primary_contact_phone' => '540-555-0141',
@@ -76,12 +65,6 @@ class VendorClientSeeder extends Seeder
             [
                 'vendor' => [
                     'name' => 'Piedmont Technology Group',
-                    'legal_company_name' => 'Piedmont Technology Group LLC',
-                    'address_line_1' => '8901 Innovation Way',
-                    'city' => 'Arlington',
-                    'state' => 'VA',
-                    'postal_code' => '22203',
-                    'country' => 'US',
                     'primary_contact_name' => 'Renee Alston',
                     'primary_contact_email' => 'renee.alston@piedmonttech.test',
                     'primary_contact_phone' => '703-555-0188',
@@ -135,6 +118,9 @@ class VendorClientSeeder extends Seeder
                     ]
                 );
             }
+
+            // catalog items for this vendor
+            CatalogItem::factory(30)->create(['vendor_id' => $vendor->id]);
         }
     }
 }

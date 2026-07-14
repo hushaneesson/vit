@@ -22,17 +22,28 @@
                     class="block w-full appearance-none rounded-lg border border-gray-300 bg-white px-3.5 py-2.5 text-center text-xl tracking-[0.4em] text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-sky-500 focus:ring-1 focus:ring-sky-500 font-mono">
             </div>
 
-            <button type="submit"
-                class="inline-flex w-full items-center justify-center rounded-lg px-4 py-2.5 shadow-sm btn-primary">
-                Verify &amp; Log In
-            </button>
-        </form>
+            <form method="POST" action="{{ route('vendor.login.otp.verify') }}" class="space-y-5">
+                @csrf
+                <input type="hidden" name="email" value="{{ $email }}">
 
-        <form method="POST" action="{{ route('vendor.login.send') }}" class="mt-6 text-center">
-            @csrf
-            <input type="hidden" name="email" value="{{ $email }}">
-            <button type="submit" class="text-sm font-medium transition text-sky-600 hover:text-sky-500">Resend
-                code</button>
-        </form>
-    </div>
-</x-layouts.vendor>
+                <div>
+                    <label for="code">Login code</label>
+                    <input type="text" name="code" id="code" required autofocus inputmode="numeric"
+                        maxlength="6" />
+                </div>
+
+                <button type="submit"
+                    class="inline-flex w-full items-center justify-center rounded-lg px-4 py-2.5 shadow-sm btn-primary">
+                    Verify &amp; Log In
+                </button>
+            </form>
+
+            <form method="POST" action="{{ route('vendor.login.send') }}" class="mt-6 text-center">
+                @csrf
+                <input type="hidden" name="email" value="{{ $email }}"/>
+                <button type="submit" class="text-sm font-medium transition text-sky-600 hover:text-sky-500">Resend
+                    code</button>
+            </form>
+        </div>
+    </main>
+</x-layouts.app>

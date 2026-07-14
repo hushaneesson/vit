@@ -16,10 +16,18 @@
                     class="block w-full appearance-none rounded-lg border border-gray-300 bg-white px-3.5 py-2.5 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-sky-500 focus:ring-1 focus:ring-sky-500">
             </div>
 
-            <button type="submit"
-                class="inline-flex w-full items-center justify-center rounded-lg btn-primary px-4 py-2.5 shadow-sm">
-                Send Login Code
-            </button>
-        </form>
-    </div>
-</x-layouts.vendor>
+            <form method="POST" action="{{ route('vendor.login.send') }}" class="space-y-5">
+                @csrf
+                <div>
+                    <label for="email">Email address</label>
+                    <input type="email" name="email" id="email" required autofocus />
+                </div>
+
+                <button type="submit"
+                    class="inline-flex w-full items-center justify-center rounded-lg btn-primary px-4 py-2.5 shadow-sm">
+                    Send Login Code
+                </button>
+            </form>
+        </div>
+    </main>
+</x-layouts.app>

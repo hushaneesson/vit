@@ -16,20 +16,6 @@ class VendorsTable
             ->columns([
                 TextColumn::make('name')
                     ->searchable(),
-                TextColumn::make('legal_company_name')
-                    ->searchable(),
-                TextColumn::make('address_line_1')
-                    ->searchable(),
-                TextColumn::make('address_line_2')
-                    ->searchable(),
-                TextColumn::make('city')
-                    ->searchable(),
-                TextColumn::make('state')
-                    ->searchable(),
-                TextColumn::make('postal_code')
-                    ->searchable(),
-                TextColumn::make('country')
-                    ->searchable(),
                 TextColumn::make('primary_contact_name')
                     ->searchable(),
                 TextColumn::make('primary_contact_email')
