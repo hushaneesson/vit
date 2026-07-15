@@ -1,13 +1,10 @@
 <?php
 
-namespace App\Filament\Resources\Availabilities\Schemas;
+namespace App\Filament\Schemas;
 
-use App\Models\User;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Repeater;
-use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
-use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TimePicker;
 use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Schema;
@@ -18,12 +15,6 @@ class AvailabilityForm
     {
         return $schema
             ->components([
-                Select::make('schedulable_id')
-                    ->label('User')
-                    ->options(fn() => User::query()->orderBy('name')->pluck('name', 'id'))
-                    ->searchable()
-                    ->preload()
-                    ->required(),
                 DatePicker::make('start_date')
                     ->required(),
                 DatePicker::make('end_date')
@@ -31,7 +22,7 @@ class AvailabilityForm
                 Repeater::make('weekly_periods')
                     ->label('Weekly periods')
                     ->schema([
-                        Select::make('day')
+                        \Filament\Forms\Components\Select::make('day')
                             ->options([
                                 'monday' => 'Monday',
                                 'tuesday' => 'Tuesday',
@@ -55,15 +46,7 @@ class AvailabilityForm
                         Toggle::make('enabled')
                             ->default(false),
                     ])
-                    ->default([
-                        ['day' => 'monday', 'start_time' => '09:00', 'end_time' => '17:00', 'enabled' => false],
-                        ['day' => 'tuesday', 'start_time' => '09:00', 'end_time' => '17:00', 'enabled' => false],
-                        ['day' => 'wednesday', 'start_time' => '09:00', 'end_time' => '17:00', 'enabled' => false],
-                        ['day' => 'thursday', 'start_time' => '09:00', 'end_time' => '17:00', 'enabled' => false],
-                        ['day' => 'friday', 'start_time' => '09:00', 'end_time' => '17:00', 'enabled' => false],
-                        ['day' => 'saturday', 'start_time' => '09:00', 'end_time' => '17:00', 'enabled' => false],
-                        ['day' => 'sunday', 'start_time' => '09:00', 'end_time' => '17:00', 'enabled' => false],
-                    ])
+                    ->default(self::defaultWeeklyPeriods())
                     ->columns(4)
                     ->columnSpanFull()
                     ->addable(false)
@@ -89,5 +72,17 @@ class AvailabilityForm
                     ->required(),
             ])
             ->columns(2);
+    }
+
+    public static function defaultWeeklyPeriods(): array
+    {
+        return collect(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'])
+            ->map(fn(string $day) => [
+                'day' => $day,
+                'start_time' => '09:00',
+                'end_time' => '17:00',
+                'enabled' => false,
+            ])
+            ->all();
     }
 }
