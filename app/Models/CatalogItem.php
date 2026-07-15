@@ -19,6 +19,8 @@ class CatalogItem extends Model
         'manufacturer_name',
         'brand_name',
         'vendor_sku',
+        'catalog_name',
+        'catalog_upload_id',
         'unspsc_code',
         'product_type',
         'unit_of_measure',

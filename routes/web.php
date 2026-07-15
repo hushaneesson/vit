@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Vendor\AppointmentController;
+use App\Http\Controllers\CatalogUploadController;
 use App\Http\Controllers\Vendor\CatalogItemController;
 use App\Http\Controllers\Vendor\CatalogItemImageController;
 use App\Http\Controllers\Vendor\ClientAuthController;
@@ -11,6 +12,7 @@ use Illuminate\Support\Facades\Route;
 Route::get('/', function () {
     return view('welcome');
 })->name('home');
+
 
 /*
 |--------------------------------------------------------------------------
@@ -43,10 +45,21 @@ Route::prefix('vendor')->name('vendor.')->group(function () {
 
         Route::get('catalog', [CatalogItemController::class, 'index'])->name('catalog.index');
         Route::get('catalog/create', [CatalogItemController::class, 'create'])->name('catalog.create');
+
+        Route::get('/catalog-upload',[CatalogItemController::class, 'renderUpload'])->name('catalog-upload');
+            Route::post('/', [CatalogUploadController::class, 'store']);
+    Route::post('/{catalogUpload}/mapping', [CatalogUploadController::class, 'saveMapping']);
+    Route::post('/{catalogUpload}/process', [CatalogUploadController::class, 'process']);
+    Route::get('/{catalogUpload}/status', [CatalogUploadController::class, 'status']);
+    Route::get('/{catalogUpload}/error-rows', [CatalogUploadController::class, 'errorRows']);
+
         Route::get('catalog/{catalogItem}/edit', [CatalogItemController::class, 'edit'])->name('catalog.edit');
         Route::delete('catalog/{catalogItem}', [CatalogItemController::class, 'destroy'])->name('catalog.destroy');
 
         Route::get('catalog-images/{catalogItemImage}', CatalogItemImageController::class)
             ->name('catalog-images.show');
     });
+
+
+
 });

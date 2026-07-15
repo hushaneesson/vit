@@ -38,6 +38,7 @@ class DatabaseSeeder extends Seeder
         $this->call([
             ReferenceDataSeeder::class,
             VendorSeeder::class,
+            CatalogFieldSeeder::class,
         ]);
     }
 }

@@ -1,0 +1,141 @@
+<?php
+
+namespace App\Services;
+
+use Illuminate\Support\Facades\Storage;
+use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Reader\Csv as CsvReader;
+use PhpOffice\PhpSpreadsheet\Reader\IReader;
+
+class CatalogFileInspectionService
+{
+    private ?string $lastLocalPath = null;
+
+    /**
+     * Read just the header row + a handful of sample rows, for the
+     * column-mapping screen. Does NOT load the whole file into memory -
+     * important for larger vendor exports.
+     */
+    public function inspect(string $disk, string $path, string $fileType, int $sampleRows = 5): array
+    {
+        $localPath = $this->resolveLocalPath($disk, $path);
+
+        $reader = $this->makeReader($fileType, $localPath);
+        $reader->setReadDataOnly(true);
+
+        // Only read the first N+1 rows (header + samples) to keep this fast
+        // even on large vendor files.
+        $reader->setReadFilter(new class($sampleRows + 1) implements \PhpOffice\PhpSpreadsheet\Reader\IReadFilter {
+            public function __construct(private int $maxRow) {}
+
+            public function readCell(string $columnAddress, int $row, string $worksheetName = ''): bool
+            {
+                return $row <= $this->maxRow;
+            }
+        });
+
+        $spreadsheet = $reader->load($localPath);
+        $sheet = $spreadsheet->getActiveSheet();
+        $rows = $sheet->toArray(null, true, true, false);
+
+        $headerRow = array_map(
+            fn ($value) => is_string($value) ? trim($value) : $value,
+            $rows[0] ?? []
+        );
+
+        $sampleData = array_slice($rows, 1, $sampleRows);
+
+        // Drop fully-empty trailing columns some Excel exports leave behind.
+        $lastNonEmptyIndex = $this->lastNonEmptyColumnIndex($headerRow);
+        $headerRow = array_slice($headerRow, 0, $lastNonEmptyIndex + 1);
+        $sampleData = array_map(
+            fn ($row) => array_slice($row, 0, $lastNonEmptyIndex + 1),
+            $sampleData
+        );
+
+        return [
+            'columns' => $headerRow,
+            'sample_rows' => $sampleData,
+        ];
+    }
+
+    /**
+     * Count total data rows (excluding header) without loading everything
+     * into memory at once - used to populate catalog_uploads.total_rows
+     * before the queued job does the heavy processing.
+     */
+    public function countDataRows(string $disk, string $path, string $fileType): int
+    {
+        $localPath = $this->resolveLocalPath($disk, $path);
+
+        $reader = $this->makeReader($fileType, $localPath);
+        $reader->setReadDataOnly(true);
+        $spreadsheet = $reader->load($localPath);
+        $sheet = $spreadsheet->getActiveSheet();
+
+        return max(0, $sheet->getHighestDataRow() - 1); // minus header row
+    }
+
+    /**
+     * Bug fix: previously called CsvReader::guessEncoding() with
+     * $this->lastLocalPath before it had ever been set (resolveLocalPath
+     * runs AFTER makeReader in the original code path), so encoding
+     * detection silently ran against an empty string every time. Now the
+     * local path is resolved first and passed straight in.
+     */
+    private function makeReader(string $fileType, ?string $localPath = null): IReader
+    {
+        $reader = match ($fileType) {
+            'csv' => new CsvReader(),
+            'xlsx', 'xls' => IOFactory::createReader($fileType === 'xls' ? 'Xls' : 'Xlsx'),
+            default => throw new \InvalidArgumentException("Unsupported file type: {$fileType}"),
+        };
+
+        if ($reader instanceof CsvReader) {
+            $reader->setDelimiter(',');
+            $reader->setEnclosure('"');
+
+            if ($localPath) {
+                $reader->setInputEncoding(CsvReader::guessEncoding($localPath));
+            }
+        }
+
+        return $reader;
+    }
+
+    private function resolveLocalPath(string $disk, string $path): string
+    {
+        // PhpSpreadsheet needs a local filesystem path. If the disk is
+        // remote (DigitalOcean Spaces), pull the file down to a temp path
+        // first rather than streaming, since PhpSpreadsheet's readers
+        // expect seekable local files.
+        //
+        // Bug fix: the original condition was
+        //   Storage::disk($disk)->getConfig()['driver'] ?? null === 'local'
+        // which - due to `??` binding looser than `===` - actually
+        // evaluated as `... ?? (null === 'local')`, i.e. `... ?? false`.
+        // That meant the null-coalesce only ever kicked in when the config
+        // array access itself failed, and the 'local' comparison never
+        // ran, so it fell through to the temp-file path even for the
+        // local disk. Parenthesizing fixes the intended comparison.
+        if ((Storage::disk($disk)->getConfig()['driver'] ?? null) === 'local') {
+            return $this->lastLocalPath = Storage::disk($disk)->path($path);
+        }
+
+        $tempPath = tempnam(sys_get_temp_dir(), 'catalog_upload_');
+        file_put_contents($tempPath, Storage::disk($disk)->get($path));
+
+        return $this->lastLocalPath = $tempPath;
+    }
+
+    private function lastNonEmptyColumnIndex(array $headerRow): int
+    {
+        for ($i = count($headerRow) - 1; $i >= 0; $i--) {
+            if (! is_null($headerRow[$i]) && trim((string) $headerRow[$i]) !== '') {
+                return $i;
+            }
+        }
+
+        return 0;
+    }
+}
