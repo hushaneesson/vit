@@ -42,6 +42,9 @@ return new class extends Migration
             $table->decimal('list_price', 10, 2);
             $table->decimal('selling_price', 10, 2);
 
+            $table->string('status', 20)->default('incomplete');
+            $table->integer('completeness_score')->default(0);
+
             $table->timestamps();
 
             $table->index(['vendor_id']);
