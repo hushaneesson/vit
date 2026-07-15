@@ -40,6 +40,10 @@ class Client extends Model implements AuthenticatableContract
         'invitation_token',
     ];
 
+    protected $with = [
+        'vendor',
+    ];
+
     protected function casts(): array
     {
         return [

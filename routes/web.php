@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Vendor\AppointmentController;
 use App\Http\Controllers\Vendor\CatalogItemController;
 use App\Http\Controllers\Vendor\CatalogItemImageController;
 use App\Http\Controllers\Vendor\ClientAuthController;
@@ -36,6 +37,9 @@ Route::prefix('vendor')->name('vendor.')->group(function () {
 
         Route::get('submissions/{submission}/download', SubmissionDownloadController::class)
             ->name('submissions.download');
+
+        Route::get('appointments', [AppointmentController::class, 'index'])->name('appointments.index');
+        Route::get('appointments/create', [AppointmentController::class, 'create'])->name('appointments.create');
 
         Route::get('catalog', [CatalogItemController::class, 'index'])->name('catalog.index');
         Route::get('catalog/create', [CatalogItemController::class, 'create'])->name('catalog.create');

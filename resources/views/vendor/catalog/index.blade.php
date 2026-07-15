@@ -5,8 +5,7 @@
                 <h1 class="text-xl font-semibold">My Catalogs</h1>
                 <p class="text-sm text-gray-500">{{ $vendor->name }}</p>
             </div>
-            <a href="{{ route('vendor.catalog.create') }}"
-                class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700">
+            <a href="{{ route('vendor.catalog.create') }}" class="btn btn-primary">
                 + Add Catalog Item
             </a>
         </div>
@@ -20,11 +19,21 @@
                         <table class="min-w-full divide-y divide-gray-200">
                             <thead class="bg-gray-50">
                                 <tr>
-                                    <th class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">Image</th>
-                                    <th class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">Product</th>
-                                    <th class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">Vendor Part #</th>
-                                    <th class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">Status</th>
-                                    <th class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase"></th>
+                                    <th
+                                        class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">
+                                        Image</th>
+                                    <th
+                                        class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">
+                                        Product</th>
+                                    <th
+                                        class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">
+                                        Vendor Part #</th>
+                                    <th
+                                        class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">
+                                        Status</th>
+                                    <th
+                                        class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody class="bg-white divide-y divide-gray-200">
@@ -32,7 +41,8 @@
                                     <tr class="text-sm hover:bg-gray-50 whitespace-nowrap">
                                         <td class="px-6 py-4">
                                             @if ($item->images->isNotEmpty())
-                                                <img src="{{ route('vendor.catalog-images.show', $item->images->first()) }}" class="object-cover w-12 h-12 border rounded">
+                                                <img src="{{ route('vendor.catalog-images.show', $item->images->first()) }}"
+                                                    class="object-cover w-12 h-12 border rounded">
                                             @endif
                                         </td>
                                         <td class="px-6 py-4">
@@ -49,11 +59,14 @@
                                             </span>
                                         </td>
                                         <td class="px-6 py-4 space-x-3">
-                                            <a href="{{ route('vendor.catalog.edit', $item) }}" class="text-indigo-600 hover:text-indigo-800">Edit</a>
-                                            <form method="POST" action="{{ route('vendor.catalog.destroy', $item) }}" class="inline">
+                                            <a href="{{ route('vendor.catalog.edit', $item) }}"
+                                                class="text-sky-600 hover:text-sky-800">Edit</a>
+                                            <form method="POST" action="{{ route('vendor.catalog.destroy', $item) }}"
+                                                class="inline">
                                                 @csrf
                                                 @method('DELETE')
-                                                <button type="submit" class="text-red-600 hover:text-red-800" onclick="return confirm('Delete this catalog item?')">Delete</button>
+                                                <button type="submit" class="text-red-600 hover:text-red-800"
+                                                    onclick="return confirm('Delete this catalog item?')">Delete</button>
                                             </form>
                                         </td>
                                     </tr>

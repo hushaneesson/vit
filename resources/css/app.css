@@ -13,6 +13,10 @@
 }
 
 @layer base {
+    [x-cloak] {
+        display: none !important;
+    }
+
     input[type="text"],
     input[type="number"],
     input[type="date"],
@@ -36,6 +40,10 @@
 }
 
 @layer components {
+    .btn {
+        @apply inline-flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2;
+    }
+
     .btn-primary {
         @apply font-semibold text-white transition-all duration-200 focus:outline-none bg-gradient-to-r from-sky-500 to-teal-500 hover:from-sky-600 hover:to-teal-600;
     }

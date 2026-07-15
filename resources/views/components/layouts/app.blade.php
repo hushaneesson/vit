@@ -13,11 +13,13 @@
 
     <!-- Styles / Scripts -->
     @vite(['resources/css/app.css', 'resources/js/app.js'])
-
+    @livewireStyles
 </head>
 
 <body class="antialiased bg-gradient-to-br from-slate-100 via-blue-50 to-sky-50">
     {{ $slot }}
+
+    @livewireScripts
 </body>
 
 </html>
