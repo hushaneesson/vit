@@ -32,16 +32,17 @@
                     <div class="items-center hidden space-x-8 lg:flex">
 
                         <a href="{{ route('vendor.dashboard') }}"
-                            class="font-medium text-gray-500 transition hover:text-indigo-600">
+                            class="font-medium text-gray-500 transition hover:text-sky-600">
                             Dashboard
                         </a>
 
                         <a href="{{ route('vendor.catalog.index') }}"
-                            class="font-medium text-gray-500 transition hover:text-indigo-600">
+                            class="font-medium text-gray-500 transition hover:text-sky-600">
                             Catalog
                         </a>
 
-                        <a href="#" class="font-medium text-gray-500 transition hover:text-indigo-600">
+                        <a href="{{ route('vendor.appointments.index') }}"
+                            class="font-medium text-gray-500 transition hover:text-sky-600">
                             Appointments
                         </a>
                     </div>
@@ -56,7 +57,7 @@
                         <form method="POST" action="{{ route('vendor.logout') }}">
                             @csrf
                             <button type="submit"
-                                class="bg-slate-100 hover:bg-red-50 hover:text-red-600 text-slate-500 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200">Log
+                                class="px-4 py-2.5 text-sm font-medium transition-all duration-200 rounded-lg bg-slate-100 hover:bg-red-50 hover:text-red-600 text-slate-500">Log
                                 out</button>
                         </form>
                     </div>
@@ -99,28 +100,22 @@
                         Catalog
                     </a>
 
-                    <a href="#" class="block px-3 py-2 rounded-lg hover:bg-gray-100">
+                    <a href="{{ route('vendor.appointments.index') }}"
+                        class="block px-3 py-2 rounded-lg hover:bg-gray-100">
                         Appointments
                     </a>
 
                     <hr class="my-3">
 
-                    <div class="px-3 text-sm text-gray-500">
+                    <div class="mb-2 text-sm text-gray-600">
                         {{ auth('client')->user()->name }}
                     </div>
 
-                    <form method="POST" action="{{ route('vendor.logout') }}">
+                    <form class="pt-2" method="POST" action="{{ route('vendor.logout') }}">
                         @csrf
-                        <button type="submit"
-                            class="text-sm font-medium text-gray-600 transition hover:text-gray-900">Log
+                        <button type="submit" class="w-full btn btn-primary">Log
                             out</button>
                     </form>
-
-                    <a href="#"
-                        class="block px-4 py-2 mt-2 text-center text-white bg-indigo-600 rounded-lg hover:bg-indigo-700">
-                        Login
-                    </a>
-
                 </div>
 
             </div>

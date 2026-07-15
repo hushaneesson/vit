@@ -6,30 +6,40 @@ use App\Models\Appointment;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class AppointmentsTable
 {
     public static function configure(Table $table): Table
     {
         return $table
-            ->defaultSort('start_date', 'desc')
+            ->modifyQueryUsing(function (Builder $query) {
+                return $query
+                    ->where('schedulable_type', \App\Models\User::class)
+                    ->where('schedulable_id', auth()->id())
+                    ->where('schedule_type', \Zap\Enums\ScheduleTypes::APPOINTMENT->value);
+            })
+            ->defaultSort('start_date', 'asc')
             ->columns([
                 TextColumn::make('name')
                     ->label('Appointment')
                     ->searchable()
                     ->wrap(),
-                TextColumn::make('schedulable.name')
-                    ->label('Owner')
-                    ->placeholder('N/A')
-                    ->searchable(),
                 TextColumn::make('start_date')
                     ->label('Date')
                     ->date()
                     ->sortable(),
-                TextColumn::make('periods_count')
-                    ->label('Slots')
-                    ->counts('periods')
-                    ->sortable(),
+                TextColumn::make('periods')
+                    ->label('Time')
+                    ->getStateUsing(function (Appointment $record) {
+                        return $record->periods
+                            ->map(fn($period) => \Carbon\Carbon::parse($period->start_time)->format('h:i A')
+                                . ' - '
+                                . \Carbon\Carbon::parse($period->end_time)->format('h:i A'))
+                            ->implode(', ');
+                    })
+                    ->wrap()
+                    ->placeholder('No times set'),
                 TextColumn::make('is_active')
                     ->label('Status')
                     ->badge()

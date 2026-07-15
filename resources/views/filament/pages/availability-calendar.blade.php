@@ -24,26 +24,28 @@
         </div>
 
 
+        {{-- Scrollable wrapper: everything below scrolls together horizontally --}}
+        <div class="overflow-x-auto">
+            <div class="min-w-[1000px]">
 
-        {{-- Week Header --}}
-        <div class="grid grid-cols-7 border-b border-gray-100">
+                {{-- Week Header --}}
+                <div class="grid grid-cols-7 border-b border-gray-100">
 
-            @foreach (['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as $day)
-                <div class="py-2 text-xs font-semibold tracking-wide text-center text-gray-400 uppercase">
-                    {{ $day }}
+                    @foreach (['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as $day)
+                        <div class="py-2 text-xs font-semibold tracking-wide text-center text-gray-400 uppercase">
+                            {{ $day }}
+                        </div>
+                    @endforeach
+
                 </div>
-            @endforeach
-
-        </div>
 
 
 
-        {{-- Calendar Days --}}
-        <div class="grid grid-cols-7">
-
-            @foreach ($this->calendar as $day)
-                <div
-                    class="
+                {{-- Calendar Days --}}
+                <div class="grid grid-cols-7">
+                    @foreach ($this->calendar as $day)
+                        <div
+                            class="
                     min-h-[110px]
                     p-1.5
                     border-b
@@ -53,9 +55,9 @@
                     {{ $day['date']->month !== $month ? 'bg-gray-50' : 'bg-white' }}
                 ">
 
-                    {{-- Date --}}
-                    <div
-                        class="
+                            {{-- Date --}}
+                            <div
+                                class="
                         flex
                         items-center
                         justify-center
@@ -72,18 +74,18 @@
                         @else
                             text-gray-700 @endif
                     ">
-                        {{ $day['date']->day }}
-                    </div>
+                                {{ $day['date']->day }}
+                            </div>
 
 
 
-                    {{-- Available Slots --}}
-                    <div class="space-y-1">
+                            {{-- Available Slots --}}
+                            <div class="space-y-1">
 
 
-                        @foreach (collect($day['slots'])->take(3) as $slot)
-                            <button
-                                class="
+                                @foreach (collect($day['slots'])->take(3) as $slot)
+                                    <button
+                                        class="
                                 w-full
                                 px-1.5
                                 py-1
@@ -98,16 +100,16 @@
                                 hover:bg-sky-500
                                 hover:text-white
                             ">
-                                {{ $slot }}
-                            </button>
-                        @endforeach
+                                        {{ $slot }}
+                                    </button>
+                                @endforeach
 
 
 
-                        {{-- More Slots Button --}}
-                        @if (count($day['slots']) > 3)
-                            <button wire:click="viewSlots('{{ $day['date']->format('Y-m-d') }}')"
-                                class="
+                                {{-- More Slots Button --}}
+                                @if (count($day['slots']) > 3)
+                                    <button wire:click="viewSlots('{{ $day['date']->format('Y-m-d') }}')"
+                                        class="
                                 w-full
                                 px-1.5
                                 py-1
@@ -119,22 +121,23 @@
                                 rounded-md
                                 hover:bg-sky-50
                             ">
-                                +{{ count($day['slots']) - 3 }} more
-                            </button>
-                        @endif
+                                        +{{ count($day['slots']) - 3 }} more
+                                    </button>
+                                @endif
 
 
 
-                        @if (empty($day['slots']) && $day['date']->month === $month)
-                            <span class="block mt-2 text-[11px] text-gray-400">
-                                No availability
-                            </span>
-                        @endif
-                    </div>
+                                @if (empty($day['slots']) && $day['date']->month === $month)
+                                    <span class="block mt-2 text-[11px] text-gray-400">
+                                        No availability
+                                    </span>
+                                @endif
+                            </div>
+                        </div>
+                    @endforeach
                 </div>
-            @endforeach
 
-
+            </div>
         </div>
 
 
