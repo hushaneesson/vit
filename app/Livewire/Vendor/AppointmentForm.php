@@ -2,9 +2,11 @@
 
 namespace App\Livewire\Vendor;
 
+use App\Models\Appointment;
 use App\Models\User;
 use Illuminate\Support\Carbon;
 use Livewire\Component;
+use Zap\Facades\Zap;
 
 class AppointmentForm extends Component
 {
@@ -16,6 +18,13 @@ class AppointmentForm extends Component
     public ?string $selectedDate = null;
     public array $selectedSlots = [];
     public bool $showModal = false;
+
+    // New: slot confirmation state
+    public bool $showConfirmModal = false;
+    public ?string $pendingDate = null;
+    public ?string $pendingSlotLabel = null; // e.g. "09:00 AM - 09:30 AM"
+
+    public bool $isSaving = false;
 
     public function render()
     {
@@ -77,6 +86,12 @@ class AppointmentForm extends Component
     public function getAvailableSlots(string $date)
     {
         $carbon = Carbon::parse($date);
+
+        // Do not show availability for past dates
+        if ($carbon->isPast() && !$carbon->isToday()) {
+            return [];
+        }
+
         $dayKey = strtolower($carbon->format('l'));
 
         if (!isset($this->schedules[$dayKey])) {
@@ -91,7 +106,18 @@ class AppointmentForm extends Component
 
         if (!empty($slots)) {
             return collect($slots)
-                ->filter(fn($slot) => $slot['is_available'])
+                ->filter(function ($slot) use ($date) {
+
+                    if (! $slot['is_available']) {
+                        return false;
+                    }
+
+                    $slotDateTime = Carbon::parse(
+                        $date . ' ' . $slot['start_time']
+                    );
+
+                    return $slotDateTime->greaterThan(now());
+                })
                 ->map(fn($slot) => Carbon::parse($slot['start_time'])->format('h:i A')
                     . ' - '
                     . Carbon::parse($slot['end_time'])->format('h:i A'))
@@ -114,5 +140,63 @@ class AppointmentForm extends Component
     public function closeModal(): void
     {
         $this->showModal = false;
+    }
+
+    /**
+     * Called when a slot button is clicked (from either the day grid or the "more" modal).
+     */
+    public function selectSlot(string $date, string $slotLabel): void
+    {
+        $this->pendingDate = $date;
+        $this->pendingSlotLabel = $slotLabel;
+
+        // Close the day-slots modal if it was open, and show the confirm modal on top.
+        $this->showModal = false;
+        $this->showConfirmModal = true;
+    }
+
+    public function closeConfirmModal(): void
+    {
+        $this->showConfirmModal = false;
+        $this->pendingDate = null;
+        $this->pendingSlotLabel = null;
+    }
+
+    public function confirmAppointment()
+    {
+        if (!$this->pendingDate || !$this->pendingSlotLabel) {
+            return;
+        }
+
+
+        $this->isSaving = true;
+
+        // "09:00 AM - 09:30 AM" -> ["09:00 AM", "09:30 AM"]
+        [$startLabel, $endLabel] = array_map('trim', explode('-', $this->pendingSlotLabel));
+
+        $startsAt = Carbon::parse($this->pendingDate . ' ' . $startLabel)->format('H:i');
+        $endsAt = Carbon::parse($this->pendingDate . ' ' . $endLabel)->format('H:i');
+
+        // check again that the slot is available before saving.
+        if (!$this->user->isBookableAtTime($this->pendingDate, $startsAt, $endsAt)) {
+            return;
+        }
+        // dd($this->pendingDate, $startsAt, $endsAt);
+        // create the appointment
+        Zap::for($this->user)
+            ->named("Appointment with " . auth('client')->user()->name)
+            ->appointment()
+            ->from($this->pendingDate)
+            ->addPeriod($startsAt, $endsAt)
+            ->noOverlap()
+            ->withMetadata([
+                'client_id' => auth('client')->user()->id,
+            ])
+            ->save();
+
+        $this->isSaving = false;
+        $this->showConfirmModal = false;
+
+        return redirect()->route('vendor.appointments.index');
     }
 }

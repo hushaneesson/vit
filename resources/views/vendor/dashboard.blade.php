@@ -1,12 +1,12 @@
 <x-layouts.vendor title="Dashboard">
     <div class="space-y-6">
-        <div class="flex items-center justify-between">
+        <div class="flex flex-col items-center gap-3 md:justify-between md:flex-row">
             <div>
                 <h1 class="text-xl font-semibold">Welcome, {{ $client->name }}</h1>
                 <p class="text-sm text-gray-500">{{ $vendor->name }} &middot; {{ $catalogItemCount }} catalog item(s) on
                     file</p>
             </div>
-            <a href="{{ route('vendor.catalog.index') }}" class="btn btn-primary">
+            <a href="{{ route('vendor.catalog.index') }}" class="w-full md:w-auto btn btn-primary">
                 Manage Catalog
             </a>
         </div>

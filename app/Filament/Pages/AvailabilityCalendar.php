@@ -90,6 +90,12 @@ class AvailabilityCalendar extends Page
     public function getAvailableSlots(string $date)
     {
         $carbon = Carbon::parse($date);
+
+        // Do not show availability for past dates
+        if ($carbon->isPast() && !$carbon->isToday()) {
+            return [];
+        }
+
         $dayKey = strtolower($carbon->format('l')); // 'monday', 'tuesday' etc.
 
         // Day not enabled in schedule
@@ -116,8 +122,17 @@ class AvailabilityCalendar extends Page
 
         if (!empty($slots)) {
             return collect($slots)
-                ->filter(function ($slot) {
-                    return $slot['is_available'];
+                ->filter(function ($slot) use ($date) {
+
+                    if (! $slot['is_available']) {
+                        return false;
+                    }
+
+                    $slotDateTime = Carbon::parse(
+                        $date . ' ' . $slot['start_time']
+                    );
+
+                    return $slotDateTime->greaterThan(now());
                 })
                 ->map(function ($slot) {
                     return [

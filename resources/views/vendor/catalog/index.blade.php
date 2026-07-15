@@ -1,11 +1,11 @@
 <x-layouts.vendor title="My Catalogs">
     <div class="space-y-6">
-        <div class="flex items-center justify-between">
+        <div class="flex flex-col items-center gap-3 md:justify-between md:flex-row">
             <div>
                 <h1 class="text-xl font-semibold">My Catalogs</h1>
                 <p class="text-sm text-gray-500">{{ $vendor->name }}</p>
             </div>
-            <a href="{{ route('vendor.catalog.create') }}" class="btn btn-primary">
+            <a href="{{ route('vendor.catalog.create') }}" class="w-full md:w-auto btn btn-primary">
                 + Add Catalog Item
             </a>
         </div>
@@ -16,8 +16,8 @@
                     <p class="p-4 text-sm text-gray-500">No items in this catalog.</p>
                 @else
                     <div class="overflow-x-auto">
-                        <table class="min-w-full divide-y divide-gray-200">
-                            <thead class="bg-gray-50">
+                        <table class="min-w-full divide-y divide-gray-200 whitespace-nowrap">
+                            <thead class="bg-gray-50 ">
                                 <tr>
                                     <th
                                         class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">

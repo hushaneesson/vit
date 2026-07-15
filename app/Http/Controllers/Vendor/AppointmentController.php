@@ -13,15 +13,16 @@ class AppointmentController extends Controller
      */
     public function index(Request $request)
     {
+        $upcomingAppointments = Appointment::whereJsonContains(
+            'metadata->client_id',
+            auth('client')->id()
+        )
+            ->whereDate('start_date', '>=', now())
+            ->where('is_active', 1)
+            ->orderBy('start_date')
+            ->get();
 
-        $upcomingAppointment = Appointment::query()
-            // ->where('client_id', auth('client')->user()->id)
-            // ->where('starts_at', '>=', now())
-            // ->where('status', '!=', 'cancelled')
-            // ->orderBy('start_time')
-            ->first();
-
-        return view('vendor.appointments.index', compact('upcomingAppointment'));
+        return view('vendor.appointments.index', compact('upcomingAppointments'));
     }
 
     /**
