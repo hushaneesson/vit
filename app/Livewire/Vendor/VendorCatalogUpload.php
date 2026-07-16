@@ -41,6 +41,9 @@ class VendorCatalogUpload extends Component
         'status' => null,
         'total_rows' => 0,
         'success_rows' => 0,
+        'updated_rows' => 0,
+        'skipped_rows' => 0,
+        'skipped_item_names' => null,
         'error_rows' => 0,
         'failure_reason' => null,
     ];
@@ -78,14 +81,41 @@ class VendorCatalogUpload extends Component
             ->get(['id', 'field_key', 'web_app_label', 'requirement_type', 'field_type', 'description']);
     }
 
+    /**
+     * Fields already mapped to any column (excluding "Do not import").
+     * Used to filter dropdowns so each field can only be chosen once.
+     */
+    #[Computed]
+    public function mappedFieldKeys()
+    {
+        return collect($this->mapping)->filter()->values();
+    }
+
+    /**
+     * Available fields for a given column index — excludes fields already
+     * mapped to OTHER columns, but keeps the current column's selection
+     * visible so the user can change it.
+     */
+    public function availableFieldsFor(int $columnIndex)
+    {
+        $currentSelection = $this->mapping[$columnIndex] ?? null;
+
+        return $this->catalogFields->filter(function ($field) use ($currentSelection) {
+            // Always show the currently selected field (so user can change it)
+            if ($field->field_key === $currentSelection) {
+                return true;
+            }
+            // Hide fields already mapped to other columns
+            return !$this->mappedFieldKeys->contains($field->field_key);
+        });
+    }
+
     #[Computed]
     public function unmappedRequiredFields()
     {
-        $mappedKeys = collect($this->mapping)->filter()->values();
-
         return $this->catalogFields
             ->where('requirement_type', 'required')
-            ->reject(fn ($field) => $mappedKeys->contains($field->field_key))
+            ->reject(fn ($field) => $this->mappedFieldKeys->contains($field->field_key))
             ->pluck('web_app_label');
     }
 
@@ -221,6 +251,9 @@ class VendorCatalogUpload extends Component
             'status' => $upload->status,
             'total_rows' => $upload->total_rows,
             'success_rows' => $upload->success_rows,
+            'updated_rows' => $upload->updated_rows ?? 0,
+            'skipped_rows' => $upload->skipped_rows ?? 0,
+            'skipped_item_names' => $upload->skipped_item_names ?? null,
             'error_rows' => $upload->error_rows,
             'failure_reason' => $upload->failure_reason,
         ];
@@ -235,7 +268,7 @@ class VendorCatalogUpload extends Component
     public function startOver(): void
     {
         $this->reset(['file', 'catalogUploadId', 'columns', 'sampleRows', 'mapping', 'suggestedIndexes', 'saveAsTemplate', 'templateName']);
-        $this->progress = ['status' => null, 'total_rows' => 0, 'success_rows' => 0, 'error_rows' => 0, 'failure_reason' => null];
+        $this->progress = ['status' => null, 'total_rows' => 0, 'success_rows' => 0, 'updated_rows' => 0, 'skipped_rows' => 0, 'skipped_item_names' => null, 'error_rows' => 0, 'failure_reason' => null];
         $this->step = 'upload';
     }
 

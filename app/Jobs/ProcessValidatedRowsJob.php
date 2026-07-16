@@ -57,15 +57,20 @@ class ProcessValidatedRowsJob implements ShouldQueue
                 ->where('status', 'valid')
                 ->cursor();
 
+            // Columns that should NOT be compared when checking for changes
+            $nonComparableColumns = ['vendor_sku', 'vendor_id', 'catalog_name', 'catalog_upload_id'];
+
             $createdCount = 0;
-            $batch = [];
-            $batchSize = 200;
+            $updatedCount = 0;
+            $skippedCount = 0;
+            $skippedNames = [];
 
             DB::beginTransaction();
 
             foreach ($validRows as $row) {
                 $data = $row->data;
 
+                // Build the attribute map from the row data
                 $attrs = [
                     'vendor_id' => $vendor->id,
                     'catalog_name' => $catalogName,
@@ -73,8 +78,7 @@ class ProcessValidatedRowsJob implements ShouldQueue
                 ];
 
                 // Map validated field data to CatalogItem columns.
-                // Always set every key so that every row in a batch has the
-                // same columns – PostgreSQL requires this.
+                // Always set every key so that every row has the same structure.
                 foreach ($fieldToColumn as $fieldKey => $columnName) {
                     $rawValue = $data[$fieldKey] ?? null;
 
@@ -96,22 +100,83 @@ class ProcessValidatedRowsJob implements ShouldQueue
                     }
                 }
 
-                // Generate UUID for batch insertion
+                // Look for an existing item with the same vendor_sku for this vendor.
+                // This way re-uploads update rather than duplicate rows.
+                $vendorSku = $attrs['vendor_sku'] ?? null;
+
+                if ($vendorSku) {
+                    $existing = CatalogItem::where('vendor_id', $vendor->id)
+                        ->where('vendor_sku', $vendorSku)
+                        ->first();
+
+                    if ($existing) {
+                        // Check if anything actually changed before updating
+                        $hasChanges = false;
+                        foreach ($attrs as $column => $newValue) {
+                            if (in_array($column, $nonComparableColumns, true)) {
+                                continue;
+                            }
+
+                            $oldValue = $existing->getRawOriginal($column);
+
+                            // Handle null vs empty string equivalence
+                            if (is_null($oldValue) && ($newValue === '' || $newValue === null)) {
+                                continue;
+                            }
+                            if (is_null($newValue) && ($oldValue === '' || $oldValue === null)) {
+                                continue;
+                            }
+
+                            // JSON columns — decode both sides for comparison
+                            if (in_array($column, ['search_terms', 'classifications', 'specifications', 'selling_points'], true)) {
+                                if (json_decode((string) $oldValue) !== json_decode((string) $newValue)) {
+                                    $hasChanges = true;
+                                    break;
+                                }
+                                continue;
+                            }
+
+                            // Numeric comparison — cast both to float for consistency
+                            if (is_numeric($oldValue) && is_numeric($newValue)) {
+                                if ((float) $oldValue !== (float) $newValue) {
+                                    $hasChanges = true;
+                                    break;
+                                }
+                                continue;
+                            }
+
+                            // Default string comparison
+                            if ((string) $oldValue !== (string) $newValue) {
+                                $hasChanges = true;
+                                break;
+                            }
+                        }
+
+                        if ($hasChanges) {
+                            // Update the existing record with new data
+                            $attrs['updated_at'] = now();
+                            $existing->update($attrs);
+                            $updatedCount++;
+                        } else {
+                            // No changes — skip to save resources
+                            $skippedCount++;
+                            $itemName = $attrs['name'] ?? $vendorSku;
+                            if ($itemName) {
+                                $skippedNames[] = $itemName;
+                            }
+                        }
+
+                        continue;
+                    }
+                }
+
+                // No existing item found — create a new one
                 $attrs['id'] = (string) Str::uuid();
                 $attrs['created_at'] = now();
                 $attrs['updated_at'] = now();
 
-                $batch[] = $attrs;
+                CatalogItem::create($attrs);
                 $createdCount++;
-
-                if (count($batch) >= $batchSize) {
-                    CatalogItem::insert($batch);
-                    $batch = [];
-                }
-            }
-
-            if (! empty($batch)) {
-                CatalogItem::insert($batch);
             }
 
             DB::commit();
@@ -120,6 +185,9 @@ class ProcessValidatedRowsJob implements ShouldQueue
                 'status' => 'completed',
                 'total_rows' => $upload->rows()->count(),
                 'success_rows' => $createdCount,
+                'updated_rows' => $updatedCount,
+                'skipped_rows' => $skippedCount,
+                'skipped_item_names' => $skippedCount > 0 ? $skippedNames : null,
                 'error_rows' => $upload->rows()->where('status', 'invalid')->count(),
                 'processing_completed_at' => now(),
             ]);
