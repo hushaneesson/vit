@@ -15,6 +15,49 @@
                 @if ($items->isEmpty())
                     <p class="p-4 text-sm text-gray-500">No items in this catalog.</p>
                 @else
+                    <form method="GET" action="{{ route('vendor.catalog.index') }}"
+                        class="flex flex-col gap-3 px-4 py-8 mb-4 sm:flex-row sm:items-end">
+                        <div class="relative flex-1">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor"
+                                class="absolute w-4 h-4 text-gray-400 -translate-y-1/2 pointer-events-none left-3 top-1/2">
+                                <circle cx="11" cy="11" r="8" stroke-width="2" />
+                                <path d="m21 21-4.35-4.35" stroke-width="2" stroke-linecap="round" />
+                            </svg>
+                            <input type="text" name="search" value="{{ request('search') }}"
+                                placeholder="Search by product name or sku..."
+                                class="w-full py-2 pr-3 text-sm border border-gray-300 rounded-md pl-9 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500" />
+                        </div>
+
+                        <select name="status"
+                            class="py-2 pl-3 pr-8 text-sm text-gray-700 border border-gray-300 rounded-md focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500 sm:w-48">
+                            <option value="">All Status</option>
+                            <option value="incomplete" @selected(request('status') === 'incomplete')>
+                                Incomplete
+                            </option>
+                            <option value="acceptable" @selected(request('status') === 'acceptable')>
+                                Acceptable
+                            </option>
+                            <option value="excellent" @selected(request('status') === 'excellent')>
+                                Excellent
+                            </option>
+                        </select>
+
+                        <div class="flex gap-2">
+                            <button type="submit"
+                                class="px-4 py-2 text-sm font-medium text-white rounded-md bg-sky-600 hover:bg-sky-500">
+                                Apply
+                            </button>
+
+                            @if (request('search') || request('status'))
+                                <a href="{{ route('vendor.catalog.index') }}"
+                                    class="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">
+                                    Clear
+                                </a>
+                            @endif
+                        </div>
+                    </form>
+
                     <div class="overflow-x-auto">
                         <table class="min-w-full divide-y divide-gray-200 whitespace-nowrap">
                             <thead class="bg-gray-50 ">
@@ -52,10 +95,11 @@
                                         <td class="px-6 py-4">
                                             <span @class([
                                                 'px-2 py-1 text-xs font-semibold leading-5 uppercase rounded-full',
-                                                'text-emerald-600 bg-emerald-100' => $item->status === 'active',
-                                                'text-gray-600 bg-gray-100' => $item->status !== 'active',
+                                                'text-emerald-600 bg-emerald-100' => $item->status === 'excellent',
+                                                'text-gray-600 bg-gray-100' => $item->status === 'incomplete',
+                                                'text-sky-600 bg-sky-100' => $item->status === 'acceptable',
                                             ])>
-                                                implement
+                                                {{ $item->status }}
                                             </span>
                                         </td>
                                         <td class="px-6 py-4 space-x-3">

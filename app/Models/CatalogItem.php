@@ -60,7 +60,7 @@ class CatalogItem extends Model
 
     // 1. Centralized Field definitions
     protected static array $requiredFields = ['name', 'description', 'price', 'sku', 'category_id'];
-    protected static array $excellentFields = ['image_url', 'weight', 'dimensions'];
+    protected static array $excellentFields = ['weight'];
 
 
     protected static function booted()

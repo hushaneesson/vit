@@ -441,3 +441,13 @@
                 </div>
             </div>
         </section>
+
+        <div class="flex justify-end mt-2">
+            <button class="btn btn-primary" type="submit">
+                {{ $catalogItemId ? 'Save Changes' : 'Create Item' }}
+            </button>
+        </div>
+
+    </form>
+
+</div>
