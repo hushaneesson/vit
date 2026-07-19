@@ -48,6 +48,7 @@ return new class extends Migration
             $table->timestamp('mapping_confirmed_at')->nullable();
             $table->timestamp('processing_started_at')->nullable();
             $table->timestamp('processing_completed_at')->nullable();
+            $table->timestamp('validation_report_emailed_at')->nullable();
 
             $table->timestamps();
 

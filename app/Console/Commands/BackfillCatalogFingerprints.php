@@ -12,7 +12,12 @@ class BackfillCatalogFingerprints extends Command
 
     protected $description = 'Backfill data_fingerprint for existing catalog items, removing exact duplicates';
 
-    private array $nonComparableColumns = ['vendor_sku', 'vendor_id', 'catalog_name', 'catalog_upload_id', 'data_fingerprint', 'id', 'created_at', 'updated_at', 'completeness_score', 'status'];
+    /**
+     * These columns should be excluded from fingerprint computation
+     * because they are metadata, not actual content data.
+     * MUST match the exclusions used in ProcessValidatedRowsJob::computeFingerprint.
+     */
+    private array $nonComparableColumns = ['vendor_sku', 'vendor_id', 'catalog_name', 'catalog_upload_id', 'data_fingerprint'];
 
     public function handle(): int
     {
@@ -65,6 +70,11 @@ class BackfillCatalogFingerprints extends Command
         return Command::SUCCESS;
     }
 
+    /**
+     * Compute fingerprint using the SAME algorithm as ProcessValidatedRowsJob.
+     * Only includes content fields (not vendor_id, catalog_name, etc.)
+     * so the fingerprint matches what the job produces for new uploads.
+     */
     private function computeFingerprint(CatalogItem $item): string
     {
         $content = [];
@@ -74,7 +84,7 @@ class BackfillCatalogFingerprints extends Command
                 continue;
             }
 
-            if (is_null($value) || $value === '' || $value === '[]') {
+            if (is_null($value) || $value === '' || $value === '[]' || $value === []) {
                 $content[$column] = null;
             } elseif (is_numeric($value)) {
                 $content[$column] = (string) (float) $value;

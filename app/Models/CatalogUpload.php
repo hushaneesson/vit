@@ -32,6 +32,7 @@ class CatalogUpload extends Model
         'mapping_confirmed_at',
         'processing_started_at',
         'processing_completed_at',
+        'validation_report_emailed_at',
     ];
 
     protected $casts = [
@@ -42,6 +43,7 @@ class CatalogUpload extends Model
         'mapping_confirmed_at' => 'datetime',
         'processing_started_at' => 'datetime',
         'processing_completed_at' => 'datetime',
+        'validation_report_emailed_at' => 'datetime',
     ];
 
     public function client(): BelongsTo

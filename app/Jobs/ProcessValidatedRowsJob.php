@@ -6,12 +6,15 @@ use App\Enums\CatalogUploadStatus;
 use App\Models\CatalogItem;
 use App\Models\CatalogUpload;
 use App\Models\Vendor;
+use App\Notifications\CatalogUploadValidationReportNotification;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -188,6 +191,40 @@ class ProcessValidatedRowsJob implements ShouldQueue
                 'error_rows' => $upload->rows()->where('status', 'invalid')->count(),
                 'processing_completed_at' => now(),
             ]);
+
+            // Send validation report by email if there are too many errors
+            // to display on-screen. The guard prevents duplicate sends even
+            // if the job is retried.
+            if ($upload->error_rows > 10 && !$upload->validation_report_emailed_at) {
+                try {
+                    $client = $upload->client;
+
+                    if ($client && $client->email) {
+                        $failedRows = $upload->rows()
+                            ->where('status', 'invalid')
+                            ->whereNotNull('errors')
+                            ->orderBy('row_number')
+                            ->get(['row_number', 'errors']);
+
+                        Notification::route('mail', $client->email)
+                            ->notify(new CatalogUploadValidationReportNotification(
+                                catalogName: $upload->catalog_name,
+                                processedAt: $upload->processing_completed_at,
+                                totalErrors: $upload->error_rows,
+                                totalWarnings: 0,
+                                errors: $failedRows,
+                                warnings: collect(),
+                            ));
+
+                        $upload->update(['validation_report_emailed_at' => now()]);
+                    }
+                } catch (\Throwable $e) {
+                    // Email failed — do NOT mark validation_report_emailed_at.
+                    // The results are preserved in the DB and the UI will
+                    // fall back to showing the first 10 rows with a notice.
+                    Log::warning('Failed to send validation report email for upload ' . $upload->id . ': ' . $e->getMessage());
+                }
+            }
         } catch (Throwable $e) {
             DB::rollBack();
 

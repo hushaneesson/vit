@@ -77,6 +77,18 @@ class VendorCatalogUpload extends Component
         'failure_reason' => null,
     ];
 
+    /**
+     * Whether the validation report was successfully emailed to the user.
+     * Read from the upload record when transitioning to the summary step.
+     */
+    public bool $validationReportEmailed = false;
+
+    /**
+     * Whether the validation report email failed to send.
+     * When true, the UI falls back to showing the first 10 rows.
+     */
+    public bool $validationReportFailed = false;
+
     protected $listeners = ['pollUploadStatus' => 'refreshStatus'];
 
     /**
@@ -89,16 +101,10 @@ class VendorCatalogUpload extends Component
 
     public function rules(): array
     {
-        $rules = [
+        return [
             'file' => ['required', 'file', 'mimes:csv,txt,xlsx,xls', 'max:51200'], // 50MB
-            'catalogName' => ['required', 'string', 'max:255'],
+            'catalogName' => ['nullable', 'string', 'max:255'],
         ];
-
-        if ($this->step === 'upload') {
-            // Only validate catalogName on the upload step
-        }
-
-        return $rules;
     }
 
     /**
@@ -133,7 +139,6 @@ class VendorCatalogUpload extends Component
     public function availableColumnsFor(string $fieldKey)
     {
         $currentSelection = $this->mapping[$fieldKey] ?? null;
-        $currentSelection = $currentSelection !== null ? (int) $currentSelection : null;
         $takenIndexes = $this->mappedColumnIndexes();
 
         return collect($this->columns)->map(function ($name, $index) use ($currentSelection, $takenIndexes) {
@@ -150,12 +155,9 @@ class VendorCatalogUpload extends Component
      */
     private function mappedColumnIndexes()
     {
-        return collect($this->mapping)
-            ->filter(function ($columnIndex) {
-                return $columnIndex !== null;
-            })
-            ->map(fn($index) => (int) $index)
-            ->values();
+        return collect($this->mapping)->filter(function ($columnIndex) {
+            return $columnIndex !== null;
+        })->values();
     }
 
     /**
@@ -226,12 +228,16 @@ class VendorCatalogUpload extends Component
     /**
      * Fires when the vendor edits any mapping.{field_key} select manually.
      *
+     * Normalizes the incoming value to an integer (or null for "Do not import")
+     * so the rest of the codebase can use strict === comparisons throughout.
+     *
      * The ONLY automatic effect is clearing the suggestion badge on the
      * field the user touched. No other field's mapping or suggestion
      * is ever changed.
      */
     public function updatedMapping($value, $key): void
     {
+        $this->mapping[$key] = $value !== null && $value !== '' ? (int) $value : null;
         unset($this->suggestedIndexes[$key]);
     }
 
@@ -325,6 +331,8 @@ class VendorCatalogUpload extends Component
         ];
 
         if ($upload->status === CatalogUploadStatus::Completed) {
+            $this->validationReportEmailed = !is_null($upload->validation_report_emailed_at);
+            $this->validationReportFailed = false; // reset on each poll; email failure is logged server-side
             $this->step = 'summary';
         } elseif ($upload->status === CatalogUploadStatus::Failed) {
             $this->step = 'error';

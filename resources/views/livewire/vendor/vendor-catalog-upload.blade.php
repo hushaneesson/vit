@@ -72,7 +72,7 @@
 
                 <div class="mt-6">
                     <label for="catalog-name" class="block text-sm font-medium text-slate-700">
-                        Catalog Name <span class="text-rose-500">*</span>
+                        Catalog Name
                     </label>
                     <input id="catalog-name" type="text" wire:model="catalogName"
                         placeholder="e.g. Q3 2026 Product Catalog"
@@ -477,37 +477,119 @@
                     </div>
                 @endif
 
-                {{-- Failed rows table --}}
+                {{-- Failed rows --}}
                 @if ($progress['error_rows'] > 0 && $this->failedRows->isNotEmpty())
-                    <div class="mt-6 overflow-hidden border rounded-lg border-rose-200">
-                        <div class="flex items-center justify-between px-4 py-2.5 bg-rose-50">
-                            <span class="text-xs font-semibold tracking-wide uppercase text-rose-700">
-                                Failed rows &mdash; <span class="font-normal lowercase">these were skipped</span>
-                            </span>
-                            <span class="text-xs text-rose-500">{{ $progress['error_rows'] }} row(s)</span>
-                        </div>
-                        <div class="overflow-y-auto max-h-48">
-                            <table class="w-full text-sm border-collapse">
-                                <thead class="sticky top-0 bg-slate-50">
-                                    <tr class="text-xs font-semibold tracking-wide uppercase text-slate-500">
-                                        <th class="p-2.5 pl-4 text-left border-b border-slate-200">Row</th>
-                                        <th class="p-2.5 text-left border-b border-slate-200">Reason</th>
-                                    </tr>
-                                </thead>
-                                <tbody class="divide-y divide-rose-100">
-                                    @foreach ($this->failedRows as $failedRow)
-                                        <tr class="hover:bg-rose-50/40">
-                                            <td class="p-2.5 pl-4 font-mono text-xs text-slate-900">
-                                                {{ $failedRow->row_number }}</td>
-                                            <td class="p-2.5 text-xs text-rose-700">
-                                                {{ is_array($failedRow->errors) ? implode('; ', $failedRow->errors) : $failedRow->errors }}
-                                            </td>
+                    @php
+                        $totalMessages = $this->failedRows->count();
+                        $showFullTable = $totalMessages <= 10;
+                        $emailSent = $this->validationReportEmailed;
+                        $emailFailed = $this->validationReportFailed;
+                    @endphp
+
+                    {{-- Case 1: 10 or fewer messages — show the full table as before --}}
+                    @if ($showFullTable)
+                        <div class="mt-6 overflow-hidden border rounded-lg border-rose-200">
+                            <div class="flex items-center justify-between px-4 py-2.5 bg-rose-50">
+                                <span class="text-xs font-semibold tracking-wide uppercase text-rose-700">
+                                    Failed rows &mdash; <span class="font-normal lowercase">these were skipped</span>
+                                </span>
+                                <span class="text-xs text-rose-500">{{ $totalMessages }} row(s)</span>
+                            </div>
+                            <div class="overflow-y-auto max-h-48">
+                                <table class="w-full text-sm border-collapse">
+                                    <thead class="sticky top-0 bg-slate-50">
+                                        <tr class="text-xs font-semibold tracking-wide uppercase text-slate-500">
+                                            <th class="p-2.5 pl-4 text-left border-b border-slate-200">Row</th>
+                                            <th class="p-2.5 text-left border-b border-slate-200">Reason</th>
                                         </tr>
-                                    @endforeach
-                                </tbody>
-                            </table>
+                                    </thead>
+                                    <tbody class="divide-y divide-rose-100">
+                                        @foreach ($this->failedRows as $failedRow)
+                                            <tr class="hover:bg-rose-50/40">
+                                                <td class="p-2.5 pl-4 font-mono text-xs text-slate-900">
+                                                    {{ $failedRow->row_number }}</td>
+                                                <td class="p-2.5 text-xs text-rose-700">
+                                                    {{ is_array($failedRow->errors) ? implode('; ', $failedRow->errors) : $failedRow->errors }}
+                                                </td>
+                                            </tr>
+                                        @endforeach
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
-                    </div>
+
+                        {{-- Case 2: More than 10 messages, email sent successfully --}}
+                    @elseif ($emailSent)
+                        <div class="p-4 mt-6 border rounded-lg bg-sky-50 border-sky-200">
+                            <div class="flex items-start gap-3">
+                                <svg class="w-5 h-5 mt-0.5 text-sky-600 shrink-0" fill="none" viewBox="0 0 24 24"
+                                    stroke="currentColor" stroke-width="1.5">
+                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                        d="M21.75 9v.906a2.25 2.25 0 0 1-1.183 1.981l-6.478 3.488M2.25 9v.906a2.25 2.25 0 0 0 1.183 1.981l6.478 3.488m8.839 2.51-4.66-2.51m0 0-1.023-.55a2.25 2.25 0 0 0-2.134 0l-1.022.55m0 0-4.661 2.51m16.5 1.615a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V8.844a2.25 2.25 0 0 1 1.183-1.981l7.5-4.039a2.25 2.25 0 0 1 2.134 0l7.5 4.039a2.25 2.25 0 0 1 1.183 1.98V19.5Z" />
+                                </svg>
+                                <div class="text-sm text-sky-800">
+                                    <p class="font-semibold">Validation report emailed</p>
+                                    <p class="mt-1">
+                                        There are <strong>{{ $totalMessages }}</strong> validation messages. To keep
+                                        this page readable, only a summary is shown.
+                                        A complete validation report has been emailed to
+                                        <strong>{{ auth('client')->user()?->email ?? 'your account email' }}</strong>.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {{-- Case 3: More than 10 messages, email failed — show first 10 with a notice --}}
+                    @else
+                        <div class="p-4 mt-6 border rounded-lg bg-amber-50 border-amber-200">
+                            <div class="flex items-start gap-3">
+                                <svg class="w-5 h-5 mt-0.5 text-amber-600 shrink-0" fill="none"
+                                    viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                        d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+                                </svg>
+                                <div class="text-sm text-amber-800">
+                                    <p class="font-semibold">Could not email full report</p>
+                                    <p class="mt-1">
+                                        There are <strong>{{ $totalMessages }}</strong> validation messages. The full
+                                        report could not be emailed.
+                                        Showing the first 10 below.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mt-3 overflow-hidden border rounded-lg border-rose-200">
+                            <div class="flex items-center justify-between px-4 py-2.5 bg-rose-50">
+                                <span class="text-xs font-semibold tracking-wide uppercase text-rose-700">
+                                    Failed rows (first 10) &mdash; <span class="font-normal lowercase">these were
+                                        skipped</span>
+                                </span>
+                                <span class="text-xs text-rose-500">{{ $totalMessages }} total row(s)</span>
+                            </div>
+                            <div class="overflow-y-auto max-h-48">
+                                <table class="w-full text-sm border-collapse">
+                                    <thead class="sticky top-0 bg-slate-50">
+                                        <tr class="text-xs font-semibold tracking-wide uppercase text-slate-500">
+                                            <th class="p-2.5 pl-4 text-left border-b border-slate-200">Row</th>
+                                            <th class="p-2.5 text-left border-b border-slate-200">Reason</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-rose-100">
+                                        @foreach ($this->failedRows->take(10) as $failedRow)
+                                            <tr class="hover:bg-rose-50/40">
+                                                <td class="p-2.5 pl-4 font-mono text-xs text-slate-900">
+                                                    {{ $failedRow->row_number }}</td>
+                                                <td class="p-2.5 text-xs text-rose-700">
+                                                    {{ is_array($failedRow->errors) ? implode('; ', $failedRow->errors) : $failedRow->errors }}
+                                                </td>
+                                            </tr>
+                                        @endforeach
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    @endif
                 @endif
 
                 <div class="flex flex-wrap items-center justify-center gap-3 mt-6">
