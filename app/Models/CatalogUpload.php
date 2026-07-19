@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Enums\CatalogUploadStatus;
+use App\Services\VitFieldDefinition;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -23,6 +25,9 @@ class CatalogUpload extends Model
         'total_rows',
         'success_rows',
         'error_rows',
+        'updated_rows',
+        'skipped_rows',
+        'skipped_item_names',
         'failure_reason',
         'mapping_confirmed_at',
         'processing_started_at',
@@ -30,6 +35,10 @@ class CatalogUpload extends Model
     ];
 
     protected $casts = [
+        'status' => CatalogUploadStatus::class,
+        'updated_rows' => 'integer',
+        'skipped_rows' => 'integer',
+        'skipped_item_names' => 'array',
         'mapping_confirmed_at' => 'datetime',
         'processing_started_at' => 'datetime',
         'processing_completed_at' => 'datetime',
@@ -59,16 +68,12 @@ class CatalogUpload extends Model
     {
         // Every required VIT field must be mapped to a column before we
         // let the client kick off processing.
-        $mappedFieldIds = $this->columnMappings()
-            ->whereNotNull('catalog_field_id')
-            ->pluck('catalog_field_id');
+        $mappedFieldKeys = $this->columnMappings()
+            ->whereNotNull('field_key')
+            ->pluck('field_key');
 
-        $requiredFieldIds = CatalogField::query()
-            ->where('requirement_type', 'required')
-            ->where('active', true)
-            ->where('is_system_derived', false) // these never get a column mapping - value comes from elsewhere
-            ->pluck('id');
+        $requiredFieldKeys = VitFieldDefinition::requiredFieldKeys();
 
-        return $requiredFieldIds->diff($mappedFieldIds)->isEmpty();
+        return $requiredFieldKeys->diff($mappedFieldKeys)->isEmpty();
     }
 }

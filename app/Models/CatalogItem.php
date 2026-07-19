@@ -21,6 +21,7 @@ class CatalogItem extends Model
         'vendor_sku',
         'catalog_name',
         'catalog_upload_id',
+        'data_fingerprint',
         'unspsc_code',
         'product_type',
         'unit_of_measure',
@@ -60,9 +61,36 @@ class CatalogItem extends Model
         return $this->hasMany(CatalogItemImage::class)->orderBy('sort_order');
     }
 
-    // 1. Centralized Field definitions
-    protected static array $requiredFields = ['name', 'description', 'price', 'sku', 'category_id'];
-    protected static array $excellentFields = ['image_url', 'weight', 'dimensions'];
+    // Fields that are considered "required" for a complete item.
+    // These are the data points a vendor MUST provide for the item
+    // to be usable. Missing required fields mark the item as 'incomplete'.
+    protected static array $requiredFields = [
+        'name',
+        'description',
+        'vendor_sku',
+        'unit_of_measure',
+    ];
+
+    // Fields that push an item from "acceptable" to "excellent"
+    protected static array $excellentFields = [
+        'manufacturer_sku',
+        'manufacturer_name',
+        'brand_name',
+        'unspsc_code',
+        'product_type',
+        'search_terms',
+        'specifications',
+        'selling_points',
+        'classifications',
+        'msds_link',
+        'quantity_per_unit',
+        'weight',
+        'min_order_quantity',
+        'max_order_quantity',
+        'multiples',
+        'list_price',
+        'selling_price',
+    ];
 
 
     protected static function booted()

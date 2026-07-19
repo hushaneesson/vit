@@ -149,13 +149,14 @@
                     <div class="min-w-0">
                         <h2 class="text-xl font-semibold text-slate-900">Match your columns</h2>
                         <p class="py-2 mt-1 text-sm text-slate-500">
-                            <span class="block">Tell us which column in your file matches ours.</span>
+                            <span class="block">For each VIT field, tell us which column in your file contains the
+                                data.</span>
                             <span class="block">
                                 Fields marked <span class="font-semibold text-rose-600">*</span> are required.
                             </span>
                         </p>
                     </div>
-                    <button wire:click="$set('mapping', @js(array_fill(0, count($columns), null)))"
+                    <button wire:click="$set('mapping', @js($this->catalogFields->pluck('field_key')->mapWithKeys(fn($k) => [$k => null])->toArray()))"
                         class="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-500 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 shrink-0 transition"
                         title="Clear all column mappings and start over">
                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"
@@ -170,7 +171,7 @@
                 {{-- Mapping progress --}}
                 @php
                     $totalRequired = $this->catalogFields->where('requirement_type', 'required')->count();
-                    $mappedRequired = $totalRequired - $this->unmappedRequiredFields->count();
+                    $mappedRequired = $totalRequired - $this->unmappedRequiredFields()->count();
                     $progressPercent = $totalRequired > 0 ? round(($mappedRequired / $totalRequired) * 100) : 0;
                 @endphp
                 <div class="flex items-center gap-3 mt-4">
@@ -183,44 +184,99 @@
                     </span>
                 </div>
 
+                @if ($this->templateIsLoaded())
+                    <div @class([
+                        'flex items-center gap-2 px-3 py-2 mt-4 text-sm border rounded-lg',
+                        'bg-indigo-50 text-indigo-700 border-indigo-200' => !$this->hasMappingChangedFromTemplate(),
+                        'bg-amber-50 text-amber-700 border-amber-200' => $this->hasMappingChangedFromTemplate(),
+                    ])>
+                        @if ($this->hasMappingChangedFromTemplate())
+                            <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                                stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
+                            </svg>
+                            <span><strong>Template modified.</strong> &ldquo;{{ $this->loadedTemplateName }}&rdquo; has
+                                been updated — you can save
+                                these changes below.</span>
+                        @else
+                            <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                                stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="m6.115 5.19.319 1.913A6 6 0 0 0 8.11 10.36L9.75 12l-.387.775c-.217.433-.132.956.21 1.298l1.348 1.348c.21.21.329.497.329.795v1.089c0 .426.24.815.622 1.006l.153.076c.433.217.956.132 1.298-.21l.723-.723a8.7 8.7 0 0 0 2.288-4.042 1.087 1.087 0 0 0-.358-1.099l-1.33-1.108c-.251-.21-.402-.513-.422-.827l-.077-1.002a.75.75 0 0 0-.747-.668.75.75 0 0 0-.747.668l-.077 1.002c-.02.314-.171.617-.422.827l-1.33 1.108a1.087 1.087 0 0 0-.358 1.099l.077.268" />
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M15.75 9h.01v.01h-.01V9Zm-4.5 3.75h.01v.01h-.01v-.01Z" />
+                            </svg>
+                            <span><strong>Using saved mapping template.</strong>
+                                &ldquo;{{ $this->loadedTemplateName }}&rdquo; — your columns were automatically matched
+                                from a previous upload.</span>
+                        @endif
+                    </div>
+                @endif
+
                 <div class="mt-4 overflow-hidden border rounded-lg border-slate-200">
                     <table class="w-full text-sm border-collapse">
                         <thead>
                             <tr class="text-xs font-semibold tracking-wide uppercase bg-slate-50 text-slate-500">
-                                <th class="p-3 text-left border-b border-slate-200">Your Column</th>
-                                <th class="p-3 text-left border-b border-slate-200">Sample Value</th>
-                                <th class="p-3 text-left border-b border-slate-200 w-80">Maps To</th>
+                                <th class="p-3 text-left border-b border-slate-200">VIT Field</th>
+                                <th class="p-3 text-left border-b border-slate-200">Requirement</th>
+                                <th class="p-3 text-left border-b border-slate-200 w-80">Uploaded File Column</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-slate-100">
-                            @foreach ($columns as $index => $columnName)
-                                @php $currentSelection = $this->mapping[$index] ?? null; @endphp
-                                <tr @class([
+                            @foreach ($this->catalogFields as $field)
+                                @php
+                                    $currentSelection = $this->mapping[$field->field_key] ?? null;
+                                    $isSuggested = !empty($this->suggestedIndexes[$field->field_key]);
+                                @endphp
+                                <tr wire:key="mapping-row-{{ $field->field_key }}" @class([
                                     'hover:bg-slate-50/60 transition',
-                                    'bg-indigo-50/30' => !empty($suggestedIndexes[$index]),
+                                    'bg-indigo-50/30' => $isSuggested,
                                 ])>
-                                    <td class="p-3 font-medium text-slate-900">{{ $columnName }}</td>
-                                    <td class="p-3 font-mono text-xs text-slate-500 max-w-[140px] truncate"
-                                        title="{{ $sampleRows[0][$index] ?? '' }}">
-                                        {{ $sampleRows[0][$index] ?? '—' }}
+                                    <td class="p-3">
+                                        <div class="font-medium text-slate-900">{{ $field->web_app_label }}</div>
+                                        @if ($field->description)
+                                            <div class="mt-0.5 text-xs text-slate-400 max-w-[200px] truncate"
+                                                title="{{ $field->description }}">
+                                                {{ $field->description }}
+                                            </div>
+                                        @endif
+                                        @if ($currentSelection !== null)
+                                            <div class="mt-1 font-mono text-xs text-slate-500">
+                                                Sample: {{ $sampleRows[0][$currentSelection] ?? '—' }}
+                                            </div>
+                                        @endif
+                                    </td>
+                                    <td class="p-3">
+                                        @if ($field->requirement_type === 'required')
+                                            <span
+                                                class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-rose-50 text-rose-700 border border-rose-200">
+                                                Required <span class="text-rose-400">*</span>
+                                            </span>
+                                        @else
+                                            <span
+                                                class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-slate-50 text-slate-500 border border-slate-200">
+                                                Optional
+                                            </span>
+                                        @endif
                                     </td>
                                     <td class="p-3">
                                         <div class="flex items-center gap-2">
-                                            <select wire:model.live="mapping.{{ $index }}"
+                                            <select wire:key="mapping-select-{{ $field->field_key }}"
+                                                wire:model.live="mapping.{{ $field->field_key }}"
                                                 class="w-full px-2.5 py-1.5 text-sm border rounded-lg border-slate-300 focus:border-slate-500 focus:ring-1 focus:ring-slate-500">
-                                                <option value="">— Skip this column</option>
-                                                @foreach ($this->availableFieldsFor($index) as $field)
-                                                    <option value="{{ $field->field_key }}"
-                                                        title="{{ $field->description ?? '' }}">
-                                                        {{ $field->web_app_label }}
-                                                        @if ($field->requirement_type === 'required')
-                                                            *
-                                                        @endif
+                                                <option wire:key="mapping-opt-{{ $field->field_key }}-empty"
+                                                    value="">— Do not import</option>
+                                                @foreach ($this->availableColumnsFor($field->field_key) as $col)
+                                                    <option
+                                                        wire:key="mapping-opt-{{ $field->field_key }}-{{ $col->index }}"
+                                                        value="{{ $col->index }}">
+                                                        {{ $col->name }}
                                                     </option>
                                                 @endforeach
                                             </select>
-
-                                            @if (!empty($suggestedIndexes[$index]) && !$currentSelection)
+                                            {{-- Badges --}}
+                                            @if ($isSuggested && $currentSelection === null)
                                                 <span
                                                     class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-emerald-50 text-emerald-700 shrink-0 border border-emerald-200"
                                                     title="We matched this based on your column name — please confirm it's correct">
@@ -231,7 +287,7 @@
                                                     </svg>
                                                     Suggested
                                                 </span>
-                                            @elseif (!empty($suggestedIndexes[$index]) && $currentSelection)
+                                            @elseif ($isSuggested && $currentSelection !== null)
                                                 <span
                                                     class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-indigo-50 text-indigo-700 shrink-0 border border-indigo-200">
                                                     <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
@@ -250,7 +306,7 @@
                     </table>
                 </div>
 
-                @if ($this->unmappedRequiredFields->isNotEmpty())
+                @if ($this->unmappedRequiredFields()->isNotEmpty())
                     <div
                         class="flex items-start gap-2 p-3 mt-4 text-sm border rounded-lg bg-amber-50 text-amber-800 border-amber-200">
                         <svg class="w-5 h-5 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24"
@@ -259,24 +315,26 @@
                                 d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
                         </svg>
                         <span>
-                            <strong>Still needed:</strong> {{ $this->unmappedRequiredFields->join(', ') }}
+                            <strong>Still needed:</strong> {{ $this->unmappedRequiredFields()->join(', ') }}
                         </span>
                     </div>
                 @endif
 
-                <div class="pt-5 mt-6 border-t border-slate-100">
-                    <label class="flex items-center gap-2 text-sm cursor-pointer text-slate-700">
-                        <input type="checkbox" wire:model.live="saveAsTemplate"
-                            class="rounded border-slate-300 text-slate-900 focus:ring-slate-500" />
-                        Remember this mapping for next time
-                    </label>
+                @if ($this->hasMappingChangedFromTemplate())
+                    <div class="pt-5 mt-6 border-t border-slate-100">
+                        <label class="flex items-center gap-2 text-sm cursor-pointer text-slate-700">
+                            <input type="checkbox" wire:model.live="saveAsTemplate"
+                                class="rounded border-slate-300 text-slate-900 focus:ring-slate-500" />
+                            Remember this mapping for next time
+                        </label>
 
-                    @if ($saveAsTemplate)
-                        <input type="text" wire:model="templateName"
-                            placeholder="Name this template (e.g. Our standard export)"
-                            class="w-full max-w-sm px-3 py-2 mt-3 text-sm border rounded-lg border-slate-300 focus:border-slate-500 focus:ring-1 focus:ring-slate-500" />
-                    @endif
-                </div>
+                        @if ($saveAsTemplate)
+                            <input type="text" wire:model="templateName"
+                                placeholder="Name this template (e.g. Our standard export)"
+                                class="w-full max-w-sm px-3 py-2 mt-3 text-sm border rounded-lg border-slate-300 focus:border-slate-500 focus:ring-1 focus:ring-slate-500" />
+                        @endif
+                    </div>
+                @endif
 
                 @error('mapping')
                     <p class="mt-4 text-sm text-rose-600">{{ $message }}</p>
@@ -293,9 +351,9 @@
                         Start over
                     </button>
 
-                    <button wire:click="confirmMapping" wire:loading.attr="disabled" @disabled($this->unmappedRequiredFields->isNotEmpty())
+                    <button wire:click="confirmMapping" wire:loading.attr="disabled" @disabled($this->unmappedRequiredFields()->isNotEmpty())
                         class="inline-flex items-center gap-2 px-6 py-2.5 text-sm font-semibold text-white rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition
-                               {{ $this->unmappedRequiredFields->isEmpty() ? 'bg-slate-900 hover:bg-slate-800' : 'bg-slate-400' }}">
+                               {{ $this->unmappedRequiredFields()->isEmpty() ? 'bg-slate-900 hover:bg-slate-800' : 'bg-slate-400' }}">
                         <span wire:loading.remove wire:target="confirmMapping">
                             Process file &rarr;
                         </span>

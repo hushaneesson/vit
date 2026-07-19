@@ -2,12 +2,13 @@
 
 namespace App\Livewire\Vendor;
 
+use App\Enums\CatalogUploadStatus;
 use App\Jobs\ProcessCatalogUploadJob;
-use App\Models\CatalogField;
 use App\Models\CatalogUpload;
 use App\Models\CatalogUploadColumnMapping;
 use App\Models\VendorMappingTemplate;
 use App\Services\CatalogFileInspectionService;
+use App\Services\VitFieldDefinition;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
@@ -31,11 +32,39 @@ class VendorCatalogUpload extends Component
 
     public array $columns = [];
     public array $sampleRows = [];
-    public array $mapping = []; // column_index => field_key|null
-    public array $suggestedIndexes = []; // column_index => true, if auto-suggested (not vendor-confirmed)
+    /**
+     * Mapping from VIT field_key => column_index (or null if unmapped).
+     * This is the reverse of the old structure: each VIT field maps to
+     * a column in the uploaded file, not the other way around.
+     */
+    public array $mapping = []; // field_key => column_index|null
+    public array $suggestedIndexes = []; // field_key => true, if auto-suggested (not vendor-confirmed)
+
+    /**
+     * Once the fuzzy matching pass has run, this is set to true.
+     * Suggestions are NEVER recalculated after this point, even if
+     * the user changes a dropdown — that only clears the badge on
+     * the field they touched.
+     */
+    public bool $suggestionsFinalized = false;
 
     public bool $saveAsTemplate = false;
     public string $templateName = '';
+
+    /**
+     * Snapshot of the mapping as it was when a saved template was applied.
+     * Null if no template was loaded. Used to determine whether the user
+     * has deviated from the template, and thus whether to show the
+     * "Remember this mapping" checkbox.
+     */
+    public ?array $originalTemplateMapping = null;
+
+    /**
+     * The name of the loaded template, if any. Used to display in the
+     * visual indicator and to auto-fill the template name input when
+     * the user modifies the mapping.
+     */
+    public ?string $loadedTemplateName = null;
 
     public array $progress = [
         'status' => null,
@@ -50,10 +79,16 @@ class VendorCatalogUpload extends Component
 
     protected $listeners = ['pollUploadStatus' => 'refreshStatus'];
 
+    /**
+     * Trim the catalog name whenever it's updated via the input field.
+     */
+    public function updatedCatalogName($value): void
+    {
+        $this->catalogName = trim($value);
+    }
+
     public function rules(): array
     {
-        $this->catalogName = trim($this->catalogName);
-
         $rules = [
             'file' => ['required', 'file', 'mimes:csv,txt,xlsx,xls', 'max:51200'], // 50MB
             'catalogName' => ['required', 'string', 'max:255'],
@@ -67,55 +102,72 @@ class VendorCatalogUpload extends Component
     }
 
     /**
-     * The static list of VIT eLink fields the vendor maps their columns
-     * to. No category/hierarchy concept here - just the flat field list.
+     * The static list of VIT eLink fields the vendor maps their columns to.
+     * No category/hierarchy concept here - just the flat field list.
+     * Source of truth is VitFieldDefinition, NOT the database.
      */
     #[Computed]
     public function catalogFields()
     {
-        return CatalogField::query()
-            ->where('active', true)
-            ->where('visible_in_web_app', true)
-            ->where('is_system_derived', false) // e.g. "Seller" comes from the vendor's account, never mapped from a file
-            ->orderBy('sort_order')
-            ->get(['id', 'field_key', 'web_app_label', 'requirement_type', 'field_type', 'description']);
+        return VitFieldDefinition::visibleInWebApp();
     }
 
     /**
      * Fields already mapped to any column (excluding "Do not import").
      * Used to filter dropdowns so each field can only be chosen once.
+     * NOT cached with #[Computed] — reads fresh from $this->mapping
+     * on every render so dropdowns stay in sync.
      */
-    #[Computed]
     public function mappedFieldKeys()
     {
-        return collect($this->mapping)->filter()->values();
+        return collect($this->mapping)->filter(function ($columnIndex) {
+            return $columnIndex !== null;
+        })->keys();
     }
 
     /**
-     * Available fields for a given column index — excludes fields already
-     * mapped to OTHER columns, but keeps the current column's selection
+     * Available columns for a given VIT field — excludes columns already
+     * mapped to OTHER fields, but keeps the current field's selection
      * visible so the user can change it.
      */
-    public function availableFieldsFor(int $columnIndex)
+    public function availableColumnsFor(string $fieldKey)
     {
-        $currentSelection = $this->mapping[$columnIndex] ?? null;
+        $currentSelection = $this->mapping[$fieldKey] ?? null;
+        $currentSelection = $currentSelection !== null ? (int) $currentSelection : null;
+        $takenIndexes = $this->mappedColumnIndexes();
 
-        return $this->catalogFields->filter(function ($field) use ($currentSelection) {
-            // Always show the currently selected field (so user can change it)
-            if ($field->field_key === $currentSelection) {
-                return true;
-            }
-            // Hide fields already mapped to other columns
-            return !$this->mappedFieldKeys->contains($field->field_key);
-        });
+        return collect($this->columns)->map(function ($name, $index) use ($currentSelection, $takenIndexes) {
+            return (object) [
+                'index' => $index,
+                'name' => $name,
+                'available' => $index === $currentSelection || !$takenIndexes->contains($index),
+            ];
+        })->where('available', true)->values();
     }
 
-    #[Computed]
+    /**
+     * Column indexes already mapped to any field.
+     */
+    private function mappedColumnIndexes()
+    {
+        return collect($this->mapping)
+            ->filter(function ($columnIndex) {
+                return $columnIndex !== null;
+            })
+            ->map(fn($index) => (int) $index)
+            ->values();
+    }
+
+    /**
+     * Required fields not yet mapped to any column.
+     * NOT cached with #[Computed] — reads fresh from $this->mapping
+     * on every render so the progress bar stays in sync.
+     */
     public function unmappedRequiredFields()
     {
         return $this->catalogFields
             ->where('requirement_type', 'required')
-            ->reject(fn ($field) => $this->mappedFieldKeys->contains($field->field_key))
+            ->reject(fn($field) => $this->mappedFieldKeys()->contains($field->field_key))
             ->pluck('web_app_label');
     }
 
@@ -135,7 +187,7 @@ class VendorCatalogUpload extends Component
 
         $storedPath = $this->file->storeAs(
             "catalog-uploads/{$client->vendor_id}",
-            Str::random(20).'.'.$extension,
+            Str::random(20) . '.' . $extension,
             self::DISK
         );
 
@@ -147,7 +199,7 @@ class VendorCatalogUpload extends Component
             'file_path' => $storedPath,
             'disk' => self::DISK,
             'file_type' => $fileType,
-            'status' => 'uploaded',
+            'status' => CatalogUploadStatus::Uploaded,
         ]);
 
         $inspection = $inspector->inspect(self::DISK, $storedPath, $fileType);
@@ -155,20 +207,28 @@ class VendorCatalogUpload extends Component
         $this->catalogUploadId = $upload->id;
         $this->columns = $inspection['columns'];
         $this->sampleRows = $inspection['sample_rows'];
-        $this->mapping = array_fill(0, count($this->columns), null);
+
+        // Initialize mapping: every VIT field starts unmapped (null)
+        $this->mapping = $this->catalogFields
+            ->pluck('field_key')
+            ->mapWithKeys(fn($key) => [$key => null])
+            ->toArray();
 
         $this->applySuggestedTemplate($client->vendor_id);
         $this->applyFuzzyMatchSuggestions();
+        $this->suggestionsFinalized = true; // Lock suggestions — NEVER recalculate
 
-        $upload->update(['status' => 'mapping']);
+        $upload->update(['status' => CatalogUploadStatus::Mapping]);
 
         $this->step = 'mapping';
     }
 
     /**
-     * Fires when the vendor edits any mapping.{index} select manually.
-     * Once they've made a deliberate choice, it's no longer "just a
-     * suggestion" - clear the badge for that column.
+     * Fires when the vendor edits any mapping.{field_key} select manually.
+     *
+     * The ONLY automatic effect is clearing the suggestion badge on the
+     * field the user touched. No other field's mapping or suggestion
+     * is ever changed.
      */
     public function updatedMapping($value, $key): void
     {
@@ -176,31 +236,37 @@ class VendorCatalogUpload extends Component
     }
 
     /**
-     * STEP 2: vendor confirms the column -> field mapping, we validate that
+     * STEP 2: vendor confirms the field -> column mapping, we validate that
      * every required field is mapped, save it, optionally save a reusable
      * template, then move to processing.
      */
     public function confirmMapping(): void
     {
-        if ($this->unmappedRequiredFields->isNotEmpty()) {
+        if ($this->unmappedRequiredFields()->isNotEmpty()) {
             $this->addError('mapping', 'Please map all required fields before continuing.');
 
             return;
         }
 
         $upload = CatalogUpload::findOrFail($this->catalogUploadId);
-        $catalogFieldsByKey = $this->catalogFields->keyBy('field_key');
 
         $upload->columnMappings()->delete();
 
-        foreach ($this->columns as $index => $columnName) {
-            $fieldKey = $this->mapping[$index] ?? null;
-            $field = $fieldKey ? $catalogFieldsByKey->get($fieldKey) : null;
+        foreach ($this->mapping as $fieldKey => $columnIndex) {
+            if ($columnIndex === null) {
+                continue; // field was left unmapped — skip
+            }
+
+            $columnName = $this->columns[$columnIndex] ?? null;
+
+            if ($columnName === null) {
+                continue;
+            }
 
             CatalogUploadColumnMapping::create([
                 'catalog_upload_id' => $upload->id,
-                'catalog_field_id' => $field?->id,
-                'column_index' => $index,
+                'field_key' => $fieldKey,
+                'column_index' => $columnIndex,
                 'source_column_name' => $columnName,
             ]);
         }
@@ -211,7 +277,7 @@ class VendorCatalogUpload extends Component
 
         $upload->update([
             'mapping_confirmed_at' => now(),
-            'status' => 'queued',
+            'status' => CatalogUploadStatus::Queued,
         ]);
 
         ProcessCatalogUploadJob::dispatch($upload->id);
@@ -258,16 +324,46 @@ class VendorCatalogUpload extends Component
             'failure_reason' => $upload->failure_reason,
         ];
 
-        if ($upload->status === 'completed') {
+        if ($upload->status === CatalogUploadStatus::Completed) {
             $this->step = 'summary';
-        } elseif ($upload->status === 'failed') {
+        } elseif ($upload->status === CatalogUploadStatus::Failed) {
             $this->step = 'error';
         }
     }
 
+    /**
+     * Whether a saved mapping template was loaded for this file.
+     * True when the user has an existing template that was applied.
+     */
+    public function templateIsLoaded(): bool
+    {
+        return $this->originalTemplateMapping !== null;
+    }
+
+    /**
+     * Whether the current mapping differs from the template that was loaded,
+     * or if no template was loaded at all. Returns true when the checkbox
+     * should be shown:
+     * - No template exists → user may want to save one
+     * - Template loaded but user changed mappings → may want to save updated version
+     *
+     * Returns false (hide checkbox) when a template was loaded and the
+     * mapping hasn't changed at all.
+     */
+    public function hasMappingChangedFromTemplate(): bool
+    {
+        // No template was loaded — always show the checkbox
+        if ($this->originalTemplateMapping === null) {
+            return true;
+        }
+
+        // Compare current mapping against the template snapshot
+        return $this->mapping !== $this->originalTemplateMapping;
+    }
+
     public function startOver(): void
     {
-        $this->reset(['file', 'catalogUploadId', 'columns', 'sampleRows', 'mapping', 'suggestedIndexes', 'saveAsTemplate', 'templateName']);
+        $this->reset(['file', 'catalogUploadId', 'columns', 'sampleRows', 'mapping', 'suggestedIndexes', 'saveAsTemplate', 'templateName', 'suggestionsFinalized', 'originalTemplateMapping', 'loadedTemplateName']);
         $this->progress = ['status' => null, 'total_rows' => 0, 'success_rows' => 0, 'updated_rows' => 0, 'skipped_rows' => 0, 'skipped_item_names' => null, 'error_rows' => 0, 'failure_reason' => null];
         $this->step = 'upload';
     }
@@ -276,72 +372,101 @@ class VendorCatalogUpload extends Component
     {
         $template = VendorMappingTemplate::where('vendor_id', $vendorId)
             ->where('active', true)
-            ->with('fields.catalogField')
+            ->with('fields')
             ->latest()
             ->first();
 
         if (! $template) {
+            $this->originalTemplateMapping = null;
+            $this->loadedTemplateName = null;
             return;
         }
 
-        $normalizedColumns = collect($this->columns)->map(fn ($c) => Str::lower(trim((string) $c)));
+        $normalizedColumns = collect($this->columns)->map(fn($c) => Str::lower(trim((string) $c)));
 
         foreach ($template->fields as $field) {
+            if (! $field->field_key) {
+                continue;
+            }
+
             $index = $normalizedColumns->search(Str::lower(trim($field->source_column_name)));
 
             if ($index !== false) {
-                $this->mapping[$index] = $field->catalogField->field_key;
+                $this->mapping[$field->field_key] = $index;
             }
         }
+
+        // Snapshot the mapping as it was applied from the template
+        $this->originalTemplateMapping = $this->mapping;
+
+        // Store the template name for display and auto-fill
+        $this->loadedTemplateName = $template->name;
+        $this->templateName = $template->name;
     }
 
     /**
      * Second suggestion pass, runs after the saved-template check, for any
-     * column still unmapped. Scores each unmapped column's header against
-     * every unclaimed VIT field's key + label using similar_text(), and
+     * VIT field still unmapped. Scores each unmapped field's key + label
+     * against every unclaimed column header using similar_text(), and
      * auto-fills the best match if it clears that field's confidence
      * threshold. Required fields need a much closer match (85%) than
      * optional ones (65%) - a wrong guess on a required field silently
      * lets bad data through, a wrong guess on an optional field is a
      * cheap, obvious fix.
+     *
+     * This method runs EXACTLY ONCE during uploadFile(). After that,
+     * $this->suggestionsFinalized is set to true and this will never
+     * run again — no matter what the user does with the dropdowns.
      */
     private function applyFuzzyMatchSuggestions(): void
     {
-        $alreadyMapped = collect($this->mapping)->filter();
-        $available = $this->catalogFields->reject(fn ($field) => $alreadyMapped->contains($field->field_key));
+        // Safety guard — suggestions are locked after the initial pass
+        if ($this->suggestionsFinalized) {
+            return;
+        }
 
-        foreach ($this->columns as $index => $columnName) {
-            if (! empty($this->mapping[$index])) {
-                continue; // already mapped (e.g. by the saved-template pass)
-            }
+        $alreadyMapped = $this->mappedFieldKeys();
+        $available = $this->catalogFields->reject(fn($field) => $alreadyMapped->contains($field->field_key));
 
-            $normalizedColumn = $this->normalizeForMatching((string) $columnName);
+        foreach ($available as $field) {
+            $normalizedField = $this->normalizeForMatching($field->field_key);
+            $normalizedLabel = $this->normalizeForMatching($field->web_app_label);
 
-            if ($normalizedColumn === '') {
+            if ($normalizedField === '' && $normalizedLabel === '') {
                 continue;
             }
 
-            $bestField = null;
+            $bestIndex = null;
             $bestScore = 0.0;
 
-            foreach ($available as $field) {
+            foreach ($this->columns as $index => $columnName) {
+                // Skip columns already mapped to another field
+                if ($this->mappedColumnIndexes()->contains($index)) {
+                    continue;
+                }
+
+                $normalizedColumn = $this->normalizeForMatching((string) $columnName);
+
+                if ($normalizedColumn === '') {
+                    continue;
+                }
+
                 $score = max(
-                    $this->similarityPercent($normalizedColumn, $this->normalizeForMatching($field->field_key)),
-                    $this->similarityPercent($normalizedColumn, $this->normalizeForMatching($field->web_app_label)),
+                    $this->similarityPercent($normalizedField, $normalizedColumn),
+                    $this->similarityPercent($normalizedLabel, $normalizedColumn),
                 );
 
                 $threshold = $field->requirement_type === 'required' ? 85.0 : 65.0;
 
                 if ($score >= $threshold && $score > $bestScore) {
                     $bestScore = $score;
-                    $bestField = $field;
+                    $bestIndex = $index;
                 }
             }
 
-            if ($bestField) {
-                $this->mapping[$index] = $bestField->field_key;
-                $this->suggestedIndexes[$index] = true;
-                $available = $available->reject(fn ($field) => $field->id === $bestField->id);
+            if ($bestIndex !== null) {
+                $this->mapping[$field->field_key] = $bestIndex;
+                $this->suggestedIndexes[$field->field_key] = true;
             }
         }
     }
@@ -371,12 +496,12 @@ class VendorCatalogUpload extends Component
         ]);
 
         foreach ($upload->columnMappings as $mapping) {
-            if (! $mapping->catalog_field_id) {
+            if (! $mapping->field_key) {
                 continue;
             }
 
             $template->fields()->create([
-                'catalog_field_id' => $mapping->catalog_field_id,
+                'field_key' => $mapping->field_key,
                 'source_column_name' => $mapping->source_column_name,
             ]);
         }

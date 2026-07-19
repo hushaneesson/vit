@@ -2,12 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\CatalogUploadStatus;
 use App\Jobs\ProcessCatalogUploadJob;
-use App\Models\CatalogField;
 use App\Models\CatalogUpload;
 use App\Models\CatalogUploadColumnMapping;
 use App\Models\VendorMappingTemplate;
 use App\Services\CatalogFileInspectionService;
+use App\Services\VitFieldDefinition;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -44,12 +45,12 @@ class CatalogUploadController extends Controller
             'file_path' => $storedPath,
             'disk' => self::DISK,
             'file_type' => $fileType,
-            'status' => 'uploaded',
+            'status' => CatalogUploadStatus::Uploaded,
         ]);
 
         $inspection = $this->inspector->inspect(self::DISK, $storedPath, $fileType);
 
-        $upload->update(['status' => 'mapping']);
+        $upload->update(['status' => CatalogUploadStatus::Mapping]);
 
         return response()->json([
             'catalog_upload_id' => $upload->id,
@@ -77,16 +78,12 @@ class CatalogUploadController extends Controller
             'template_name' => ['required_if:save_as_template,true', 'string', 'max:255'],
         ]);
 
-        $catalogFieldsByKey = CatalogField::where('active', true)->get()->keyBy('field_key');
-
         $catalogUpload->columnMappings()->delete();
 
         foreach ($data['mappings'] as $mapping) {
-            $field = $mapping['field_key'] ? $catalogFieldsByKey->get($mapping['field_key']) : null;
-
             CatalogUploadColumnMapping::create([
                 'catalog_upload_id' => $catalogUpload->id,
-                'catalog_field_id' => $field?->id,
+                'field_key' => $mapping['field_key'],
                 'column_index' => $mapping['column_index'],
                 'source_column_name' => $mapping['source_column_name'],
             ]);
@@ -105,7 +102,7 @@ class CatalogUploadController extends Controller
 
         $catalogUpload->update([
             'mapping_confirmed_at' => now(),
-            'status' => 'mapping',
+            'status' => CatalogUploadStatus::Mapping,
         ]);
 
         return response()->json(['ready_to_process' => true]);
@@ -122,7 +119,7 @@ class CatalogUploadController extends Controller
             return response()->json(['message' => 'Mapping is incomplete.'], 422);
         }
 
-        $catalogUpload->update(['status' => 'queued']);
+        $catalogUpload->update(['status' => CatalogUploadStatus::Queued]);
 
         ProcessCatalogUploadJob::dispatch($catalogUpload->id);
 
@@ -169,12 +166,15 @@ class CatalogUploadController extends Controller
 
     private function activeCatalogFieldsForUi(): array
     {
-        return CatalogField::query()
-            ->where('active', true)
-            ->where('visible_in_web_app', true)
-            ->where('is_system_derived', false) // e.g. "Seller" comes from the vendor's account, never mapped from a file
-            ->orderBy('sort_order')
-            ->get(['field_key', 'web_app_label', 'requirement_type', 'field_type', 'description'])
+        return VitFieldDefinition::visibleInWebApp()
+            ->map(fn($field) => [
+                'field_key' => $field->field_key,
+                'web_app_label' => $field->web_app_label,
+                'requirement_type' => $field->requirement_type,
+                'field_type' => $field->field_type,
+                'description' => $field->description,
+            ])
+            ->values()
             ->toArray();
     }
 
@@ -182,7 +182,7 @@ class CatalogUploadController extends Controller
     {
         $template = VendorMappingTemplate::where('vendor_id', $vendorId)
             ->where('active', true)
-            ->with('fields.catalogField')
+            ->with('fields')
             ->latest()
             ->first();
 
@@ -193,12 +193,12 @@ class CatalogUploadController extends Controller
         // Match template fields back to the newly-uploaded file's columns by
         // name (case-insensitive), since column order can shift between
         // exports even for the same vendor.
-        $normalizedColumns = collect($columns)->map(fn ($c) => Str::lower(trim((string) $c)));
+        $normalizedColumns = collect($columns)->map(fn($c) => Str::lower(trim((string) $c)));
 
         $suggestions = $template->fields->mapWithKeys(function ($field) use ($normalizedColumns) {
             $index = $normalizedColumns->search(Str::lower(trim($field->source_column_name)));
 
-            return $index === false ? [] : [$index => $field->catalogField->field_key];
+            return $index === false ? [] : [$index => $field->field_key];
         });
 
         return $suggestions->isEmpty() ? null : [
@@ -217,12 +217,12 @@ class CatalogUploadController extends Controller
         ]);
 
         foreach ($catalogUpload->columnMappings as $mapping) {
-            if (! $mapping->catalog_field_id) {
+            if (! $mapping->field_key) {
                 continue;
             }
 
             $template->fields()->create([
-                'catalog_field_id' => $mapping->catalog_field_id,
+                'field_key' => $mapping->field_key,
                 'source_column_name' => $mapping->source_column_name,
             ]);
         }

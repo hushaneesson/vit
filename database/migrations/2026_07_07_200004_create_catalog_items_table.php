@@ -6,9 +6,6 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     *
-     */
     public function up(): void
     {
         Schema::create('catalog_items', function (Blueprint $table) {
@@ -23,8 +20,12 @@ return new class extends Migration
             $table->string('brand_name')->nullable();
 
             $table->string('vendor_sku');
-            $table->string('unspsc_code');
-            $table->string('product_type', 50);
+            $table->string('catalog_name')->nullable();
+            $table->foreignId('catalog_upload_id')->nullable()->constrained('catalog_uploads')->nullOnDelete();
+            $table->string('data_fingerprint', 32)->nullable();
+
+            $table->string('unspsc_code')->nullable();
+            $table->string('product_type', 50)->nullable();
 
             $table->string('unit_of_measure', 50);
             $table->decimal('quantity_per_unit', 10, 2)->nullable();
@@ -39,8 +40,8 @@ return new class extends Migration
             $table->json('selling_points')->nullable();
             $table->string('msds_link', 300)->nullable();
 
-            $table->decimal('list_price', 10, 2);
-            $table->decimal('selling_price', 10, 2);
+            $table->decimal('list_price', 10, 2)->nullable();
+            $table->decimal('selling_price', 10, 2)->nullable();
 
             $table->string('status', 20)->default('incomplete');
             $table->integer('completeness_score')->default(0);
@@ -48,10 +49,8 @@ return new class extends Migration
             $table->timestamps();
 
             $table->index(['vendor_id']);
-
-            // categories
-            // product images
-            // brand logo
+            $table->index('data_fingerprint', 'catalog_items_fingerprint_index');
+            $table->unique(['vendor_id', 'vendor_sku'], 'catalog_items_vendor_sku_unique');
         });
     }
 

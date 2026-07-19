@@ -2,11 +2,12 @@
 
 namespace App\Jobs;
 
-use App\Models\CatalogField;
+use App\Enums\CatalogUploadStatus;
 use App\Models\CatalogUpload;
 use App\Models\CatalogUploadRow;
 use App\Jobs\ProcessValidatedRowsJob;
 use App\Services\CatalogRowValidator;
+use App\Services\VitFieldDefinition;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -28,26 +29,23 @@ class ProcessCatalogUploadJob implements ShouldQueue
 
     public function handle(CatalogRowValidator $validator): void
     {
-        $upload = CatalogUpload::with('columnMappings.catalogField')->findOrFail($this->catalogUploadId);
+        $upload = CatalogUpload::with('columnMappings')->findOrFail($this->catalogUploadId);
 
         $upload->update([
-            'status' => 'processing',
+            'status' => CatalogUploadStatus::Processing,
             'processing_started_at' => now(),
         ]);
 
         try {
             // column_index (int) => field_key (string|null - null means "unmapped, skip")
             $columnToFieldKey = $upload->columnMappings
-                ->mapWithKeys(fn ($mapping) => [
-                    $mapping->column_index => $mapping->catalogField?->field_key,
+                ->mapWithKeys(fn($mapping) => [
+                    $mapping->column_index => $mapping->field_key,
                 ]);
 
             // System-derived fields (e.g. seller from vendor.name) aren't mapped
             // from file columns — they're populated from the vendor record later.
-            $activeFields = CatalogField::where('active', true)
-                ->where('is_system_derived', false)
-                ->get()
-                ->keyBy('field_key');
+            $activeFields = VitFieldDefinition::active()->keyBy('field_key');
 
             $localPath = $this->resolveLocalPath($upload->disk, $upload->file_path);
             $reader = $upload->file_type === 'csv'
@@ -118,21 +116,28 @@ class ProcessCatalogUploadJob implements ShouldQueue
                 CatalogUploadRow::insert($batch);
             }
 
-            $upload->update([
-                'status' => 'completed',
-                'total_rows' => $successCount + $errorCount,
-                'success_rows' => $successCount,
-                'error_rows' => $errorCount,
-                'processing_completed_at' => now(),
-            ]);
-
-            // Phase 8B: convert validated rows into CatalogItem records
+            // Phase 8B: convert validated rows into CatalogItem records.
+            // ProcessValidatedRowsJob will finalize the upload status and counts.
             if ($successCount > 0) {
+                $upload->update([
+                    'status' => CatalogUploadStatus::ProcessingItems,
+                    'processing_completed_at' => now(),
+                ]);
+
                 ProcessValidatedRowsJob::dispatch($upload->id);
+            } else {
+                // No valid rows — nothing to process, mark as completed with counts
+                $upload->update([
+                    'status' => CatalogUploadStatus::Completed,
+                    'total_rows' => $successCount + $errorCount,
+                    'success_rows' => $successCount,
+                    'error_rows' => $errorCount,
+                    'processing_completed_at' => now(),
+                ]);
             }
         } catch (\Throwable $e) {
             $upload->update([
-                'status' => 'failed',
+                'status' => CatalogUploadStatus::Failed,
                 'failure_reason' => $e->getMessage(),
                 'processing_completed_at' => now(),
             ]);
@@ -163,7 +168,7 @@ class ProcessCatalogUploadJob implements ShouldQueue
             return [];
         }
 
-        return array_values(array_filter(array_map('trim', explode($separator, $rawValue)), fn ($v) => $v !== ''));
+        return array_values(array_filter(array_map('trim', explode($separator, $rawValue)), fn($v) => $v !== ''));
     }
 
     private function resolveLocalPath(string $disk, string $path): string

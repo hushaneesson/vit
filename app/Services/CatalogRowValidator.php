@@ -7,7 +7,7 @@ use Illuminate\Support\Collection;
 class CatalogRowValidator
 {
     /**
-     * @param  Collection<int, \App\Models\CatalogFieldDefinition>  $fieldDefinitions  active definitions, keyed by field_key
+     * @param  Collection<int, object>  $fieldDefinitions  active definitions (from VitFieldDefinition), keyed by field_key
      * @param  array<string, mixed>  $rowData  keyed by field_key
      * @return array{errors: array<int, array{field_key: string, message: string}>}
      */
