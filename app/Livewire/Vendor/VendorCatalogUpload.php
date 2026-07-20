@@ -142,11 +142,13 @@ class VendorCatalogUpload extends Component
         $currentSelection = $this->mapping[$fieldKey] ?? null;
         $takenIndexes = $this->mappedColumnIndexes();
 
-        return collect($this->columns)->map(function ($name, $index) use ($currentSelection, $takenIndexes) {
+        $currentStr = $currentSelection !== null ? (string) $currentSelection : null;
+        return collect($this->columns)->map(function ($name, $index) use ($currentStr, $takenIndexes) {
+            $indexStr = (string) $index;
             return (object) [
-                'index' => $index,
+                'index' => $indexStr,
                 'name' => $name,
-                'available' => $index === $currentSelection || !$takenIndexes->contains($index),
+                'available' => $indexStr === $currentStr || !$takenIndexes->contains($indexStr),
             ];
         })->where('available', true)->values();
     }
@@ -158,7 +160,7 @@ class VendorCatalogUpload extends Component
     {
         return collect($this->mapping)->filter(function ($columnIndex) {
             return $columnIndex !== null;
-        })->values();
+        })->map(fn($index) => (string) $index)->values();
     }
 
     /**
@@ -238,7 +240,8 @@ class VendorCatalogUpload extends Component
      */
     public function updatedMapping($value, $key): void
     {
-        $this->mapping[$key] = $value !== null && $value !== '' ? (int) $value : null;
+        // Livewire hydrates select values as strings; normalize to string for consistent comparison
+        $this->mapping[$key] = $value !== null && $value !== '' ? (string) $value : null;
         unset($this->suggestedIndexes[$key]);
     }
 
