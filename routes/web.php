@@ -40,6 +40,8 @@ Route::prefix('vendor')->name('vendor.')->group(function () {
 
         Route::get('appointments', [AppointmentController::class, 'index'])->name('appointments.index');
         Route::get('appointments/create', [AppointmentController::class, 'create'])->name('appointments.create');
+        Route::patch('appointments/{appointment}/cancel', [AppointmentController::class, 'cancel'])
+            ->name('appointments.cancel');
 
         Route::get('catalog', [CatalogItemController::class, 'index'])->name('catalog.index');
         Route::get('catalog/create', [CatalogItemController::class, 'create'])->name('catalog.create');

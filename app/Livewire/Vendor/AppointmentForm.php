@@ -4,6 +4,8 @@ namespace App\Livewire\Vendor;
 
 use App\Models\Appointment;
 use App\Models\User;
+use App\Notifications\AppointmentBookedWithYouNotification;
+use App\Notifications\ClientAppointmentBookedNotification;
 use Illuminate\Support\Carbon;
 use Livewire\Component;
 use Zap\Facades\Zap;
@@ -179,6 +181,7 @@ class AppointmentForm extends Component
 
         // check again that the slot is available before saving.
         if (!$this->user->isBookableAtTime($this->pendingDate, $startsAt, $endsAt)) {
+            $this->isSaving = false;
             return;
         }
         // dd($this->pendingDate, $startsAt, $endsAt);
@@ -194,9 +197,27 @@ class AppointmentForm extends Component
             ])
             ->save();
 
+        $client = auth('client')->user();
+
+        $client?->notify(new ClientAppointmentBookedNotification(
+            bookedWithName: $this->user->name,
+            date: $this->pendingDate,
+            startsAt: $startsAt,
+            endsAt: $endsAt,
+        ));
+
+        $this->user->notify(new AppointmentBookedWithYouNotification(
+            clientName: $client?->name ?? 'A client',
+            date: $this->pendingDate,
+            startsAt: $startsAt,
+            endsAt: $endsAt,
+        ));
+
         $this->isSaving = false;
         $this->showConfirmModal = false;
 
-        return redirect()->route('vendor.appointments.index');
+        return redirect()
+            ->route('vendor.appointments.index')
+            ->with('status', 'Appointment booked successfully!');
     }
 }

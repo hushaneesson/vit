@@ -1,22 +1,5 @@
 <x-layouts.app>
     <div x-data="{ open: false }" class="min-h-screen">
-
-        @if (session('status'))
-            <div class="px-4 py-3 mb-5 text-sm border shadow-sm rounded-xl border-sky-200 bg-sky-50 text-sky-900">
-                {{ session('status') }}
-            </div>
-        @endif
-
-        @if ($errors->any())
-            <div class="px-4 py-3 mb-5 text-sm text-red-800 border border-red-200 shadow-sm rounded-xl bg-red-50">
-                <ul class="list-disc list-inside">
-                    @foreach ($errors->all() as $error)
-                        <li>{{ $error }}</li>
-                    @endforeach
-                </ul>
-            </div>
-        @endif
-
         <!-- Navigation -->
         <nav class="sticky top-0 z-50 p-3 border-b shadow-sm bg-white/80 backdrop-blur-md border-slate-200 ">
             <div class="container px-4 mx-auto sm:px-6 lg:px-8">
@@ -126,8 +109,27 @@
 
         </nav>
 
+
         <!-- Main Content -->
         <main class="container px-4 py-8 mx-auto sm:px-6 lg:px-8">
+
+            @if (session('status'))
+                <div
+                    class="px-4 py-3 mb-5 text-sm border shadow-sm rounded-xl border-emerald-200 bg-emerald-50 text-emerald-700">
+                    {{ session('status') }}
+                </div>
+            @endif
+
+            @if ($errors->any())
+                <div class="px-4 py-3 mb-5 text-sm text-red-800 border border-red-200 shadow-sm rounded-xl bg-red-50">
+                    <ul class="list-disc list-inside">
+                        @foreach ($errors->all() as $error)
+                            <li>{{ $error }}</li>
+                        @endforeach
+                    </ul>
+                </div>
+            @endif
+
             {{ $slot }}
         </main>
 

@@ -6,36 +6,49 @@
                 <p class="text-sm text-gray-500">{{ auth('client')->user()->vendor->name }}</p>
             </div>
             <a href="{{ route('vendor.appointments.create') }}" class="w-full md:w-auto btn btn-primary">
-                + {{ $upcomingAppointments->isNotEmpty() ? 'Book Another Appointment' : 'Book An Appointment' }}
+                <i class="fas fa-calendar" aria-hidden="true"></i> Book Appointment
             </a>
         </div>
 
-        <div class="grid gap-5 p-5 overflow-hidden bg-white rounded-lg shadow-lg md:grid-cols-2">
+        <div class="grid gap-5 p-5 overflow-hidden bg-white rounded-lg shadow-lg lg:grid-cols-2">
             @if ($upcomingAppointments->isNotEmpty())
                 @foreach ($upcomingAppointments as $upcomingAppointment)
-                    <div class="flex items-start gap-4 p-10">
-                        {{-- Date block --}}
-                        <div
-                            class="flex flex-col items-center justify-center border rounded-lg w-14 h-14 shrink-0 border-sky-100 bg-sky-50 text-sky-700">
-                            <span class="text-sm font-semibold leading-none uppercase ">
-                                {{ $upcomingAppointment->start_date->format('M') }}
-                            </span>
-                            <span class="text-lg font-bold leading-none">
-                                {{ $upcomingAppointment->start_date->format('d') }}
-                            </span>
+                    <div class="p-5 space-y-8 border rounded-lg shadow-sm md:p-10 border-slate-200 bg-slate-50">
+                        <div class="flex items-start gap-4">
+                            {{-- Date block --}}
+                            <div
+                                class="flex flex-col items-center justify-center border rounded-lg w-14 h-14 shrink-0 border-sky-100 bg-sky-50 text-sky-700">
+                                <span class="text-sm font-semibold leading-none uppercase ">
+                                    {{ $upcomingAppointment->start_date->format('M') }}
+                                </span>
+                                <span class="text-lg font-bold leading-none">
+                                    {{ $upcomingAppointment->start_date->format('d') }}
+                                </span>
+                            </div>
+
+                            {{-- Details --}}
+                            <div class="flex-1 min-w-0">
+                                <p class="mb-2 font-semibold text-gray-800">
+                                    {{ $upcomingAppointment->start_date->format('l, F j, Y') }}
+                                </p>
+                                <p class="text-sm text-gray-500">
+                                    {{ \Carbon\Carbon::parse($upcomingAppointment->periods->first()->start_time)->format('h:i A') }}
+                                    &ndash;
+                                    {{ \Carbon\Carbon::parse($upcomingAppointment->periods->first()->end_time)->format('h:i A') }}
+                                </p>
+
+
+                            </div>
                         </div>
 
-                        {{-- Details --}}
-                        <div class="flex-1 min-w-0">
-                            <p class="mb-2 font-semibold text-gray-800">
-                                {{ $upcomingAppointment->start_date->format('l, F j, Y') }}
-                            </p>
-                            <p class="text-sm text-gray-500">
-                                {{ \Carbon\Carbon::parse($upcomingAppointment->periods->first()->start_time)->format('h:i A') }}
-                                &ndash;
-                                {{ \Carbon\Carbon::parse($upcomingAppointment->periods->first()->end_time)->format('h:i A') }}
-                            </p>
-                        </div>
+                        <form method="POST" action="{{ route('vendor.appointments.cancel', $upcomingAppointment) }}"
+                            onsubmit="return confirm('Cancel this appointment?')" class="flex justify-end w-full mt-4">
+                            @csrf
+                            @method('PATCH')
+                            <button type="submit" class="btn btn-gray">
+                                <i class="fas fa-ban"></i> Cancel Appointment
+                            </button>
+                        </form>
                     </div>
                 @endforeach
             @else
