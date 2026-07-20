@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "@fortawesome/fontawesome-free/css/all.min.css";
 
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 @source '../../storage/framework/views/*.php';
@@ -41,10 +42,14 @@
 
 @layer components {
     .btn {
-        @apply inline-flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2;
+        @apply inline-flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-all duration-200 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2;
     }
 
     .btn-primary {
-        @apply font-semibold text-white transition-all duration-200 focus:outline-none bg-gradient-to-r from-sky-500 to-teal-500 hover:from-sky-600 hover:to-teal-600;
+        @apply font-semibold text-white focus:outline-none bg-gradient-to-r from-sky-500 to-teal-500 hover:from-sky-600 hover:to-teal-600;
+    }
+
+    .btn-gray {
+        @apply text-white bg-gray-800 hover:bg-gray-900 focus:ring-gray-300;
     }
 }

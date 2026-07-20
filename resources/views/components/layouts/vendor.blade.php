@@ -57,8 +57,9 @@
                         <form method="POST" action="{{ route('vendor.logout') }}">
                             @csrf
                             <button type="submit"
-                                class="px-4 py-2.5 text-sm font-medium transition-all duration-200 rounded-lg bg-slate-100 hover:bg-red-50 hover:text-red-600 text-slate-500">Log
-                                out</button>
+                                class="py-2.5 text-sm font-medium btn bg-slate-100 hover:bg-slate-200 hover:font-bold text-slate-500">
+                                <i class="fas fa-arrow-right-from-bracket"></i> Log out
+                            </button>
                         </form>
                     </div>
 
@@ -113,8 +114,11 @@
 
                     <form class="pt-2" method="POST" action="{{ route('vendor.logout') }}">
                         @csrf
-                        <button type="submit" class="w-full btn btn-primary">Log
-                            out</button>
+
+                        <button type="submit"
+                            class="py-2.5 w-full font-medium btn bg-slate-100 hover:bg-slate-200 hover:font-bold text-slate-500">
+                            <i class="fas fa-arrow-right-from-bracket"></i> Log out
+                        </button>
                     </form>
                 </div>
 
