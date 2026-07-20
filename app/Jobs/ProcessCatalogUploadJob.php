@@ -13,6 +13,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Reader\Csv as CsvReader;
@@ -107,21 +108,26 @@ class ProcessCatalogUploadJob implements ShouldQueue
                 ];
 
                 if (count($batch) >= $batchSize) {
-                    CatalogUploadRow::insert($batch);
+                    DB::transaction(function () use ($batch) {
+                        CatalogUploadRow::insert($batch);
+                    });
                     $batch = [];
                 }
             }
 
             if (! empty($batch)) {
-                CatalogUploadRow::insert($batch);
+                DB::transaction(function () use ($batch) {
+                    CatalogUploadRow::insert($batch);
+                });
             }
 
             // Phase 8B: convert validated rows into CatalogItem records.
-            // ProcessValidatedRowsJob will finalize the upload status and counts.
+            // ProcessValidatedRowsJob will claim ownership and finalize the upload.
             if ($successCount > 0) {
+                // Set status to Processing so ProcessValidatedRowsJob can claim it
                 $upload->update([
-                    'status' => CatalogUploadStatus::ProcessingItems,
-                    'processing_completed_at' => now(),
+                    'status' => CatalogUploadStatus::Processing,
+                    'processing_completed_at' => null,
                 ]);
 
                 ProcessValidatedRowsJob::dispatch($upload->id);

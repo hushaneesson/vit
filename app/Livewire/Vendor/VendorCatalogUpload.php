@@ -10,6 +10,7 @@ use App\Models\VendorMappingTemplate;
 use App\Services\CatalogFileInspectionService;
 use App\Services\VitFieldDefinition;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
@@ -256,39 +257,47 @@ class VendorCatalogUpload extends Component
 
         $upload = CatalogUpload::findOrFail($this->catalogUploadId);
 
-        $upload->columnMappings()->delete();
+        try {
+            DB::transaction(function () use ($upload) {
+                $upload->columnMappings()->delete();
 
-        foreach ($this->mapping as $fieldKey => $columnIndex) {
-            if ($columnIndex === null) {
-                continue; // field was left unmapped — skip
-            }
+                foreach ($this->mapping as $fieldKey => $columnIndex) {
+                    if ($columnIndex === null) {
+                        continue; // field was left unmapped — skip
+                    }
 
-            $columnName = $this->columns[$columnIndex] ?? null;
+                    $columnName = $this->columns[$columnIndex] ?? null;
 
-            if ($columnName === null) {
-                continue;
-            }
+                    if ($columnName === null) {
+                        continue;
+                    }
 
-            CatalogUploadColumnMapping::create([
-                'catalog_upload_id' => $upload->id,
-                'field_key' => $fieldKey,
-                'column_index' => $columnIndex,
-                'source_column_name' => $columnName,
-            ]);
+                    CatalogUploadColumnMapping::create([
+                        'catalog_upload_id' => $upload->id,
+                        'field_key' => $fieldKey,
+                        'column_index' => $columnIndex,
+                        'source_column_name' => $columnName,
+                    ]);
+                }
+
+                if ($this->saveAsTemplate && $this->templateName !== '') {
+                    $this->persistMappingTemplate($upload);
+                }
+
+                $upload->update([
+                    'mapping_confirmed_at' => now(),
+                    'status' => CatalogUploadStatus::Queued,
+                ]);
+            });
+
+            ProcessCatalogUploadJob::dispatch($upload->id);
+
+            $this->step = 'processing';
+        } catch (\Throwable $e) {
+            // Transaction was rolled back - mapping changes not persisted
+            // The upload remains in its previous state
+            throw $e;
         }
-
-        if ($this->saveAsTemplate && $this->templateName !== '') {
-            $this->persistMappingTemplate($upload);
-        }
-
-        $upload->update([
-            'mapping_confirmed_at' => now(),
-            'status' => CatalogUploadStatus::Queued,
-        ]);
-
-        ProcessCatalogUploadJob::dispatch($upload->id);
-
-        $this->step = 'processing';
     }
 
     /**

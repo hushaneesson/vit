@@ -156,8 +156,8 @@
                             </span>
                         </p>
                     </div>
-                    <button wire:click="$set('mapping', @js($this->catalogFields->pluck('field_key')->mapWithKeys(fn($k) => [$k => null])->toArray()))"
-                        class="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-500 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 shrink-0 transition"
+                    <button wire:click="$set('mapping', @js($this->catalogFields->pluck('field_key')->mapWithKeys(fn($k) => [$k => null])->toArray()))" wire:loading.attr="disabled"
+                        class="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-500 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 shrink-0 transition disabled:opacity-50 disabled:cursor-not-allowed"
                         title="Clear all column mappings and start over">
                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"
                             stroke-width="2">
@@ -219,6 +219,7 @@
                         <thead>
                             <tr class="text-xs font-semibold tracking-wide uppercase bg-slate-50 text-slate-500">
                                 <th class="p-3 text-left border-b border-slate-200">VIT Field</th>
+                                <th class="p-3 text-left border-b border-slate-200">Description</th>
                                 <th class="p-3 text-left border-b border-slate-200">Requirement</th>
                                 <th class="p-3 text-left border-b border-slate-200 w-80">Uploaded File Column</th>
                             </tr>
@@ -234,17 +235,15 @@
                                     'bg-indigo-50/30' => $isSuggested,
                                 ])>
                                     <td class="p-3">
-                                        <div class="font-medium text-slate-900">{{ $field->web_app_label }}</div>
+                                        <div class="flex items-center gap-2">
+                                            <span
+                                                class="font-medium text-slate-900">{{ $field->web_app_label }}</span>
+                                        </div>
+                                    </td>
+                                    <td class="p-3">
                                         @if ($field->description)
-                                            <div class="mt-0.5 text-xs text-slate-400 max-w-[200px] truncate"
-                                                title="{{ $field->description }}">
-                                                {{ $field->description }}
-                                            </div>
-                                        @endif
-                                        @if ($currentSelection !== null)
-                                            <div class="mt-1 font-mono text-xs text-slate-500">
-                                                Sample: {{ $sampleRows[0][$currentSelection] ?? '—' }}
-                                            </div>
+                                            <p class="text-xs break-words text-slate-500">{{ $field->description }}
+                                            </p>
                                         @endif
                                     </td>
                                     <td class="p-3">
@@ -263,7 +262,7 @@
                                     <td class="p-3">
                                         <div class="flex items-center gap-2">
                                             <select wire:key="mapping-select-{{ $field->field_key }}"
-                                                wire:model.live="mapping.{{ $field->field_key }}"
+                                                wire:model="mapping.{{ $field->field_key }}"
                                                 class="w-full px-2.5 py-1.5 text-sm border rounded-lg border-slate-300 focus:border-slate-500 focus:ring-1 focus:ring-slate-500">
                                                 <option wire:key="mapping-opt-{{ $field->field_key }}-empty"
                                                     value="">— Do not import</option>
@@ -275,30 +274,29 @@
                                                     </option>
                                                 @endforeach
                                             </select>
-                                            {{-- Badges --}}
                                             @if ($isSuggested && $currentSelection === null)
                                                 <span
-                                                    class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-emerald-50 text-emerald-700 shrink-0 border border-emerald-200"
-                                                    title="We matched this based on your column name — please confirm it's correct">
-                                                    <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24"
-                                                        stroke="currentColor" stroke-width="2">
-                                                        <path stroke-linecap="round" stroke-linejoin="round"
-                                                            d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 0 0-2.455 2.456Z" />
-                                                    </svg>
+                                                    class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0"
+                                                    title="Suggested match based on column name">
                                                     Suggested
                                                 </span>
                                             @elseif ($isSuggested && $currentSelection !== null)
                                                 <span
-                                                    class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-indigo-50 text-indigo-700 shrink-0 border border-indigo-200">
-                                                    <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                                                        <path fill-rule="evenodd"
-                                                            d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z"
-                                                            clip-rule="evenodd" />
-                                                    </svg>
+                                                    class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 shrink-0">
                                                     Confirmed
                                                 </span>
                                             @endif
                                         </div>
+                                        @if ($currentSelection !== null)
+                                            @php
+                                                $sampleValue = collect($sampleRows)->first(
+                                                    fn($row) => trim((string) ($row[$currentSelection] ?? '')) !== '',
+                                                );
+                                            @endphp
+                                            <div class="mt-1.5 text-xs text-slate-500">
+                                                Example: {{ $sampleValue[$currentSelection] ?? '—' }}
+                                            </div>
+                                        @endif
                                     </td>
                                 </tr>
                             @endforeach
@@ -341,8 +339,8 @@
                 @enderror
 
                 <div class="flex items-center justify-between mt-6">
-                    <button wire:click="startOver"
-                        class="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition">
+                    <button wire:click="startOver" wire:loading.attr="disabled"
+                        class="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition disabled:opacity-50 disabled:cursor-not-allowed">
                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"
                             stroke-width="2">
                             <path stroke-linecap="round" stroke-linejoin="round"
@@ -509,7 +507,14 @@
                                                 <td class="p-2.5 pl-4 font-mono text-xs text-slate-900">
                                                     {{ $failedRow->row_number }}</td>
                                                 <td class="p-2.5 text-xs text-rose-700">
-                                                    {{ is_array($failedRow->errors) ? implode('; ', $failedRow->errors) : $failedRow->errors }}
+                                                    @php
+                                                        $fbMsgs = is_array($failedRow->errors)
+                                                            ? collect($failedRow->errors)
+                                                                ->pluck('message')
+                                                                ->implode('; ')
+                                                            : (string) $failedRow->errors;
+                                                    @endphp
+                                                    {{ $fbMsgs }}
                                                 </td>
                                             </tr>
                                         @endforeach
@@ -581,7 +586,14 @@
                                                 <td class="p-2.5 pl-4 font-mono text-xs text-slate-900">
                                                     {{ $failedRow->row_number }}</td>
                                                 <td class="p-2.5 text-xs text-rose-700">
-                                                    {{ is_array($failedRow->errors) ? implode('; ', $failedRow->errors) : $failedRow->errors }}
+                                                    @php
+                                                        $fbMsgs2 = is_array($failedRow->errors)
+                                                            ? collect($failedRow->errors)
+                                                                ->pluck('message')
+                                                                ->implode('; ')
+                                                            : (string) $failedRow->errors;
+                                                    @endphp
+                                                    {{ $fbMsgs2 }}
                                                 </td>
                                             </tr>
                                         @endforeach
@@ -603,8 +615,8 @@
                         View my catalog
                     </a>
 
-                    <button wire:click="startOver"
-                        class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-slate-900 rounded-lg hover:bg-slate-800 transition">
+                    <button wire:click="startOver" wire:loading.attr="disabled"
+                        class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-slate-900 rounded-lg hover:bg-slate-800 transition disabled:opacity-50 disabled:cursor-not-allowed">
                         Upload another file
                     </button>
                 </div>
@@ -626,8 +638,8 @@
                 <p class="max-w-sm mx-auto mt-1 text-sm text-slate-600">
                     {{ $progress['failure_reason'] ?? 'Please try again or contact support.' }}
                 </p>
-                <button wire:click="startOver"
-                    class="inline-flex items-center gap-2 px-5 py-2.5 mt-6 text-sm font-semibold text-slate-900 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition">
+                <button wire:click="startOver" wire:loading.attr="disabled"
+                    class="inline-flex items-center gap-2 px-5 py-2.5 mt-6 text-sm font-semibold text-slate-900 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition disabled:opacity-50 disabled:cursor-not-allowed">
                     Try again
                 </button>
             </div>

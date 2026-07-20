@@ -3,8 +3,10 @@
 namespace App\Console\Commands;
 
 use App\Models\CatalogItem;
+use App\Services\FingerprintService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class BackfillCatalogFingerprints extends Command
 {
@@ -31,34 +33,42 @@ class BackfillCatalogFingerprints extends Command
         $backfilled = 0;
 
         // Process ordered by created_at so the earliest record is kept
+        // Wrap each chunk in a transaction for atomicity
         CatalogItem::orderBy('created_at')
             ->chunk(100, function ($items) use (&$dedupTracker, &$duplicatesRemoved, &$backfilled, $bar) {
                 foreach ($items as $item) {
-                    $fingerprint = $this->computeFingerprint($item);
+                    try {
+                        DB::transaction(function () use ($item, &$dedupTracker, &$duplicatesRemoved, &$backfilled, $bar) {
+                            $fingerprint = $this->computeFingerprint($item);
 
-                    DB::table('catalog_items')
-                        ->where('id', $item->id)
-                        ->update(['data_fingerprint' => $fingerprint]);
+                            DB::table('catalog_items')
+                                ->where('id', $item->id)
+                                ->update(['data_fingerprint' => $fingerprint]);
 
-                    $backfilled++;
+                            $backfilled++;
 
-                    // Check for duplicates within the same vendor
-                    $vendorId = $item->vendor_id;
-                    if (!isset($dedupTracker[$vendorId])) {
-                        $dedupTracker[$vendorId] = [];
+                            // Check for duplicates within the same vendor
+                            $vendorId = $item->vendor_id;
+                            if (!isset($dedupTracker[$vendorId])) {
+                                $dedupTracker[$vendorId] = [];
+                            }
+
+                            if (isset($dedupTracker[$vendorId][$fingerprint])) {
+                                // Exact duplicate found — remove this one (keep the earliest)
+                                $existing = $dedupTracker[$vendorId][$fingerprint];
+                                $item->delete();
+                                $duplicatesRemoved++;
+                                $this->line("\nRemoved duplicate item [{$item->id}] — keeping [{$existing}]");
+                            } else {
+                                $dedupTracker[$vendorId][$fingerprint] = $item->id;
+                            }
+
+                            $bar->advance();
+                        });
+                    } catch (\Throwable $e) {
+                        Log::error('Failed to process fingerprint for item ' . $item->id, ['error' => $e->getMessage()]);
+                        $bar->advance();
                     }
-
-                    if (isset($dedupTracker[$vendorId][$fingerprint])) {
-                        // Exact duplicate found — remove this one (keep the earliest)
-                        $existing = $dedupTracker[$vendorId][$fingerprint];
-                        $item->delete();
-                        $duplicatesRemoved++;
-                        $this->line("\nRemoved duplicate item [{$item->id}] — keeping [{$existing}]");
-                    } else {
-                        $dedupTracker[$vendorId][$fingerprint] = $item->id;
-                    }
-
-                    $bar->advance();
                 }
             });
 
@@ -71,30 +81,10 @@ class BackfillCatalogFingerprints extends Command
     }
 
     /**
-     * Compute fingerprint using the SAME algorithm as ProcessValidatedRowsJob.
-     * Only includes content fields (not vendor_id, catalog_name, etc.)
-     * so the fingerprint matches what the job produces for new uploads.
+     * Compute fingerprint using the shared FingerprintService.
      */
     private function computeFingerprint(CatalogItem $item): string
     {
-        $content = [];
-
-        foreach ($item->getAttributes() as $column => $value) {
-            if (in_array($column, $this->nonComparableColumns, true)) {
-                continue;
-            }
-
-            if (is_null($value) || $value === '' || $value === '[]' || $value === []) {
-                $content[$column] = null;
-            } elseif (is_numeric($value)) {
-                $content[$column] = (string) (float) $value;
-            } else {
-                $content[$column] = trim((string) $value);
-            }
-        }
-
-        ksort($content);
-
-        return md5(json_encode($content));
+        return FingerprintService::compute($item->getAttributes(), $this->nonComparableColumns);
     }
 }

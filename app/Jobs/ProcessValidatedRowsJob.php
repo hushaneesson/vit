@@ -7,6 +7,7 @@ use App\Models\CatalogItem;
 use App\Models\CatalogUpload;
 use App\Models\Vendor;
 use App\Notifications\CatalogUploadValidationReportNotification;
+use App\Services\FingerprintService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -38,7 +39,39 @@ class ProcessValidatedRowsJob implements ShouldQueue
     {
         $upload = CatalogUpload::with('vendor')->findOrFail($this->catalogUploadId);
 
-        $upload->update(['status' => CatalogUploadStatus::ProcessingItems]);
+        // Guard against retrying completed uploads
+        if ($upload->status === CatalogUploadStatus::Completed) {
+            return; // Already processed successfully - nothing to do
+        }
+
+        // Stale processing detection - check if processing started but never completed
+        // This allows recovery from abandoned jobs while preventing duplicate workers
+        if ($upload->status === CatalogUploadStatus::ProcessingItems) {
+            $processingTimeout = (int) config('catalog.processing_timeout_minutes', 60);
+            $isStale = $upload->processing_started_at
+                && $upload->processing_started_at->addMinutes($processingTimeout)->isPast();
+
+            if (!$isStale && $upload->processing_started_at !== null) {
+                // Another worker is still processing - exit to avoid conflict
+                return;
+            }
+            // Stale job or retry after email failure (null timestamp) - continue processing
+        }
+
+        // Atomically claim ownership by updating status
+        // This prevents concurrent workers from processing the same upload
+        $claimed = DB::transaction(function () use ($upload) {
+            $updated = CatalogUpload::where('id', $upload->id)
+                ->whereIn('status', [CatalogUploadStatus::Processing, CatalogUploadStatus::ProcessingItems])
+                ->update(['status' => CatalogUploadStatus::ProcessingItems, 'processing_started_at' => now()]);
+
+            return $updated > 0;
+        });
+
+        if (!$claimed) {
+            // Another worker already claimed this upload
+            return;
+        }
 
         try {
             $vendor = $upload->vendor;
@@ -62,7 +95,11 @@ class ProcessValidatedRowsJob implements ShouldQueue
             DB::beginTransaction();
 
             foreach ($validRows as $row) {
+                // CatalogUploadRow.data is JSON; use accessor with fallback.
                 $data = $row->data;
+                if (!is_array($data)) {
+                    $data = json_decode((string) ($data ?? ''), true) ?: [];
+                }
 
                 // Build the attribute map from the row data
                 $attrs = [
@@ -72,14 +109,16 @@ class ProcessValidatedRowsJob implements ShouldQueue
                 ];
 
                 // Map validated field data to CatalogItem columns.
-                // Always set every key so that every row has the same structure.
                 foreach ($fieldToColumn as $fieldKey => $columnName) {
                     $rawValue = $data[$fieldKey] ?? null;
 
                     if (is_null($rawValue) || $rawValue === '' || $rawValue === []) {
-                        // Leave as null — the completeness scoring will mark
-                        // the item as 'incomplete' if required fields are missing.
-                        // No fake defaults are injected.
+                        // For weight, use the DB default (0.01). For other optional
+                        // fields leave as null and let completeness scoring decide.
+                        if ($columnName === 'weight') {
+                            $attrs[$columnName] = 0.01;
+                            continue;
+                        }
                         $attrs[$columnName] = null;
                         continue;
                     }
@@ -181,20 +220,10 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
             DB::commit();
 
-            $upload->update([
-                'status' => CatalogUploadStatus::Completed,
-                'total_rows' => $upload->rows()->count(),
-                'success_rows' => $createdCount + $updatedCount,
-                'updated_rows' => $updatedCount,
-                'skipped_rows' => $skippedCount,
-                'skipped_item_names' => $skippedCount > 0 ? $skippedNames : null,
-                'error_rows' => $upload->rows()->where('status', 'invalid')->count(),
-                'processing_completed_at' => now(),
-            ]);
-
             // Send validation report by email if there are too many errors
-            // to display on-screen. The guard prevents duplicate sends even
-            // if the job is retried.
+            // to display on-screen. Only mark as Completed after email succeeds,
+            // so failed sends can be retried automatically.
+            $emailSent = false;
             if ($upload->error_rows > 10 && !$upload->validation_report_emailed_at) {
                 try {
                     $client = $upload->client;
@@ -217,13 +246,31 @@ class ProcessValidatedRowsJob implements ShouldQueue
                             ));
 
                         $upload->update(['validation_report_emailed_at' => now()]);
+                        $emailSent = true;
                     }
                 } catch (\Throwable $e) {
-                    // Email failed — do NOT mark validation_report_emailed_at.
-                    // The results are preserved in the DB and the UI will
-                    // fall back to showing the first 10 rows with a notice.
+                    // Email failed — leave upload retryable by not marking Completed.
+                    // Reset processing_started_at so the stale check allows immediate retry.
+                    $upload->update(['processing_started_at' => null]);
                     Log::warning('Failed to send validation report email for upload ' . $upload->id . ': ' . $e->getMessage());
                 }
+            } else {
+                $emailSent = true;
+            }
+
+            // Only mark as Completed after rows are processed AND email is sent (if required).
+            // This allows automatic retry when email delivery fails.
+            if ($emailSent) {
+                $upload->update([
+                    'status' => CatalogUploadStatus::Completed,
+                    'total_rows' => $upload->rows()->count(),
+                    'success_rows' => $createdCount + $updatedCount,
+                    'updated_rows' => $updatedCount,
+                    'skipped_rows' => $skippedCount,
+                    'skipped_item_names' => $skippedCount > 0 ? $skippedNames : null,
+                    'error_rows' => $upload->rows()->where('status', 'invalid')->count(),
+                    'processing_completed_at' => now(),
+                ]);
             }
         } catch (Throwable $e) {
             DB::rollBack();
@@ -244,32 +291,7 @@ class ProcessValidatedRowsJob implements ShouldQueue
      */
     private function computeFingerprint(array $attrs, array $excludeColumns): string
     {
-        $content = [];
-
-        foreach ($attrs as $column => $value) {
-            if (in_array($column, $excludeColumns, true)) {
-                continue;
-            }
-
-            // Normalize the value for deterministic comparison
-            if (is_null($value) || $value === '' || $value === []) {
-                $content[$column] = null;
-            } elseif (is_array($value)) {
-                // Sort arrays so order doesn't matter
-                sort($value);
-                $content[$column] = $value;
-            } elseif (is_numeric($value)) {
-                // Normalize numeric values to avoid "10" vs 10.0 mismatches
-                $content[$column] = (string) (float) $value;
-            } else {
-                $content[$column] = trim((string) $value);
-            }
-        }
-
-        // Sort by key for deterministic ordering
-        ksort($content);
-
-        return md5(json_encode($content));
+        return FingerprintService::compute($attrs, $excludeColumns);
     }
 
     /**

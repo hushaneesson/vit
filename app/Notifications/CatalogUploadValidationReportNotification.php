@@ -74,7 +74,7 @@ class CatalogUploadValidationReportNotification extends Notification implements 
             foreach ($this->errors as $row) {
                 $rowNumber = $row->row_number ?? '?';
                 $messages = is_array($row->errors)
-                    ? implode('; ', $row->errors)
+                    ? collect($row->errors)->pluck('message')->implode('; ')
                     : (string) $row->errors;
                 $mail->line("- **Row {$rowNumber}:** {$messages}");
             }
@@ -90,7 +90,7 @@ class CatalogUploadValidationReportNotification extends Notification implements 
             foreach ($this->warnings as $row) {
                 $rowNumber = $row->row_number ?? '?';
                 $messages = is_array($row->errors)
-                    ? implode('; ', $row->errors)
+                    ? collect($row->errors)->pluck('message')->implode('; ')
                     : (string) $row->errors;
                 $mail->line("- **Row {$rowNumber}:** {$messages}");
             }
