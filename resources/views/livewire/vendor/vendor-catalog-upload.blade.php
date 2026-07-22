@@ -283,7 +283,7 @@
                                             @elseif ($isSuggested && $currentSelection !== null)
                                                 <span
                                                     class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 shrink-0">
-                                                    Confirmed
+                                                    Suggested
                                                 </span>
                                             @endif
                                         </div>
