@@ -28,8 +28,8 @@ class CatalogItemController extends Controller
                         ->orWhere('manufacturer_sku', 'like', '%' . $request->search . '%');
                 });
             })
-            ->when($request->filled('status'), function ($query, $status) {
-                $query->where('status', $status);
+            ->when($request->filled('status'), function ($query) use ($request) {
+                $query->where('status', $request->status);
             })
             ->orderBy('name')
             ->paginate(25);
@@ -41,7 +41,7 @@ class CatalogItemController extends Controller
     }
 
 
-      public function renderUpload()
+    public function renderUpload()
     {
         return view('vendor.catalog.upload');
     }

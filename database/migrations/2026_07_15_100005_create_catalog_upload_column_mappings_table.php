@@ -8,8 +8,7 @@ return new class extends Migration
 {
     /**
      * The vendor's column -> VIT field mapping for one specific upload.
-     * catalog_field_id nullable = "ignore this column" (vendor chose not
-     * to map it to anything).
+     * field_key maps to the static VIT field definitions (not a DB FK).
      */
     public function up(): void
     {
@@ -17,8 +16,7 @@ return new class extends Migration
             $table->id();
 
             $table->foreignId('catalog_upload_id')->constrained('catalog_uploads')->cascadeOnDelete();
-            $table->foreignId('catalog_field_id')->nullable()
-                ->constrained('catalog_fields')->nullOnDelete();
+            $table->string('field_key', 100);
 
             $table->unsignedInteger('column_index'); // 0-based position in the source file
             $table->string('source_column_name'); // header text as it appeared in the vendor's file
