@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class CatalogItem extends Model
@@ -61,6 +62,16 @@ class CatalogItem extends Model
         return $this->hasMany(CatalogItemImage::class)->orderBy('sort_order');
     }
 
+    /**
+     * The catalog submissions that included this item.
+     * Recorded via the catalog_submission_items pivot for auditability.
+     */
+    public function catalogSubmissions(): BelongsToMany
+    {
+        return $this->belongsToMany(CatalogSubmission::class, 'catalog_submission_items')
+            ->withTimestamps();
+    }
+
     // Fields that are considered "required" for a complete item.
     // These are the data points a vendor MUST provide for the item
     // to be usable. Missing required fields mark the item as 'incomplete'.
@@ -114,7 +125,7 @@ class CatalogItem extends Model
 
         // 1. Calculate the score (0 to 100)
         foreach ($allFields as $field) {
-            if (!empty($data[$field])) {
+            if (array_key_exists($field, $data) && $data[$field] !== null && $data[$field] !== '') {
                 $filledCount++;
             }
         }

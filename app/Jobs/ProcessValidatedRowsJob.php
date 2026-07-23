@@ -123,9 +123,12 @@ class ProcessValidatedRowsJob implements ShouldQueue
                         continue;
                     }
 
-                    // Cast multi-value arrays to JSON for JSON columns
+                    // Cast multi-value arrays for JSON columns
+                    // Pass raw arrays directly — CatalogItem casts these as 'array',
+                    // so Laravel will handle the JSON encoding automatically. Passing
+                    // json_encode() strings would cause double encoding.
                     if (in_array($columnName, ['search_terms', 'classifications', 'specifications', 'selling_points'], true)) {
-                        $attrs[$columnName] = is_array($rawValue) ? json_encode($rawValue) : json_encode([$rawValue]);
+                        $attrs[$columnName] = is_array($rawValue) ? $rawValue : [$rawValue];
                     } elseif ($columnName === 'weight') {
                         $attrs[$columnName] = is_numeric($rawValue) ? (float) $rawValue : 0.01;
                     } elseif (in_array($columnName, ['quantity_per_unit', 'min_order_quantity', 'max_order_quantity', 'multiples', 'list_price', 'selling_price'], true)) {
@@ -317,8 +320,10 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
             // JSON columns — decode both sides for comparison
             if (in_array($column, ['search_terms', 'classifications', 'specifications', 'selling_points'], true)) {
-                $decodedOld = json_decode((string) $oldValue, true);
-                $decodedNew = json_decode((string) $newValue, true);
+                // $oldValue comes from the database (JSON string), $newValue may be
+                // a raw array (from our fix) or a JSON string. Handle both.
+                $decodedOld = is_array($oldValue) ? $oldValue : json_decode((string) $oldValue, true);
+                $decodedNew = is_array($newValue) ? $newValue : json_decode((string) $newValue, true);
 
                 // Normalize both: sort arrays for deterministic comparison
                 if (is_array($decodedOld)) {
