@@ -20,6 +20,17 @@ class CatalogItemController extends Controller
 
         $items = CatalogItem::query()
             ->where('vendor_id', $vendor->id)
+            ->when($request->filled('search'), function ($query) use ($request) {
+                // search name, vendor_sku, manufacturer_sku
+                $query->where(function ($query) use ($request) {
+                    $query->where('name', 'like', '%' . $request->search . '%')
+                        ->orWhere('vendor_sku', 'like', '%' . $request->search . '%')
+                        ->orWhere('manufacturer_sku', 'like', '%' . $request->search . '%');
+                });
+            })
+            ->when($request->filled('status'), function ($query, $status) {
+                $query->where('status', $status);
+            })
             ->orderBy('name')
             ->paginate(25);
 
