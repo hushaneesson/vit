@@ -5,9 +5,23 @@
                 <h1 class="text-xl font-semibold">My Catalogs</h1>
                 <p class="text-sm text-gray-500">{{ $vendor->name }}</p>
             </div>
-            <a href="{{ route('vendor.catalog.create') }}" class="w-full md:w-auto btn btn-primary">
-                + Add Catalog Item
-            </a>
+            <div class="flex items-center w-full gap-2 md:w-auto">
+                <a href="{{ route('vendor.catalog-upload') }}"
+                    class="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white transition rounded-lg bg-slate-900 hover:bg-slate-800">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round"
+                            d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 7.5 12 3m0 0L7.5 7.5M12 3v13.5" />
+                    </svg>
+                    Batch Upload
+                </a>
+                <a href="{{ route('vendor.catalog.create') }}"
+                    class="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white transition rounded-lg bg-emerald-600 hover:bg-emerald-700">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                    </svg>
+                    Add Item
+                </a>
+            </div>
         </div>
 
         @if ($items !== null)
@@ -93,13 +107,31 @@
                                         </td>
                                         <td class="px-6 py-4 text-gray-500">{{ $item->vendor_sku }}</td>
                                         <td class="px-6 py-4">
+                                            @php $status = $item->status ?? 'incomplete'; @endphp
                                             <span @class([
-                                                'px-2 py-1 text-xs font-semibold leading-5 uppercase rounded-full',
-                                                'text-emerald-600 bg-emerald-100' => $item->status === 'excellent',
-                                                'text-gray-600 bg-gray-100' => $item->status === 'incomplete',
-                                                'text-sky-600 bg-sky-100' => $item->status === 'acceptable',
+                                                'inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold leading-5 rounded-full',
+                                                'text-rose-700 bg-rose-100' => $status === 'incomplete',
+                                                'text-amber-700 bg-amber-100' => $status === 'acceptable',
+                                                'text-emerald-700 bg-emerald-100' => $status === 'excellent',
                                             ])>
-                                                {{ $item->status }}
+                                                @if ($status === 'excellent')
+                                                    <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                                        <path fill-rule="evenodd"
+                                                            d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z"
+                                                            clip-rule="evenodd" />
+                                                    </svg>
+                                                @endif
+                                                @if ($status === 'incomplete')
+                                                    <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24"
+                                                        stroke="currentColor" stroke-width="2">
+                                                        <path stroke-linecap="round" stroke-linejoin="round"
+                                                            d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+                                                    </svg>
+                                                @endif
+                                                <span>{{ $status }}</span>
+                                                @if ($item->completeness_score > 0)
+                                                    <span class="opacity-60">({{ $item->completeness_score }}%)</span>
+                                                @endif
                                             </span>
                                         </td>
                                         <td class="px-6 py-4 space-x-3">

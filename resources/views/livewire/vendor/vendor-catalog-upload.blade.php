@@ -1,0 +1,649 @@
+<div>
+    <div class="max-w-4xl px-4 py-10 mx-auto catalog-upload-mapper">
+
+        {{-- STEP RAIL with friendly descriptions --}}
+        @php
+            $steps = [
+                'upload' => ['label' => 'Upload', 'desc' => 'Choose your file'],
+                'mapping' => ['label' => 'Map Columns', 'desc' => 'Match to VIT fields'],
+                'processing' => ['label' => 'Process', 'desc' => 'We handle the rest'],
+                'summary' => ['label' => 'Done', 'desc' => 'Review results'],
+            ];
+            $stepKeys = array_keys($steps);
+            $currentIndex = array_search($step, $stepKeys) !== false ? array_search($step, $stepKeys) : 0;
+        @endphp
+
+        @unless ($step === 'error')
+            <ol class="flex items-center mb-10">
+                @foreach ($steps as $key => $info)
+                    @php
+                        $isDone = array_search($key, $stepKeys) < $currentIndex;
+                        $isCurrent = $key === $step;
+                    @endphp
+                    <li class="flex items-center {{ !$loop->last ? 'flex-1' : '' }}">
+                        <div class="flex flex-col items-center gap-1 shrink-0">
+                            <span @class([
+                                'flex items-center justify-center w-9 h-9 rounded-full text-sm font-semibold border-2 shrink-0 transition-colors',
+                                'bg-emerald-600 border-emerald-600 text-white' => $isDone,
+                                'bg-white border-slate-900 text-slate-900' => $isCurrent,
+                                'bg-white border-slate-300 text-slate-400' => !$isDone && !$isCurrent,
+                            ])>
+                                @if ($isDone)
+                                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                                        stroke-width="3">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                    </svg>
+                                @else
+                                    {{ $loop->iteration }}
+                                @endif
+                            </span>
+                            <span @class([
+                                'text-xs font-semibold whitespace-nowrap',
+                                'text-slate-900' => $isCurrent || $isDone,
+                                'text-slate-400' => !$isCurrent && !$isDone,
+                            ])>{{ $info['label'] }}</span>
+                            <span @class([
+                                'text-[10px] whitespace-nowrap hidden sm:block',
+                                'text-slate-400' => $isCurrent || $isDone,
+                                'text-slate-300' => !$isCurrent && !$isDone,
+                            ])>{{ $info['desc'] }}</span>
+                        </div>
+                        @if (!$loop->last)
+                            <div @class([
+                                'flex-1 h-0.5 mx-3 -mt-7 sm:-mt-9',
+                                'bg-emerald-500' => $isDone,
+                                'bg-slate-200' => !$isDone,
+                            ])></div>
+                        @endif
+                    </li>
+                @endforeach
+            </ol>
+        @endunless
+
+        {{-- ============================================================ --}}
+        {{-- STEP 1: Upload                                                --}}
+        {{-- ============================================================ --}}
+        @if ($step === 'upload')
+            <div class="p-8 bg-white border rounded-xl border-slate-200">
+                <h2 class="text-xl font-semibold text-slate-900">Upload your product catalog</h2>
+                <p class="mt-1 text-sm text-slate-500">
+                    Upload your file exactly as it is. We'll help you match the columns in the next step.
+                </p>
+
+                <div class="mt-6">
+                    <label for="catalog-name" class="block text-sm font-medium text-slate-700">
+                        Catalog Name
+                    </label>
+                    <input id="catalog-name" type="text" wire:model="catalogName"
+                        placeholder="e.g. Q3 2026 Product Catalog"
+                        class="block w-full px-3 py-2 mt-1 text-sm border rounded-lg border-slate-300 focus:border-slate-500 focus:ring-1 focus:ring-slate-500" />
+                    @error('catalogName')
+                        <p class="mt-1 text-sm text-rose-600">{{ $message }}</p>
+                    @enderror
+                </div>
+
+                {{-- Drop zone --}}
+                <label for="catalog-file" @class([
+                    'relative flex flex-col items-center justify-center gap-2 px-6 py-12 mt-4 text-center transition border-2 border-dashed rounded-lg cursor-pointer',
+                    'border-emerald-400 bg-emerald-50/40' => $file,
+                    'border-slate-300 hover:border-slate-400 hover:bg-slate-50' => !$file,
+                ])>
+                    @if ($file)
+                        <div class="flex items-center justify-center w-12 h-12 rounded-full bg-emerald-100">
+                            <svg class="w-6 h-6 text-emerald-600" fill="none" viewBox="0 0 24 24"
+                                stroke="currentColor" stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                            </svg>
+                        </div>
+                        <span class="text-sm font-semibold text-slate-900">{{ $file->getClientOriginalName() }}</span>
+                        <span class="text-xs text-slate-500">Click to choose a different file</span>
+                    @else
+                        <svg class="w-8 h-8 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                            stroke-width="1.5">
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 7.5 12 3m0 0L7.5 7.5M12 3v13.5" />
+                        </svg>
+                        <span class="text-sm font-medium text-slate-900">Click to browse, or drag a file here</span>
+                        <span class="text-xs text-slate-500">CSV, XLS, or XLSX &middot; up to 50MB</span>
+                    @endif
+
+                    <input id="catalog-file" type="file" wire:model="file" accept=".csv,.xls,.xlsx"
+                        class="sr-only" />
+                </label>
+
+                <div wire:loading wire:target="file" class="flex items-center gap-2 mt-3 text-sm text-slate-500">
+                    <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"
+                            stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z">
+                        </path>
+                    </svg>
+                    Reading file&hellip;
+                </div>
+
+                @error('file')
+                    <p class="mt-3 text-sm text-rose-600">{{ $message }}</p>
+                @enderror
+
+                <p class="mt-3 text-xs text-slate-400">
+                    Your catalog will be named
+                    &ldquo;{{ $catalogName ?: $file?->getClientOriginalName() ?: 'Untitled' }}&rdquo;
+                </p>
+
+                <button wire:click="uploadFile" wire:loading.attr="disabled" wire:target="uploadFile"
+                    @disabled(!$file)
+                    class="inline-flex items-center gap-2 px-5 py-2.5 mt-4 text-sm font-semibold text-white rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition
+                           {{ $file ? 'bg-slate-900 hover:bg-slate-800' : 'bg-slate-400' }}">
+                    <span wire:loading.remove wire:target="uploadFile">Continue to mapping &rarr;</span>
+                    <span wire:loading wire:target="uploadFile">Processing file&hellip;</span>
+                </button>
+            </div>
+        @endif
+
+        {{-- ============================================================ --}}
+        {{-- STEP 2: Column mapping                                        --}}
+        {{-- ============================================================ --}}
+        @if ($step === 'mapping')
+            <div class="p-8 bg-white border rounded-xl border-slate-200">
+                <div class="flex items-start justify-between gap-4">
+                    <div class="min-w-0">
+                        <h2 class="text-xl font-semibold text-slate-900">Match your columns</h2>
+                        <p class="py-2 mt-1 text-sm text-slate-500">
+                            <span class="block">For each VIT field, tell us which column in your file contains the
+                                data.</span>
+                            <span class="block">
+                                Fields marked <span class="font-semibold text-rose-600">*</span> are required.
+                            </span>
+                        </p>
+                    </div>
+                    <button wire:click="$set('mapping', @js($this->catalogFields->pluck('field_key')->mapWithKeys(fn($k) => [$k => null])->toArray()))" wire:loading.attr="disabled"
+                        class="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-500 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 shrink-0 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Clear all column mappings and start over">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                            stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" />
+                        </svg>
+                        Reset all
+                    </button>
+                </div>
+
+                {{-- Mapping progress --}}
+                @php
+                    $totalRequired = $this->catalogFields->where('requirement_type', 'required')->count();
+                    $mappedRequired = $totalRequired - $this->unmappedRequiredFields()->count();
+                    $progressPercent = $totalRequired > 0 ? round(($mappedRequired / $totalRequired) * 100) : 0;
+                @endphp
+                <div class="flex items-center gap-3 mt-4">
+                    <div class="flex-1 h-2 overflow-hidden rounded-full bg-slate-100">
+                        <div class="h-full rounded-full transition-all duration-500 {{ $mappedRequired === $totalRequired ? 'bg-emerald-500' : 'bg-slate-500' }}"
+                            style="width: {{ $progressPercent }}%"></div>
+                    </div>
+                    <span class="text-xs font-medium text-slate-500 whitespace-nowrap">
+                        {{ $mappedRequired }} of {{ $totalRequired }} required fields
+                    </span>
+                </div>
+
+                @if ($this->templateIsLoaded())
+                    <div @class([
+                        'flex items-center gap-2 px-3 py-2 mt-4 text-sm border rounded-lg',
+                        'bg-indigo-50 text-indigo-700 border-indigo-200' => !$this->hasMappingChangedFromTemplate(),
+                        'bg-amber-50 text-amber-700 border-amber-200' => $this->hasMappingChangedFromTemplate(),
+                    ])>
+                        @if ($this->hasMappingChangedFromTemplate())
+                            <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                                stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
+                            </svg>
+                            <span><strong>Template modified.</strong> &ldquo;{{ $this->loadedTemplateName }}&rdquo; has
+                                been updated — you can save
+                                these changes below.</span>
+                        @else
+                            <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                                stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="m6.115 5.19.319 1.913A6 6 0 0 0 8.11 10.36L9.75 12l-.387.775c-.217.433-.132.956.21 1.298l1.348 1.348c.21.21.329.497.329.795v1.089c0 .426.24.815.622 1.006l.153.076c.433.217.956.132 1.298-.21l.723-.723a8.7 8.7 0 0 0 2.288-4.042 1.087 1.087 0 0 0-.358-1.099l-1.33-1.108c-.251-.21-.402-.513-.422-.827l-.077-1.002a.75.75 0 0 0-.747-.668.75.75 0 0 0-.747.668l-.077 1.002c-.02.314-.171.617-.422.827l-1.33 1.108a1.087 1.087 0 0 0-.358 1.099l.077.268" />
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M15.75 9h.01v.01h-.01V9Zm-4.5 3.75h.01v.01h-.01v-.01Z" />
+                            </svg>
+                            <span><strong>Using saved mapping template.</strong>
+                                &ldquo;{{ $this->loadedTemplateName }}&rdquo; — your columns were automatically matched
+                                from a previous upload.</span>
+                        @endif
+                    </div>
+                @endif
+
+                <div class="mt-4 overflow-hidden border rounded-lg border-slate-200">
+                    <table class="w-full text-sm border-collapse">
+                        <thead>
+                            <tr class="text-xs font-semibold tracking-wide uppercase bg-slate-50 text-slate-500">
+                                <th class="p-3 text-left border-b border-slate-200">VIT Field</th>
+                                <th class="p-3 text-left border-b border-slate-200">Description</th>
+                                <th class="p-3 text-left border-b border-slate-200">Requirement</th>
+                                <th class="p-3 text-left border-b border-slate-200 w-80">Uploaded File Column</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100">
+                            @foreach ($this->catalogFields as $field)
+                                @php
+                                    $currentSelection = $this->mapping[$field->field_key] ?? null;
+                                    $isSuggested = !empty($this->suggestedIndexes[$field->field_key]);
+                                @endphp
+                                <tr wire:key="mapping-row-{{ $field->field_key }}" @class([
+                                    'hover:bg-slate-50/60 transition',
+                                    'bg-indigo-50/30' => $isSuggested,
+                                ])>
+                                    <td class="p-3">
+                                        <div class="flex items-center gap-2">
+                                            <span
+                                                class="font-medium text-slate-900">{{ $field->web_app_label }}</span>
+                                        </div>
+                                    </td>
+                                    <td class="p-3">
+                                        @if ($field->description)
+                                            <p class="text-xs break-words text-slate-500">{{ $field->description }}
+                                            </p>
+                                        @endif
+                                    </td>
+                                    <td class="p-3">
+                                        @if ($field->requirement_type === 'required')
+                                            <span
+                                                class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-rose-50 text-rose-700 border border-rose-200">
+                                                Required <span class="text-rose-400">*</span>
+                                            </span>
+                                        @else
+                                            <span
+                                                class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-slate-50 text-slate-500 border border-slate-200">
+                                                Optional
+                                            </span>
+                                        @endif
+                                    </td>
+                                    <td class="p-3">
+                                        <div class="flex items-center gap-2">
+                                            <select wire:key="mapping-select-{{ $field->field_key }}"
+                                                wire:model="mapping.{{ $field->field_key }}"
+                                                class="w-full px-2.5 py-1.5 text-sm border rounded-lg border-slate-300 focus:border-slate-500 focus:ring-1 focus:ring-slate-500">
+                                                <option wire:key="mapping-opt-{{ $field->field_key }}-empty"
+                                                    value="">— Do not import</option>
+                                                @foreach ($this->availableColumnsFor($field->field_key) as $col)
+                                                    <option
+                                                        wire:key="mapping-opt-{{ $field->field_key }}-{{ $col->index }}"
+                                                        value="{{ $col->index }}">
+                                                        {{ $col->name }}
+                                                    </option>
+                                                @endforeach
+                                            </select>
+                                            @if ($isSuggested && $currentSelection === null)
+                                                <span
+                                                    class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0"
+                                                    title="Suggested match based on column name">
+                                                    Suggested
+                                                </span>
+                                            @elseif ($isSuggested && $currentSelection !== null)
+                                                <span
+                                                    class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 shrink-0">
+                                                    Suggested
+                                                </span>
+                                            @endif
+                                        </div>
+                                        @if ($currentSelection !== null)
+                                            @php
+                                                $sampleValue = collect($sampleRows)->first(
+                                                    fn($row) => trim((string) ($row[$currentSelection] ?? '')) !== '',
+                                                );
+                                            @endphp
+                                            <div class="mt-1.5 text-xs text-slate-500">
+                                                Example: {{ $sampleValue[$currentSelection] ?? '—' }}
+                                            </div>
+                                        @endif
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+
+                @if ($this->unmappedRequiredFields()->isNotEmpty())
+                    <div
+                        class="flex items-start gap-2 p-3 mt-4 text-sm border rounded-lg bg-amber-50 text-amber-800 border-amber-200">
+                        <svg class="w-5 h-5 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24"
+                            stroke="currentColor" stroke-width="1.5">
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+                        </svg>
+                        <span>
+                            <strong>Still needed:</strong> {{ $this->unmappedRequiredFields()->join(', ') }}
+                        </span>
+                    </div>
+                @endif
+
+                @if ($this->hasMappingChangedFromTemplate())
+                    <div class="pt-5 mt-6 border-t border-slate-100">
+                        <label class="flex items-center gap-2 text-sm cursor-pointer text-slate-700">
+                            <input type="checkbox" wire:model.live="saveAsTemplate"
+                                class="rounded border-slate-300 text-slate-900 focus:ring-slate-500" />
+                            Remember this mapping for next time
+                        </label>
+
+                        @if ($saveAsTemplate)
+                            <input type="text" wire:model="templateName"
+                                placeholder="Name this template (e.g. Our standard export)"
+                                class="w-full max-w-sm px-3 py-2 mt-3 text-sm border rounded-lg border-slate-300 focus:border-slate-500 focus:ring-1 focus:ring-slate-500" />
+                        @endif
+                    </div>
+                @endif
+
+                @error('mapping')
+                    <p class="mt-4 text-sm text-rose-600">{{ $message }}</p>
+                @enderror
+
+                <div class="flex items-center justify-between mt-6">
+                    <button wire:click="startOver" wire:loading.attr="disabled"
+                        class="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                            stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" />
+                        </svg>
+                        Start over
+                    </button>
+
+                    <button wire:click="confirmMapping" wire:loading.attr="disabled" @disabled($this->unmappedRequiredFields()->isNotEmpty())
+                        class="inline-flex items-center gap-2 px-6 py-2.5 text-sm font-semibold text-white rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition
+                               {{ $this->unmappedRequiredFields()->isEmpty() ? 'bg-slate-900 hover:bg-slate-800' : 'bg-slate-400' }}">
+                        <span wire:loading.remove wire:target="confirmMapping">
+                            Process file &rarr;
+                        </span>
+                        <span wire:loading wire:target="confirmMapping">Starting&hellip;</span>
+                    </button>
+                </div>
+            </div>
+        @endif
+
+        {{-- ============================================================ --}}
+        {{-- STEP 3: Processing                                            --}}
+        {{-- ============================================================ --}}
+        @if ($step === 'processing')
+            <div wire:poll.2s="refreshStatus" class="p-10 text-center bg-white border rounded-xl border-slate-200">
+                <div class="flex items-center justify-center mx-auto rounded-full w-14 h-14 bg-slate-100">
+                    <svg class="w-6 h-6 animate-spin text-slate-900" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"
+                            stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z">
+                        </path>
+                    </svg>
+                </div>
+                <h2 class="mt-4 text-xl font-semibold text-slate-900">Processing your file&hellip;</h2>
+                <p class="max-w-sm mx-auto mt-1 text-sm text-slate-500">
+                    This may take a few minutes for larger files. You can leave this page &mdash; we'll keep working
+                    in the background.
+                </p>
+
+                {{-- Live counts — update as the poll refreshes --}}
+                <div class="flex items-center justify-center gap-6 mt-6">
+                    @if ($progress['total_rows'] > 0)
+                        <div class="text-center">
+                            <div class="text-xs font-medium uppercase text-slate-400">Total</div>
+                            <div class="text-lg font-semibold text-slate-900">{{ $progress['total_rows'] }}</div>
+                        </div>
+                    @endif
+                    @if ($progress['success_rows'] > 0)
+                        <div class="text-center">
+                            <div class="text-xs font-medium uppercase text-emerald-600">Created</div>
+                            <div class="text-lg font-semibold text-emerald-700">{{ $progress['success_rows'] }}</div>
+                        </div>
+                    @endif
+                    @if ($progress['updated_rows'] > 0)
+                        <div class="text-center">
+                            <div class="text-xs font-medium uppercase text-amber-600">Updated</div>
+                            <div class="text-lg font-semibold text-amber-700">{{ $progress['updated_rows'] }}</div>
+                        </div>
+                    @endif
+                    @if ($progress['skipped_rows'] > 0)
+                        <div class="text-center">
+                            <div class="text-xs font-medium uppercase text-sky-600">Unchanged</div>
+                            <div class="text-lg font-semibold text-sky-700">{{ $progress['skipped_rows'] }}</div>
+                        </div>
+                    @endif
+                    @if ($progress['error_rows'] > 0)
+                        <div class="text-center">
+                            <div class="text-xs font-medium uppercase text-rose-600">Errors</div>
+                            <div class="text-lg font-semibold text-rose-700">{{ $progress['error_rows'] }}</div>
+                        </div>
+                    @endif
+                </div>
+
+                <div class="w-full h-2 mt-6 overflow-hidden rounded-full bg-slate-100">
+                    <div class="h-full rounded-full bg-slate-900 animate-pulse" style="width: 60%"></div>
+                </div>
+
+                <p class="mt-4 text-xs text-slate-400">
+                    We'll show your results automatically when processing is complete.
+                </p>
+            </div>
+        @endif
+
+        {{-- ============================================================ --}}
+        {{-- STEP 4: Summary                                               --}}
+        {{-- ============================================================ --}}
+        @if ($step === 'summary')
+            <div class="p-8 bg-white border rounded-xl border-slate-200">
+                <div class="flex items-center justify-center w-12 h-12 mx-auto rounded-full bg-emerald-100">
+                    <svg class="w-6 h-6 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                        stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                    </svg>
+                </div>
+                <h2 class="mt-4 text-xl font-semibold text-center text-slate-900">Upload complete</h2>
+
+                {{-- Visual summary cards --}}
+                <dl class="grid grid-cols-4 gap-3 mt-6">
+                    <div class="p-4 text-center border rounded-lg border-slate-200 bg-slate-50">
+                        <dt class="text-xs font-medium tracking-wide uppercase text-slate-500">Total Rows</dt>
+                        <dd class="mt-1 text-2xl font-semibold text-slate-900">{{ $progress['total_rows'] }}</dd>
+                    </div>
+                    <div class="p-4 text-center border rounded-lg border-emerald-200 bg-emerald-50">
+                        <dt class="text-xs font-medium tracking-wide uppercase text-emerald-700">Created</dt>
+                        <dd class="mt-1 text-2xl font-semibold text-emerald-700">{{ $progress['success_rows'] }}</dd>
+                    </div>
+                    <div class="p-4 text-center border rounded-lg border-amber-200 bg-amber-50">
+                        <dt class="text-xs font-medium tracking-wide uppercase text-amber-700">
+                            Updated
+                            @if ($progress['skipped_rows'] > 0)
+                                <span class="ml-1 text-xs font-normal text-amber-500">({{ $progress['skipped_rows'] }}
+                                    unchanged)</span>
+                            @endif
+                        </dt>
+                        <dd class="mt-1 text-2xl font-semibold text-amber-700">{{ $progress['updated_rows'] }}</dd>
+                    </div>
+                    <div class="p-4 text-center border rounded-lg border-rose-200 bg-rose-50">
+                        <dt class="text-xs font-medium tracking-wide uppercase text-rose-700">Errors</dt>
+                        <dd class="mt-1 text-2xl font-semibold text-rose-700">{{ $progress['error_rows'] }}</dd>
+                    </div>
+                </dl>
+
+                {{-- Items that were already up to date --}}
+                @if ($progress['skipped_rows'] > 0 && $progress['skipped_item_names'])
+                    <div class="p-3 mt-4 text-sm border rounded-lg bg-sky-50 text-sky-800 border-sky-200">
+                        <span class="font-semibold">{{ $progress['skipped_rows'] }} item(s) already up to date:</span>
+                        <ul class="mt-1 ml-4 overflow-y-auto list-disc max-h-32">
+                            @foreach ($progress['skipped_item_names'] as $name)
+                                <li>{{ $name }}</li>
+                            @endforeach
+                        </ul>
+                    </div>
+                @endif
+
+                {{-- Failed rows --}}
+                @if ($progress['error_rows'] > 0 && $this->failedRows->isNotEmpty())
+                    @php
+                        $totalMessages = $this->failedRows->count();
+                        $showFullTable = $totalMessages <= 10;
+                        $emailSent = $this->validationReportEmailed;
+                        $emailFailed = $this->validationReportFailed;
+                    @endphp
+
+                    {{-- Case 1: 10 or fewer messages — show the full table as before --}}
+                    @if ($showFullTable)
+                        <div class="mt-6 overflow-hidden border rounded-lg border-rose-200">
+                            <div class="flex items-center justify-between px-4 py-2.5 bg-rose-50">
+                                <span class="text-xs font-semibold tracking-wide uppercase text-rose-700">
+                                    Failed rows &mdash; <span class="font-normal lowercase">these were skipped</span>
+                                </span>
+                                <span class="text-xs text-rose-500">{{ $totalMessages }} row(s)</span>
+                            </div>
+                            <div class="overflow-y-auto max-h-48">
+                                <table class="w-full text-sm border-collapse">
+                                    <thead class="sticky top-0 bg-slate-50">
+                                        <tr class="text-xs font-semibold tracking-wide uppercase text-slate-500">
+                                            <th class="p-2.5 pl-4 text-left border-b border-slate-200">Row</th>
+                                            <th class="p-2.5 text-left border-b border-slate-200">Reason</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-rose-100">
+                                        @foreach ($this->failedRows as $failedRow)
+                                            <tr class="hover:bg-rose-50/40">
+                                                <td class="p-2.5 pl-4 font-mono text-xs text-slate-900">
+                                                    {{ $failedRow->row_number }}</td>
+                                                <td class="p-2.5 text-xs text-rose-700">
+                                                    @php
+                                                        $fbMsgs = is_array($failedRow->errors)
+                                                            ? collect($failedRow->errors)
+                                                                ->pluck('message')
+                                                                ->implode('; ')
+                                                            : (string) $failedRow->errors;
+                                                    @endphp
+                                                    {{ $fbMsgs }}
+                                                </td>
+                                            </tr>
+                                        @endforeach
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        {{-- Case 2: More than 10 messages, email sent successfully --}}
+                    @elseif ($emailSent)
+                        <div class="p-4 mt-6 border rounded-lg bg-sky-50 border-sky-200">
+                            <div class="flex items-start gap-3">
+                                <svg class="w-5 h-5 mt-0.5 text-sky-600 shrink-0" fill="none" viewBox="0 0 24 24"
+                                    stroke="currentColor" stroke-width="1.5">
+                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                        d="M21.75 9v.906a2.25 2.25 0 0 1-1.183 1.981l-6.478 3.488M2.25 9v.906a2.25 2.25 0 0 0 1.183 1.981l6.478 3.488m8.839 2.51-4.66-2.51m0 0-1.023-.55a2.25 2.25 0 0 0-2.134 0l-1.022.55m0 0-4.661 2.51m16.5 1.615a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V8.844a2.25 2.25 0 0 1 1.183-1.981l7.5-4.039a2.25 2.25 0 0 1 2.134 0l7.5 4.039a2.25 2.25 0 0 1 1.183 1.98V19.5Z" />
+                                </svg>
+                                <div class="text-sm text-sky-800">
+                                    <p class="font-semibold">Validation report emailed</p>
+                                    <p class="mt-1">
+                                        There are <strong>{{ $totalMessages }}</strong> validation messages. To keep
+                                        this page readable, only a summary is shown.
+                                        A complete validation report has been emailed to
+                                        <strong>{{ auth('client')->user()?->email ?? 'your account email' }}</strong>.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {{-- Case 3: More than 10 messages, email failed — show first 10 with a notice --}}
+                    @else
+                        <div class="p-4 mt-6 border rounded-lg bg-amber-50 border-amber-200">
+                            <div class="flex items-start gap-3">
+                                <svg class="w-5 h-5 mt-0.5 text-amber-600 shrink-0" fill="none"
+                                    viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                        d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+                                </svg>
+                                <div class="text-sm text-amber-800">
+                                    <p class="font-semibold">Could not email full report</p>
+                                    <p class="mt-1">
+                                        There are <strong>{{ $totalMessages }}</strong> validation messages. The full
+                                        report could not be emailed.
+                                        Showing the first 10 below.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mt-3 overflow-hidden border rounded-lg border-rose-200">
+                            <div class="flex items-center justify-between px-4 py-2.5 bg-rose-50">
+                                <span class="text-xs font-semibold tracking-wide uppercase text-rose-700">
+                                    Failed rows (first 10) &mdash; <span class="font-normal lowercase">these were
+                                        skipped</span>
+                                </span>
+                                <span class="text-xs text-rose-500">{{ $totalMessages }} total row(s)</span>
+                            </div>
+                            <div class="overflow-y-auto max-h-48">
+                                <table class="w-full text-sm border-collapse">
+                                    <thead class="sticky top-0 bg-slate-50">
+                                        <tr class="text-xs font-semibold tracking-wide uppercase text-slate-500">
+                                            <th class="p-2.5 pl-4 text-left border-b border-slate-200">Row</th>
+                                            <th class="p-2.5 text-left border-b border-slate-200">Reason</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-rose-100">
+                                        @foreach ($this->failedRows->take(10) as $failedRow)
+                                            <tr class="hover:bg-rose-50/40">
+                                                <td class="p-2.5 pl-4 font-mono text-xs text-slate-900">
+                                                    {{ $failedRow->row_number }}</td>
+                                                <td class="p-2.5 text-xs text-rose-700">
+                                                    @php
+                                                        $fbMsgs2 = is_array($failedRow->errors)
+                                                            ? collect($failedRow->errors)
+                                                                ->pluck('message')
+                                                                ->implode('; ')
+                                                            : (string) $failedRow->errors;
+                                                    @endphp
+                                                    {{ $fbMsgs2 }}
+                                                </td>
+                                            </tr>
+                                        @endforeach
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    @endif
+                @endif
+
+                <div class="flex flex-wrap items-center justify-center gap-3 mt-6">
+                    <a href="{{ route('vendor.catalog.index') }}"
+                        class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-slate-900 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                            stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                d="M2.25 7.125C2.25 6.504 2.754 6 3.375 6h6.75c.621 0 1.125.504 1.125 1.125v3.75c0 .621-.504 1.125-1.125 1.125h-6.75a1.125 1.125 0 0 1-1.125-1.125v-3.75ZM14.25 8.625c0-.621.504-1.125 1.125-1.125h5.25c.621 0 1.125.504 1.125 1.125v8.25c0 .621-.504 1.125-1.125 1.125h-5.25a1.125 1.125 0 0 1-1.125-1.125v-8.25ZM3.75 16.125c0-.621.504-1.125 1.125-1.125h5.25c.621 0 1.125.504 1.125 1.125v2.25c0 .621-.504 1.125-1.125 1.125h-5.25a1.125 1.125 0 0 1-1.125-1.125v-2.25Z" />
+                        </svg>
+                        View my catalog
+                    </a>
+
+                    <button wire:click="startOver" wire:loading.attr="disabled"
+                        class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-slate-900 rounded-lg hover:bg-slate-800 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                        Upload another file
+                    </button>
+                </div>
+            </div>
+        @endif
+
+        {{-- ============================================================ --}}
+        {{-- ERROR STATE                                                   --}}
+        {{-- ============================================================ --}}
+        @if ($step === 'error')
+            <div class="p-8 text-center bg-white border rounded-xl border-rose-200">
+                <div class="flex items-center justify-center w-12 h-12 mx-auto rounded-full bg-rose-100">
+                    <svg class="w-6 h-6 text-rose-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                        stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </div>
+                <h2 class="mt-4 text-xl font-semibold text-rose-600">Something went wrong</h2>
+                <p class="max-w-sm mx-auto mt-1 text-sm text-slate-600">
+                    {{ $progress['failure_reason'] ?? 'Please try again or contact support.' }}
+                </p>
+                <button wire:click="startOver" wire:loading.attr="disabled"
+                    class="inline-flex items-center gap-2 px-5 py-2.5 mt-6 text-sm font-semibold text-slate-900 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                    Try again
+                </button>
+            </div>
+        @endif
+
+    </div>
+</div>

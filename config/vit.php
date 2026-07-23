@@ -4,6 +4,17 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Admin Email for Internal Notifications
+    |--------------------------------------------------------------------------
+    |
+    | System administrator email address used for internal notifications such
+    | as catalog review requests and other admin-facing alerts.
+    |
+    */
+    'admin_email' => env('VIT_ADMIN_EMAIL', 'admin@example.com'),
+
+    /*
+    |--------------------------------------------------------------------------
     | VIT Gateway Notification Address
     |--------------------------------------------------------------------------
     |

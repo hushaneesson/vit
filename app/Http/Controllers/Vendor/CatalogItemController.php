@@ -40,6 +40,12 @@ class CatalogItemController extends Controller
         ]);
     }
 
+
+      public function renderUpload()
+    {
+        return view('vendor.catalog.upload');
+    }
+
     public function create()
     {
         return view('vendor.catalog.create');
