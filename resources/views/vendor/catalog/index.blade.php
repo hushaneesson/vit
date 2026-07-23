@@ -24,6 +24,9 @@
             </div>
         </div>
 
+        {{-- Catalog submission status and button --}}
+        @livewire('vendor.catalog-submission-button')
+
         @if ($items !== null)
             <div class="p-2 bg-white rounded-lg shadow-lg">
                 @if ($items->isEmpty())
