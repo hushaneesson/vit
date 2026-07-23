@@ -3,6 +3,7 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use Zap\Enums\ScheduleTypes;
 
 return new class extends Migration
 {
@@ -16,6 +17,8 @@ return new class extends Migration
             $table->morphs('schedulable'); // User, Resource, etc.
             $table->string('name')->nullable();
             $table->text('description')->nullable();
+            $table->enum('schedule_type', ScheduleTypes::values())
+                ->default(ScheduleTypes::CUSTOM);
             $table->date('start_date');
             $table->date('end_date')->nullable();
             $table->boolean('is_recurring')->default(false);
@@ -31,6 +34,8 @@ return new class extends Migration
             $table->index('is_active', 'schedules_is_active_index');
             $table->index('is_recurring', 'schedules_is_recurring_index');
             $table->index('frequency', 'schedules_frequency_index');
+            $table->index('schedule_type', 'schedules_type_index');
+            $table->index(['schedulable_type', 'schedulable_id', 'schedule_type'], 'schedules_schedulable_type_index');
         });
     }
 

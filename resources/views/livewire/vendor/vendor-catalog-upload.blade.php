@@ -262,7 +262,7 @@
                                     <td class="p-3">
                                         <div class="flex items-center gap-2">
                                             <select wire:key="mapping-select-{{ $field->field_key }}"
-                                                wire:model="mapping.{{ $field->field_key }}"
+                                                wire:model.live="mapping.{{ $field->field_key }}"
                                                 class="w-full px-2.5 py-1.5 text-sm border rounded-lg border-slate-300 focus:border-slate-500 focus:ring-1 focus:ring-slate-500">
                                                 <option wire:key="mapping-opt-{{ $field->field_key }}-empty"
                                                     value="">— Do not import</option>

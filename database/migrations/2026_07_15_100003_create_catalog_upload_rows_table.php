@@ -34,6 +34,7 @@ return new class extends Migration
             $table->timestamps();
 
             $table->index(['catalog_upload_id', 'status']);
+            $table->unique(['catalog_upload_id', 'row_number'], 'catalog_upload_rows_row_unique');
         });
     }
 

@@ -32,8 +32,12 @@ return new class extends Migration
         Schema::create('vendor_mapping_template_fields', function (Blueprint $table) {
             $table->id();
 
-            $table->foreignId('vendor_mapping_template_id')->constrained('vendor_mapping_templates')->cascadeOnDelete();
-            $table->foreignId('catalog_field_id')->constrained('catalog_fields')->cascadeOnDelete();
+            $table->foreignId('vendor_mapping_template_id');
+            $table->foreign('vendor_mapping_template_id', 'vmt_fields_template_fk')
+                ->references('id')
+                ->on('vendor_mapping_templates')
+                ->cascadeOnDelete();
+            $table->string('field_key', 100);
 
             $table->string('source_column_name');
 
