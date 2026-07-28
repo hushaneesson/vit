@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
@@ -109,5 +110,14 @@ class CatalogSubmission extends Model
     {
         return $this->belongsToMany(CatalogItem::class, 'catalog_submission_items')
             ->withTimestamps();
+    }
+
+    /*
+     * The snapshot records for this submission.
+     * These contain the actual item data at the time of submission.
+     */
+    public function submissionItems(): HasMany
+    {
+        return $this->hasMany(CatalogSubmissionItem::class);
     }
 }

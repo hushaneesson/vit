@@ -5,6 +5,7 @@ namespace App\Livewire\Vendor;
 use App\Enums\CatalogSubmissionStatus;
 use App\Models\CatalogItem;
 use App\Models\CatalogSubmission;
+use App\Models\CatalogSubmissionItem;
 use App\Notifications\CatalogReadyForReviewNotification;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -133,6 +134,32 @@ class CatalogSubmissionButton extends Component
                     'incomplete_items'       => $incompleteItems,
                     'requested_at'           => now(),
                 ]);
+
+                // Create snapshot records for each exportable catalog item
+                // This preserves the exact data at submission time for auditability
+                foreach ($exportableItems as $item) {
+                    CatalogSubmissionItem::create([
+                        'catalog_submission_id' => $submission->id,
+                        'catalog_item_id'       => $item->id,
+                        'vendor_id'             => $item->vendor_id,
+                        'vendor_sku'            => $item->vendor_sku,
+                        'name'                  => $item->name,
+                        'description'           => $item->description,
+                        'product_type'          => $item->product_type,
+                        'unit_of_measure'       => $item->unit_of_measure,
+                        'manufacturer_sku'      => $item->manufacturer_sku,
+                        'manufacturer_name'     => $item->manufacturer_name,
+                        'brand_name'            => $item->brand_name,
+                        'list_price'            => $item->list_price,
+                        'selling_price'         => $item->selling_price,
+                        'weight'                => $item->weight,
+                        'unspsc_code'           => $item->unspsc_code,
+                        'search_terms'          => $item->search_terms,
+                        'selling_points'        => $item->selling_points,
+                        'specifications'        => $item->specifications,
+                        'classifications'       => $item->classifications,
+                    ]);
+                }
             });
 
             // Dispatch notification only after successful transaction commit
@@ -140,11 +167,6 @@ class CatalogSubmissionButton extends Component
                 \Illuminate\Support\Facades\Notification::route('mail', config('vit.admin_email'))
                     ->notify(new CatalogReadyForReviewNotification(
                         vendorName: $client->vendor->name,
-                        catalogName: 'Catalog Submission',
-                        totalItems: $totalItems,
-                        completeItems: $completeItems,
-                        incompleteItems: $incompleteItems,
-                        submissionId: $submission->id,
                     ));
             }
 

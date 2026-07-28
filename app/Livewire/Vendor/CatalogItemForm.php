@@ -39,7 +39,7 @@ class CatalogItemForm extends Component
 
     public ?string $quantityPerUnit = null;
 
-    public ?string $weight = '0.01';
+    public ?string $weight = null;
 
     // Images
     /** @var array<int, \Livewire\Features\SupportFileUploads\TemporaryUploadedFile> */

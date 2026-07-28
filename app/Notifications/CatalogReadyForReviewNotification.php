@@ -20,18 +20,9 @@ class CatalogReadyForReviewNotification extends Notification implements ShouldQu
 
     /**
      * @param  string  $vendorName     Name of the vendor requesting review
-     * @param  string  $catalogName    Name of the catalog being submitted
-     * @param  int     $totalItems     Total catalog items for this vendor
-     * @param  int     $completeItems  Items with acceptable/excellent status
-     * @param  int     $incompleteItems Items with incomplete status
      */
     public function __construct(
         protected string $vendorName,
-        protected string $catalogName,
-        protected int $totalItems,
-        protected int $completeItems,
-        protected int $incompleteItems,
-        protected int $submissionId,
     ) {}
 
     public function via(object $notifiable): array
@@ -41,22 +32,12 @@ class CatalogReadyForReviewNotification extends Notification implements ShouldQu
 
     public function toMail(object $notifiable): MailMessage
     {
-        $completenessPercent = $this->totalItems > 0
-            ? round(($this->completeItems / $this->totalItems) * 100)
-            : 0;
-
         return (new MailMessage)
-            ->subject("Catalog review requested: {$this->vendorName} — {$this->catalogName}")
+            ->subject("Catalog review requested for {$this->vendorName}")
             ->greeting('Catalog Review Requested')
-            ->line("Vendor **{$this->vendorName}** has submitted their catalog **{$this->catalogName}** for review.")
-            ->line('')
-            ->line('**Catalog Summary:**')
-            ->line("- Total items: {$this->totalItems}")
-            ->line("- Complete (exportable): {$this->completeItems}")
-            ->line("- Incomplete: {$this->incompleteItems}")
-            ->line("- Completeness: {$completenessPercent}%")
+            ->line("Vendor **{$this->vendorName}** has submitted their catalog for review.")
             ->line('')
             ->line('Please review the catalog and approve or reject the submission.')
-            ->action('Review Catalog', route('filament.admin.resources.catalog-submissions.edit', $this->submissionId));
+            ->action('Review Catalog', route('filament.admin.resources.catalog-submissions.index'));
     }
 }

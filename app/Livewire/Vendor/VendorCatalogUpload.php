@@ -89,6 +89,12 @@ class VendorCatalogUpload extends Component
      */
     public bool $validationReportFailed = false;
 
+    /**
+     * File signature of the currently-uploaded file, computed from its
+     * column headers. Used to match against saved templates.
+     */
+    public ?string $currentFileSignature = null;
+
     protected $listeners = ['pollUploadStatus' => 'refreshStatus'];
 
 
@@ -202,6 +208,10 @@ class VendorCatalogUpload extends Component
         $this->catalogUploadId = $upload->id;
         $this->columns = $inspection['columns'];
         $this->sampleRows = $inspection['sample_rows'];
+
+        // Compute the file signature from the column headers and store it
+        // so we can match against saved templates later.
+        $this->currentFileSignature = $inspector->computeFileSignature(self::DISK, $storedPath, $fileType);
 
         // Initialize mapping: every VIT field starts unmapped (null)
         $this->mapping = $this->catalogFields
@@ -373,15 +383,20 @@ class VendorCatalogUpload extends Component
 
     public function startOver(): void
     {
-        $this->reset(['file', 'catalogUploadId', 'columns', 'sampleRows', 'mapping', 'suggestedIndexes', 'saveAsTemplate', 'templateName', 'suggestionsFinalized', 'originalTemplateMapping', 'loadedTemplateName']);
+        $this->reset(['file', 'catalogUploadId', 'columns', 'sampleRows', 'mapping', 'suggestedIndexes', 'saveAsTemplate', 'templateName', 'suggestionsFinalized', 'originalTemplateMapping', 'loadedTemplateName', 'currentFileSignature']);
         $this->progress = ['status' => null, 'total_rows' => 0, 'success_rows' => 0, 'updated_rows' => 0, 'skipped_rows' => 0, 'skipped_item_names' => null, 'error_rows' => 0, 'failure_reason' => null];
         $this->step = 'upload';
     }
 
     private function applySuggestedTemplate(int $vendorId): void
     {
+        // Only match templates that have a file signature AND whose signature
+        // matches the current file. This ensures a template created from
+        // File A is never auto-applied to an incompatible File B.
         $template = VendorMappingTemplate::where('vendor_id', $vendorId)
             ->where('active', true)
+            ->whereNotNull('file_signature')
+            ->where('file_signature', $this->currentFileSignature)
             ->with('fields')
             ->latest()
             ->first();
@@ -503,6 +518,7 @@ class VendorCatalogUpload extends Component
             'vendor_id' => $upload->vendor_id,
             'created_by_client_id' => $upload->client_id,
             'name' => $this->templateName,
+            'file_signature' => $this->currentFileSignature,
         ]);
 
         foreach ($upload->columnMappings as $mapping) {

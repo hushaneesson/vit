@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Models\CatalogExport;
 use App\Models\CatalogItem;
+use App\Models\CatalogSubmissionItem;
+use App\Models\VitFieldDefinition;
 use App\Models\Vendor;
 use App\Enums\CatalogExportStatus;
 use Illuminate\Support\Collection;
@@ -171,15 +173,23 @@ class CatalogExportService
 
     /**
      * Generate Excel file from an existing CatalogExport linked to a CatalogSubmission.
-     * Uses the submission's snapshot of catalog items (catalog_submission_items pivot table).
+     * Uses the submission's snapshot records (catalog_submission_items table).
      *
      * @param  CatalogExport  $export  The export record to process
      * @return string                  Relative storage path to the generated .xlsx
      */
     public function generateFromSubmission(CatalogExport $export): string
     {
-        // Load items from the submission snapshot
-        $items = $export->submission->catalogItems()->get();
+        // Load items from the submission snapshot (preserves data at submission time)
+        $snapshotItems = $export->submission->submissionItems()->get();
+
+        // Convert snapshot items to a format compatible with generateAndStore
+        // We'll map them to a Collection that mimics CatalogItem models
+        $items = $snapshotItems->map(function (CatalogSubmissionItem $snapshot) {
+            // Create a minimal CatalogItem-like object from the snapshot
+            return new CatalogItem((array) $snapshot->getAttributes());
+        });
+
         $vendor = $export->vendor;
         $catalogName = 'Export ' . $vendor->name . ' ' . now()->format('Y-m-d');
         $disk = $export->disk ?? 'local';

@@ -16,6 +16,7 @@ class VendorMappingTemplate extends Model
         'created_by_client_id',
         'name',
         'active',
+        'file_signature',
     ];
 
     protected $casts = [

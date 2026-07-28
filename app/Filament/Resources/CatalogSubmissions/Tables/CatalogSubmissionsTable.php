@@ -15,6 +15,7 @@ use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class CatalogSubmissionsTable
@@ -66,7 +67,7 @@ class CatalogSubmissionsTable
             ->defaultSort('requested_at', 'desc')
             ->recordActions([
                 Action::make('approve')
-                    ->label('Approve & Generate Export')
+                    ->label('Approve & Generate Excel File')
                     ->icon('heroicon-o-check-circle')
                     ->color('success')
                     ->visible(fn(CatalogSubmission $record) => $record->status === CatalogSubmissionStatus::ReviewRequested)
@@ -84,8 +85,8 @@ class CatalogSubmissionsTable
                             return;
                         }
 
-                        // Guard: must have catalog items attached
-                        $itemCount = $record->catalogItems()->count();
+                        // Guard: must have catalog items attached (via submissionItems snapshot)
+                        $itemCount = $record->submissionItems()->count();
                         if ($itemCount === 0) {
                             Notification::make()
                                 ->title('Cannot approve')
@@ -98,11 +99,19 @@ class CatalogSubmissionsTable
                         try {
                             DB::transaction(function () use ($record) {
                                 // 1. Update submission status
-                                $record->update([
+                                $userId = auth()->id();
+
+                                $updateData = [
                                     'status' => CatalogSubmissionStatus::Approved,
-                                    'approved_by' => auth()->id(),
                                     'approved_at' => now(),
-                                ]);
+                                ];
+
+                                // Only set approved_by if we have a valid user ID
+                                if ($userId !== null) {
+                                    $updateData['approved_by'] = $userId;
+                                }
+
+                                $record->update($updateData);
 
                                 // 2. Create CatalogExport linked to this submission
                                 // Enforce 1:1 relationship at DB level; catch duplicate dispatch
@@ -194,6 +203,40 @@ class CatalogSubmissionsTable
                                 ->danger()
                                 ->send();
                         }
+                    }),
+                Action::make('downloadExcel')
+                    ->label('Download Excel File')
+                    ->icon('heroicon-o-arrow-down-on-square')
+                    ->color('info')
+                    ->visible(fn(CatalogSubmission $record) => in_array($record->status, [
+                        CatalogSubmissionStatus::Approved,
+                        CatalogSubmissionStatus::ReadyForUpload,
+                        CatalogSubmissionStatus::Uploaded,
+                    ]))
+                    ->action(function (CatalogSubmission $record) {
+                        $export = $record->catalogExport;
+
+                        if (!$export) {
+                            Notification::make()
+                                ->title('File not available')
+                                ->body('The Excel file has not been generated yet')
+                                ->warning()
+                                ->send();
+                            return;
+                        }
+
+                        if (!$export->file_path || !Storage::disk($export->disk)->exists($export->file_path)) {
+                            Notification::make()
+                                ->title('File not found')
+                                ->body('The generated file is missing from storage')
+                                ->danger()
+                                ->send();
+                            return;
+                        }
+
+                        $filename = 'catalog-submission-' . $record->id . '-' . now()->format('Y-m-d') . '.xlsx';
+
+                        return Storage::disk($export->disk)->download($export->file_path, $filename);
                     }),
                 Action::make('confirmUpload')
                     ->label('Confirm VIT Upload')
