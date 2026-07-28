@@ -22,13 +22,11 @@ class CatalogSubmissionReviewedNotification extends Notification implements Shou
 
     /**
      * @param  string      $vendorName      Name of the vendor
-     * @param  string      $catalogName     Name of the catalog submitted
      * @param  string      $status          'approved' or 'rejected'
      * @param  string|null $rejectionReason Reason for rejection (null if approved)
      */
     public function __construct(
         protected string $vendorName,
-        protected string $catalogName,
         protected string $status,
         protected ?string $rejectionReason = null,
     ) {}
@@ -42,17 +40,17 @@ class CatalogSubmissionReviewedNotification extends Notification implements Shou
     {
         if ($this->status === 'approved') {
             return (new MailMessage)
-                ->subject("Catalog approved: {$this->vendorName} — {$this->catalogName}")
+                ->subject("Catalog approved: {$this->vendorName}")
                 ->greeting('Catalog Approved')
-                ->line("Your catalog **{$this->catalogName}** has been approved by the admin.")
+                ->line("Your catalog has been approved by the admin.")
                 ->line('The Excel export is now being generated. You will be notified when it is ready.')
                 ->salutation('— VIT System');
         }
 
         return (new MailMessage)
-            ->subject("Catalog review update: {$this->vendorName} — {$this->catalogName}")
+            ->subject("Catalog review update: {$this->vendorName}")
             ->greeting('Catalog Review Update')
-            ->line("Your catalog **{$this->catalogName}** has been reviewed and was not approved at this time.")
+            ->line("Your catalog has been reviewed and was not approved at this time.")
             ->line('')
             ->line('**Reason:**')
             ->line($this->rejectionReason ?? 'No specific reason provided.')

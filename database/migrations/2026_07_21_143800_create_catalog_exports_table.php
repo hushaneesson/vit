@@ -8,8 +8,8 @@ return new class extends Migration
 {
     /**
      * Tracks each catalog export generation run. One row per generated .xlsx
-     * file, recording the vendor, catalog name, file metadata, and the
-     * lifecycle status (pending → generating → completed | failed).
+     * file, recording the vendor, file metadata, and the lifecycle status
+     * (pending → generating → completed | failed).
      *
      * This table exists independently of the submissions pipeline — it's the
      * source-of-truth for the "generate Excel → store on disk → (future: FTP)"
@@ -22,7 +22,6 @@ return new class extends Migration
             $table->id();
 
             $table->foreignId('vendor_id')->constrained('vendors')->cascadeOnDelete();
-            $table->string('catalog_name');
 
             $table->string('file_path')->nullable();        // relative storage path to the .xlsx
             $table->string('disk')->default('local');        // which filesystem disk it lives on

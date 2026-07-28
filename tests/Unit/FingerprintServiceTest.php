@@ -17,7 +17,6 @@ class FingerprintServiceTest extends TestCase
             'description' => 'Test Description',
             'vendor_sku' => 'SKU-123',
             'vendor_id' => 1,
-            'catalog_name' => 'Test Catalog',
         ];
 
         $fingerprint1 = FingerprintService::compute($data);
@@ -34,14 +33,12 @@ class FingerprintServiceTest extends TestCase
         $data1 = [
             'name' => 'Product A',
             'vendor_id' => 1,
-            'catalog_name' => 'Catalog 1',
             'data_fingerprint' => null,
         ];
 
         $data2 = [
             'name' => 'Product A',
             'vendor_id' => 999,
-            'catalog_name' => 'Catalog 2',
             'data_fingerprint' => null,
         ];
 

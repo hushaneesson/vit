@@ -21,7 +21,6 @@ class CatalogExport extends Model
     protected $fillable = [
         'vendor_id',
         'catalog_submission_id',
-        'catalog_name',
         'file_path',
         'disk',
         'file_size',

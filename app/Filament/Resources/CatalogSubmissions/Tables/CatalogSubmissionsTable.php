@@ -110,7 +110,6 @@ class CatalogSubmissionsTable
                                     $export = CatalogExport::create([
                                         'vendor_id'             => $record->vendor_id,
                                         'catalog_submission_id' => $record->id,
-                                        'catalog_name'          => $record->catalogUpload?->catalog_name ?? 'Catalog Export',
                                         'total_items'           => $record->complete_items,
                                         'disk'                  => 'spaces',
                                         'status'                => \App\Enums\CatalogExportStatus::Pending,
@@ -178,7 +177,6 @@ class CatalogSubmissionsTable
                                 \Illuminate\Support\Facades\Notification::route('mail', $client->email)
                                     ->notify(new CatalogSubmissionReviewedNotification(
                                         vendorName: $record->vendor->name,
-                                        catalogName: $record->catalogUpload?->catalog_name ?? 'Untitled',
                                         status: 'rejected',
                                         rejectionReason: $data['rejection_reason'],
                                     ));

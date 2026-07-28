@@ -19,7 +19,7 @@ class VitApiClient
 {
     /**
      * POST the submission's stored Excel file to VIT as multipart form
-     * data with `file`, `vendor_name`, `catalog_name`.
+     * data with `file`, `vendor_name`.
      *
      * @throws ConnectionException
      */
@@ -38,7 +38,6 @@ class VitApiClient
             ->attach('file', file_get_contents($absolutePath), basename($submission->file_path))
             ->post(config('vit.api.endpoint'), [
                 'vendor_name' => $submission->vendor?->name,
-                'catalog_name' => $submission->catalog_name,
             ]);
     }
 }

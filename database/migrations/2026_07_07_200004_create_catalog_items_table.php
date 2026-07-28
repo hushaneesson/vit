@@ -20,7 +20,6 @@ return new class extends Migration
             $table->string('brand_name')->nullable();
 
             $table->string('vendor_sku');
-            $table->string('catalog_name')->nullable();
             $table->foreignId('catalog_upload_id')->nullable()->constrained('catalog_uploads')->nullOnDelete();
             $table->string('data_fingerprint', 32)->nullable();
 

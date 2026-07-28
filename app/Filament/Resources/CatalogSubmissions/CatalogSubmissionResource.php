@@ -38,9 +38,6 @@ class CatalogSubmissionResource extends Resource
                     \Filament\Schemas\Components\View::make('requested_at')
                         ->view('filament.forms.components.text-input')
                         ->default(fn($record) => $record->requested_at?->format('M j, Y g:i A') ?? '—'),
-                    \Filament\Schemas\Components\View::make('catalog_name')
-                        ->view('filament.forms.components.text-input')
-                        ->default('—'),
                 ])->columns(2),
 
             \Filament\Schemas\Components\Section::make('Submission Statistics')

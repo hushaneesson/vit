@@ -19,7 +19,7 @@ class BackfillCatalogFingerprints extends Command
      * because they are metadata, not actual content data.
      * MUST match the exclusions used in ProcessValidatedRowsJob::computeFingerprint.
      */
-    private array $nonComparableColumns = ['vendor_sku', 'vendor_id', 'catalog_name', 'catalog_upload_id', 'data_fingerprint'];
+    private array $nonComparableColumns = ['vendor_sku', 'vendor_id', 'catalog_upload_id', 'data_fingerprint'];
 
     public function handle(): int
     {

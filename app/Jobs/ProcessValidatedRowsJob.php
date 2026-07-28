@@ -75,7 +75,6 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
         try {
             $vendor = $upload->vendor;
-            $catalogName = $upload->catalog_name ?? 'Imported Catalog ' . $upload->created_at->format('Y-m-d');
 
             // Build field_key => CatalogItem column mapping
             $fieldToColumn = $this->fieldKeyToColumnMap();
@@ -85,7 +84,7 @@ class ProcessValidatedRowsJob implements ShouldQueue
                 ->cursor();
 
             // Columns that should NOT be compared when checking for changes
-            $nonComparableColumns = ['vendor_sku', 'vendor_id', 'catalog_name', 'catalog_upload_id', 'data_fingerprint'];
+            $nonComparableColumns = ['vendor_sku', 'vendor_id', 'catalog_upload_id', 'data_fingerprint'];
 
             $createdCount = 0;
             $updatedCount = 0;
@@ -104,7 +103,6 @@ class ProcessValidatedRowsJob implements ShouldQueue
                 // Build the attribute map from the row data
                 $attrs = [
                     'vendor_id' => $vendor->id,
-                    'catalog_name' => $catalogName,
                     'catalog_upload_id' => $upload->id,
                 ];
 
@@ -139,7 +137,7 @@ class ProcessValidatedRowsJob implements ShouldQueue
                 }
 
                 // Compute a deterministic fingerprint of the content data only
-                // (excludes metadata like vendor_id, catalog_name, catalog_upload_id)
+                // (excludes metadata like vendor_id, catalog_upload_id)
                 $fingerprint = $this->computeFingerprint($attrs, $nonComparableColumns);
 
                 // STEP 1: Check by fingerprint first — exact content match
@@ -240,7 +238,7 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
                         Notification::route('mail', $client->email)
                             ->notify(new CatalogUploadValidationReportNotification(
-                                catalogName: $upload->catalog_name,
+                                catalogName: 'Upload #' . $upload->id,
                                 processedAt: $upload->processing_completed_at,
                                 totalErrors: $upload->error_rows,
                                 totalWarnings: 0,

@@ -36,7 +36,7 @@ class CatalogUploadValidationReportTest extends TestCase
             ->create([
                 'client_id' => $client->id,
                 'vendor_id' => $vendor->id,
-                'catalog_name' => 'Test Catalog',
+                // catalog_name removed from schema
                 'status' => CatalogUploadStatus::Processing,
                 'processing_started_at' => now(),
             ]);
@@ -193,7 +193,7 @@ class CatalogUploadValidationReportTest extends TestCase
             ->get(['row_number', 'errors']);
 
         $notification = new CatalogUploadValidationReportNotification(
-            catalogName: $upload->catalog_name,
+            catalogName: 'Upload #' . $upload->id,
             processedAt: $upload->processing_completed_at,
             totalErrors: $upload->error_rows,
             totalWarnings: 0,
@@ -203,7 +203,6 @@ class CatalogUploadValidationReportTest extends TestCase
 
         $rendered = $notification->toMail($client)->render();
 
-        $this->assertStringContainsString('Test Catalog', $rendered);
         $this->assertStringContainsString('Total error rows:', $rendered);
         $this->assertStringContainsString('5', $rendered);
         $this->assertStringContainsString('Total warning rows:', $rendered);
@@ -230,7 +229,7 @@ class CatalogUploadValidationReportTest extends TestCase
         ]);
 
         $notification = new CatalogUploadValidationReportNotification(
-            catalogName: $upload->catalog_name,
+            catalogName: 'Upload #' . $upload->id,
             processedAt: $upload->processing_completed_at,
             totalErrors: $upload->error_rows,
             totalWarnings: 2,
@@ -247,7 +246,7 @@ class CatalogUploadValidationReportTest extends TestCase
         $this->assertStringContainsString('Description is shorter than recommended.', $rendered);
     }
 
-    public function test_notification_with_null_catalog_name(): void
+    public function test_notification_with_upload_id(): void
     {
         $client = Client::factory()->create([
             'vendor_id' => Vendor::factory()->create()->id,
@@ -266,7 +265,7 @@ class CatalogUploadValidationReportTest extends TestCase
         );
 
         $rendered = $notification->toMail($client)->render();
-        $this->assertStringContainsString('Untitled', $rendered);
+        $this->assertStringContainsString('Total error rows:', $rendered);
     }
 
     // -----------------------------------------------------------------------

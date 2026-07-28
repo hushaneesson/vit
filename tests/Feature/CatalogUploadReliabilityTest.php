@@ -151,10 +151,10 @@ class CatalogUploadReliabilityTest extends TestCase
      */
     public function test_fingerprint_excludes_metadata_columns(): void
     {
-        $data1 = ['name' => 'Product', 'vendor_sku' => 'SKU-1', 'vendor_id' => 1, 'catalog_name' => 'Catalog'];
-        $data2 = ['name' => 'Product', 'vendor_sku' => 'SKU-2', 'vendor_id' => 999, 'catalog_name' => 'Other'];
+        $data1 = ['name' => 'Product', 'vendor_sku' => 'SKU-1', 'vendor_id' => 1];
+        $data2 = ['name' => 'Product', 'vendor_sku' => 'SKU-2', 'vendor_id' => 999];
 
-        // Both should produce same fingerprint because vendor_sku, vendor_id, catalog_name are excluded
+        // Both should produce same fingerprint because vendor_sku, vendor_id are excluded
         $this->assertEquals(
             FingerprintService::compute($data1),
             FingerprintService::compute($data2),

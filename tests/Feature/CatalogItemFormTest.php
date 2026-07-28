@@ -34,9 +34,12 @@ class CatalogItemFormTest extends TestCase
         $level1 = ProductHierarchy::create(['level' => 1, 'name' => 'Office Supplies', 'path' => 'Office Supplies', 'active' => true]);
         $level2 = ProductHierarchy::create(['level' => 2, 'name' => 'Paper Products', 'path' => 'Office Supplies!Paper Products', 'parent_id' => $level1->id, 'active' => true]);
         $level3 = ProductHierarchy::create([
-            'level' => 3, 'name' => 'Copy Paper',
+            'level' => 3,
+            'name' => 'Copy Paper',
             'path' => 'Office Supplies!Paper Products!Copy Paper',
-            'parent_id' => $level2->id, 'hierarchy_number' => '10001', 'active' => true,
+            'parent_id' => $level2->id,
+            'hierarchy_number' => '10001',
+            'active' => true,
         ]);
 
         CommodityType::create(['name' => 'Use the name of Category Level 2', 'sort_order' => 0, 'active' => true]);
@@ -192,10 +195,10 @@ class CatalogItemFormTest extends TestCase
 
         $itemB = CatalogItem::create([
             'vendor_id' => $vendorB->id,
-            'client_id' => Client::create(['vendor_id' => $vendorB->id, 'name' => 'B User', 'email' => 'b@example.com', 'status' => 'active'])->id,
-            'catalog_name' => 'Vendor B Catalog',
-            'vendor_part_number' => 'B-SKU-1',
-            'field_values' => [],
+            'name' => 'Test Item B',
+            'description' => 'Desc',
+            'vendor_sku' => 'B-SKU-1',
+            'unit_of_measure' => 'EA',
             'status' => 'ready',
         ]);
 
@@ -213,10 +216,10 @@ class CatalogItemFormTest extends TestCase
 
         CatalogItem::create([
             'vendor_id' => $vendor->id,
-            'client_id' => $clientOne->id,
-            'catalog_name' => 'Shared Catalog',
-            'vendor_part_number' => 'SKU-SHARED-1',
-            'field_values' => [],
+            'name' => 'Shared Item',
+            'description' => 'Desc',
+            'vendor_sku' => 'SKU-SHARED-1',
+            'unit_of_measure' => 'EA',
             'status' => 'ready',
         ]);
 

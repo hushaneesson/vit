@@ -30,7 +30,7 @@
                     <tbody class="divide-y divide-gray-200">
                         @foreach ($submissions as $submission)
                             <tr>
-                                <td class="px-4 py-2">{{ $submission->catalog_name }}</td>
+                                <td class="px-4 py-2">Submission #{{ $submission->id }}</td>
                                 <td class="px-4 py-2">{{ $submission->total_items }}</td>
                                 <td class="px-4 py-2">
                                     {{ ucfirst(str_replace('_', ' ', $submission->status?->value ?? $submission->status)) }}

@@ -18,7 +18,6 @@ class CatalogUploadFactory extends Factory
             'client_id' => Client::factory(),
             'vendor_id' => fn(array $attrs) => Client::find($attrs['client_id'])?->vendor_id ?? Vendor::factory(),
             'original_filename' => $this->faker->word() . '.csv',
-            'catalog_name' => $this->faker->words(3, true),
             'file_path' => 'catalog-uploads/' . $this->faker->uuid() . '.csv',
             'disk' => 'local',
             'file_type' => 'csv',

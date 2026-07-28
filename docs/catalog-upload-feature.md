@@ -21,10 +21,10 @@ Upload File → Map Columns → Validate Rows → Store in catalog_items → Gen
 
 **File:** `app/Livewire/Vendor/VendorCatalogUpload.php` (line 127)
 
-- Vendor provides a **Catalog Name** and selects a file (CSV, XLS, or XLSX, up to 50MB)
+- Vendor selects a file (CSV, XLS, or XLSX, up to 50MB)
 - File is stored on DigitalOcean Spaces (`spaces` disk) at `catalog-uploads/{vendor_id}/`
 - A `CatalogUpload` record is created with:
-    - `vendor_id`, `client_id`, `catalog_name`, `file_path`, `disk`, `file_type`
+    - `vendor_id`, `client_id`, `file_path`, `disk`, `file_type`
     - `status = 'uploaded'`
 - The file is inspected (header row + sample rows extracted) using `CatalogFileInspectionService`
 - The UI advances to the **Mapping** step
@@ -93,7 +93,7 @@ Upload File → Map Columns → Validate Rows → Store in catalog_items → Gen
 **File:** `app/Services/SubmissionService.php`
 
 - Triggered manually or automatically after catalog items are created
-- Queries `CatalogItem` by `vendor_id` + `catalog_name`
+- Queries `CatalogItem` by `vendor_id`
 - Uses `CatalogExcelGenerator` to build a VIT-compliant `.xlsx` workbook:
     - Column order, headers, and formatting come from `CatalogFieldDefinition` table (admin-managed)
     - Product images are embedded as real images (not URLs)
@@ -173,7 +173,7 @@ uploaded → mapping → queued → processing → processing_items → complete
 
 The UI is a single-page wizard with 4 steps:
 
-1. **Upload** — File picker + catalog name
+1. **Upload** — File picker
 2. **Map Columns** — Table with dropdowns for each column
 3. **Processing** — Polling screen with live counts
 4. **Summary** — Results with created/updated/error counts, failed row details

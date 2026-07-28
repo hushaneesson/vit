@@ -17,7 +17,6 @@ class CatalogUpload extends Model
         'client_id',
         'vendor_id',
         'original_filename',
-        'catalog_name',
         'file_path',
         'disk',
         'file_type',

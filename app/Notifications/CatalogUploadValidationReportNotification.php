@@ -52,9 +52,6 @@ class CatalogUploadValidationReportNotification extends Notification implements 
             ->subject('Catalog Upload Validation Report')
             ->greeting('Catalog Upload Validation Report');
 
-        // Catalog name
-        $mail->line('**Upload name:** ' . ($this->catalogName ?? 'Untitled'));
-
         // Processed date/time
         $processedAt = $this->processedAt
             ? \Carbon\Carbon::parse($this->processedAt)->format('Y-m-d H:i:s T')

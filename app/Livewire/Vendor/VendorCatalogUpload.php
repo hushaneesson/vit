@@ -25,7 +25,6 @@ class VendorCatalogUpload extends Component
     // upload | mapping | processing | summary | error
     public string $step = 'upload';
 
-    public string $catalogName = '';
 
     public $file; // Livewire temporary upload
 
@@ -92,19 +91,11 @@ class VendorCatalogUpload extends Component
 
     protected $listeners = ['pollUploadStatus' => 'refreshStatus'];
 
-    /**
-     * Trim the catalog name whenever it's updated via the input field.
-     */
-    public function updatedCatalogName($value): void
-    {
-        $this->catalogName = trim($value);
-    }
 
     public function rules(): array
     {
         return [
             'file' => ['required', 'file', 'mimes:csv,txt,xlsx,xls', 'max:51200'], // 50MB
-            'catalogName' => ['nullable', 'string', 'max:255'],
         ];
     }
 
@@ -200,7 +191,6 @@ class VendorCatalogUpload extends Component
             'client_id' => $client->id,
             'vendor_id' => $client->vendor_id,
             'original_filename' => $this->file->getClientOriginalName(),
-            'catalog_name' => $this->catalogName ?: $this->file->getClientOriginalName(),
             'file_path' => $storedPath,
             'disk' => self::DISK,
             'file_type' => $fileType,

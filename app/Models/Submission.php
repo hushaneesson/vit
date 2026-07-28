@@ -13,7 +13,6 @@ class Submission extends Model
     protected $fillable = [
         'vendor_id',
         'client_id',
-        'catalog_name',
         'file_path',
         'file_size',
         'product_count',

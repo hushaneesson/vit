@@ -11,7 +11,6 @@ class FingerprintService
     public const EXCLUDE_COLUMNS = [
         'vendor_sku',
         'vendor_id',
-        'catalog_name',
         'catalog_upload_id',
         'data_fingerprint'
     ];

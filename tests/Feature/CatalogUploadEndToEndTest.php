@@ -62,7 +62,6 @@ class CatalogUploadEndToEndTest extends TestCase
             'vendor_id' => $this->vendor->id,
             'client_id' => $this->client->id,
             'original_filename' => 'test-upload.csv',
-            'catalog_name' => 'Test Catalog',
             'file_path' => 'catalog-uploads/test.csv',
             'disk' => 'local',
             'file_type' => 'csv',
@@ -126,7 +125,6 @@ class CatalogUploadEndToEndTest extends TestCase
     public function test_stale_processing_job_is_recovered(): void
     {
         $upload = $this->createUpload([
-            'catalog_name' => 'Stale Catalog',
             'status' => CatalogUploadStatus::ProcessingItems,
             'processing_started_at' => now()->subHours(2), // Stale - started 2 hours ago
         ]);
@@ -149,7 +147,6 @@ class CatalogUploadEndToEndTest extends TestCase
     {
         $upload = $this->createUpload([
             'original_filename' => 'missing-file.csv',
-            'catalog_name' => 'Missing File Catalog',
             'file_path' => '/nonexistent/path/to/file.csv',
             'status' => CatalogUploadStatus::Queued,
         ]);
@@ -175,7 +172,6 @@ class CatalogUploadEndToEndTest extends TestCase
     public function test_mixed_valid_and_invalid_rows(): void
     {
         $upload = $this->createUpload([
-            'catalog_name' => 'Mixed Catalog',
             'status' => CatalogUploadStatus::Processing,
         ]);
 
@@ -210,7 +206,6 @@ class CatalogUploadEndToEndTest extends TestCase
     public function test_existing_item_with_same_sku_is_updated(): void
     {
         $upload = $this->createUpload([
-            'catalog_name' => 'Update Catalog',
             'status' => CatalogUploadStatus::Processing,
         ]);
 
@@ -250,7 +245,6 @@ class CatalogUploadEndToEndTest extends TestCase
     public function test_duplicate_fingerprint_skips_creation(): void
     {
         $upload = $this->createUpload([
-            'catalog_name' => 'Duplicate Catalog',
             'status' => CatalogUploadStatus::Processing,
         ]);
 
@@ -290,7 +284,6 @@ class CatalogUploadEndToEndTest extends TestCase
     public function test_race_condition_handling(): void
     {
         $upload = $this->createUpload([
-            'catalog_name' => 'Race Catalog',
             'status' => CatalogUploadStatus::Processing,
         ]);
 
@@ -326,7 +319,6 @@ class CatalogUploadEndToEndTest extends TestCase
     public function test_no_valid_rows_results_in_completed_status(): void
     {
         $upload = $this->createUpload([
-            'catalog_name' => 'No Valid Catalog',
             'status' => CatalogUploadStatus::Processing,
         ]);
 

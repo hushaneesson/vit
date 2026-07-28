@@ -70,18 +70,6 @@
                     Upload your file exactly as it is. We'll help you match the columns in the next step.
                 </p>
 
-                <div class="mt-6">
-                    <label for="catalog-name" class="block text-sm font-medium text-slate-700">
-                        Catalog Name
-                    </label>
-                    <input id="catalog-name" type="text" wire:model="catalogName"
-                        placeholder="e.g. Q3 2026 Product Catalog"
-                        class="block w-full px-3 py-2 mt-1 text-sm border rounded-lg border-slate-300 focus:border-slate-500 focus:ring-1 focus:ring-slate-500" />
-                    @error('catalogName')
-                        <p class="mt-1 text-sm text-rose-600">{{ $message }}</p>
-                    @enderror
-                </div>
-
                 {{-- Drop zone --}}
                 <label for="catalog-file" @class([
                     'relative flex flex-col items-center justify-center gap-2 px-6 py-12 mt-4 text-center transition border-2 border-dashed rounded-lg cursor-pointer',
@@ -124,11 +112,6 @@
                 @error('file')
                     <p class="mt-3 text-sm text-rose-600">{{ $message }}</p>
                 @enderror
-
-                <p class="mt-3 text-xs text-slate-400">
-                    Your catalog will be named
-                    &ldquo;{{ $catalogName ?: $file?->getClientOriginalName() ?: 'Untitled' }}&rdquo;
-                </p>
 
                 <button wire:click="uploadFile" wire:loading.attr="disabled" wire:target="uploadFile"
                     @disabled(!$file)

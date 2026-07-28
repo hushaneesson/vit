@@ -20,7 +20,7 @@ return new class extends Migration
             $table->foreignId('vendor_id')->constrained('vendors')->cascadeOnDelete();
 
             $table->string('original_filename');
-            $table->string('catalog_name')->nullable();
+
             $table->string('file_path'); // path on the configured disk (DigitalOcean Spaces)
             $table->string('disk')->default('spaces');
             $table->enum('file_type', ['csv', 'xlsx', 'xls']);

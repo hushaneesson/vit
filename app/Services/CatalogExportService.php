@@ -181,7 +181,7 @@ class CatalogExportService
         // Load items from the submission snapshot
         $items = $export->submission->catalogItems()->get();
         $vendor = $export->vendor;
-        $catalogName = $export->catalog_name;
+        $catalogName = 'Export ' . $vendor->name . ' ' . now()->format('Y-m-d');
         $disk = $export->disk ?? 'local';
 
         // Also need to store disk on export for later reference
@@ -202,7 +202,6 @@ class CatalogExportService
 
         $export = CatalogExport::create([
             'vendor_id'             => $vendor->id,
-            'catalog_name'          => $catalogName,
             'status'                => CatalogExportStatus::Generating,
             'total_items'           => $items->count(),
             'generating_started_at' => now(),

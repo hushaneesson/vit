@@ -28,10 +28,10 @@ class CatalogUploadFailedNotification extends Notification implements ShouldQueu
         return (new MailMessage)
             ->subject('VIT catalog upload failed — retry needed')
             ->greeting('Upload failed')
-            ->line('Vendor: '.$this->submission->vendor?->name)
-            ->line('Catalog: '.$this->submission->catalog_name)
-            ->line('Attempt #'.$this->submission->upload_attempts)
-            ->line('Error: '.$this->submission->last_upload_error)
-            ->action('Review & Retry', url('/admin/submissions/'.$this->submission->id.'/edit'));
+            ->line('Vendor: ' . $this->submission->vendor?->name)
+            ->line('Catalog: Upload #' . $this->submission->id)
+            ->line('Attempt #' . $this->submission->upload_attempts)
+            ->line('Error: ' . $this->submission->last_upload_error)
+            ->action('Review & Retry', url('/admin/submissions/' . $this->submission->id . '/edit'));
     }
 }
