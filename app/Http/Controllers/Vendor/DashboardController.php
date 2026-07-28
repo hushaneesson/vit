@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Vendor;
 
 use App\Http\Controllers\Controller;
+use App\Models\CatalogSubmission;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -18,7 +19,10 @@ class DashboardController extends Controller
         $client = Auth::guard('client')->user();
         $vendor = $client->vendor;
 
-        $submissions = $vendor->submissions()->latest('submission_date')->limit(10)->get();
+        $submissions = $vendor->catalogSubmissions()
+            ->latest('requested_at')
+            ->limit(10)
+            ->get();
         $catalogItemCount = $vendor->catalogItems()->count();
 
         return view('vendor.dashboard', [

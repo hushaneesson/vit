@@ -3,9 +3,9 @@
 namespace App\Filament\Resources\CatalogSubmissions\Tables;
 
 use App\Enums\CatalogSubmissionStatus;
+use App\Jobs\GenerateCatalogExportJob;
 use App\Models\CatalogExport;
 use App\Models\CatalogSubmission;
-use App\Jobs\GenerateCatalogExportJob;
 use App\Notifications\CatalogSubmissionReviewedNotification;
 use Filament\Actions\Action;
 use Filament\Actions\DeleteBulkAction;
@@ -15,6 +15,7 @@ use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class CatalogSubmissionsTable
 {
@@ -25,42 +26,22 @@ class CatalogSubmissionsTable
                 TextColumn::make('vendor.name')
                     ->searchable()
                     ->sortable(),
-                TextColumn::make('catalogUpload.catalog_name')
-                    ->label('Catalog')
+                TextColumn::make('requestedByClient.name')
                     ->searchable()
-                    ->default('—'),
-                TextColumn::make('requested_at')
-                    ->label('Requested')
-                    ->dateTime()
-                    ->sortable(),
+                    ->description(fn($record) => $record->requested_at->format('Y-m-d')),
                 TextColumn::make('total_items')
                     ->numeric()
                     ->sortable(),
-                TextColumn::make('complete_items')
-                    ->numeric()
-                    ->sortable()
-                    ->color(fn($record) => $record->total_items > 0 && $record->complete_items === $record->total_items ? 'success' : 'warning'),
-                TextColumn::make('incomplete_items')
-                    ->numeric()
-                    ->sortable()
-                    ->color('danger'),
-                TextColumn::make('completeness')
-                    ->label('Completeness')
-                    ->state(fn(CatalogSubmission $record): string => $record->total_items > 0
-                        ? round(($record->complete_items / $record->total_items) * 100) . '%'
-                        : '0%')
-                    ->color(fn(CatalogSubmission $record): string => $record->total_items > 0 && round(($record->complete_items / $record->total_items) * 100) >= 80
-                        ? 'success'
-                        : 'warning'),
                 TextColumn::make('status')
                     ->badge()
-                    ->color(fn(string $state): string => match ($state) {
-                        'draft' => 'gray',
-                        'review_requested' => 'warning',
-                        'approved' => 'success',
-                        'rejected' => 'danger',
-                        'ready_for_upload' => 'info',
-                        'uploaded' => 'success',
+                    ->formatStateUsing(fn($state) => Str::headline($state->value ?? ''))
+                    ->color(fn($state): string => match ($state) {
+                        CatalogSubmissionStatus::Draft => 'gray',
+                        CatalogSubmissionStatus::ReviewRequested => 'warning',
+                        CatalogSubmissionStatus::Approved => 'success',
+                        CatalogSubmissionStatus::Rejected => 'danger ',
+                        CatalogSubmissionStatus::ReadyForUpload => 'info',
+                        CatalogSubmissionStatus::Uploaded => 'success',
                         default => 'gray',
                     }),
                 TextColumn::make('created_at')
@@ -83,7 +64,6 @@ class CatalogSubmissionsTable
                     ->options(fn() => \App\Models\Vendor::query()->pluck('name', 'id')),
             ])
             ->defaultSort('requested_at', 'desc')
-            ->recordUrl(fn(CatalogSubmission $record): string => route('filament.admin.resources.catalog-submissions.edit', $record))
             ->recordActions([
                 Action::make('approve')
                     ->label('Approve & Generate Export')

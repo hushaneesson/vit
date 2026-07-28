@@ -133,11 +133,6 @@ class CatalogSubmissionButton extends Component
                     'incomplete_items'       => $incompleteItems,
                     'requested_at'           => now(),
                 ]);
-
-                // Snapshot the exact CatalogItem IDs included in this submission
-                $submission->catalogItems()->attach(
-                    $exportableItems->pluck('id')->toArray()
-                );
             });
 
             // Dispatch notification only after successful transaction commit
