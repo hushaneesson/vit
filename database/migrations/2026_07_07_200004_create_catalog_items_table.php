@@ -12,7 +12,7 @@ return new class extends Migration
             $table->uuid('id')->primary();
             $table->foreignId('vendor_id')->constrained('vendors')->cascadeOnDelete();
 
-            $table->string('name');
+            $table->text('name');
             $table->text('description');
 
             $table->string('manufacturer_sku')->nullable();

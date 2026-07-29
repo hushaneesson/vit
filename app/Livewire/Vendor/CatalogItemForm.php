@@ -194,13 +194,12 @@ class CatalogItemForm extends Component
         $client = Auth::guard('client')->user();
 
         return [
-            'name' => ['required', 'string', 'max:255'],
+            'name' => ['required'],
             'vendorSku' => [
                 'required',
                 'string',
                 'max:255',
                 Rule::unique('catalog_items', 'vendor_sku')
-                    ->where('vendor_id', $client->vendor_id)
                     ->ignore($this->catalogItemId),
             ],
             'manufacturerSku' => ['nullable', 'string', 'max:255'],
@@ -221,7 +220,7 @@ class CatalogItemForm extends Component
             'searchTerms.*' => ['nullable', 'string'],
 
             'listPrice' => ['required', 'numeric', 'min:0'],
-            'sellingPrice' => ['required', 'numeric', 'min:0', 'lte:listPrice'],
+            'sellingPrice' => ['required', 'numeric', 'min:0'],
             'weight' => ['required', 'numeric', 'min:0'],
 
             'sellingPoints' => ['required', 'array', 'min:1'],
