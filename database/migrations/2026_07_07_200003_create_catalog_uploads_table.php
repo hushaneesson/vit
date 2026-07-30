@@ -38,10 +38,14 @@ return new class extends Migration
 
             $table->unsignedInteger('total_rows')->nullable();
             $table->unsignedInteger('success_rows')->default(0);
+            $table->unsignedInteger('created_rows')->default(0);
             $table->unsignedInteger('error_rows')->default(0);
             $table->unsignedInteger('updated_rows')->default(0);
             $table->unsignedInteger('skipped_rows')->default(0);
+            $table->unsignedInteger('unchanged_rows')->default(0);
+            $table->unsignedInteger('duplicate_rows')->default(0);
             $table->json('skipped_item_names')->nullable();
+
 
             $table->text('failure_reason')->nullable(); // set if the whole job fails (bad file, etc.)
 

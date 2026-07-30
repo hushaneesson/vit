@@ -15,7 +15,7 @@
                     {{ $catalogItemId ? 'Edit Catalog Item' : 'Add Catalog Item' }}
                 </h1>
                 <p class="text-sm text-gray-500 mt-0.5">
-                    Fields marked <span class="font-medium text-red-600">*</span> are required.
+                    Fields marked <span class="font-medium text-red-600">*</span> are required for VIT submission.
                 </p>
             </div>
         </div>

@@ -74,6 +74,8 @@ class CatalogUploadEndToEndTest extends TestCase
 
         $this->assertEquals(CatalogUploadStatus::Completed, $upload->status);
         $this->assertNotNull($upload->processing_completed_at);
+        $this->assertEquals(2, $upload->created_rows);
+        $this->assertEquals(0, $upload->updated_rows);
         $this->assertEquals(2, $upload->success_rows);
         $this->assertEquals(2, $upload->total_rows);
         $this->assertCount(2, CatalogItem::where('vendor_id', $this->vendor->id)->get());
@@ -135,13 +137,14 @@ class CatalogUploadEndToEndTest extends TestCase
     {
         $upload = $this->createUpload(['status' => CatalogUploadStatus::Processing]);
         $this->createValidRow($upload, 'SKU-VALID', 'Valid Item');
+        // Row with a type error (non-numeric in a decimal field) — genuinely bad data
         CatalogUploadRow::create([
             'catalog_upload_id' => $upload->id,
             'row_number' => 2,
-            'data' => ['seller_sku' => 'SKU-INVALID'],
+            'data' => ['seller_sku' => 'SKU-INVALID', 'list_price' => 'not-a-number'],
             'raw_data' => json_encode([]),
             'status' => 'invalid',
-            'errors' => [['field_key' => 'name', 'message' => 'Item Name is required.']],
+            'errors' => [['field_key' => 'list_price', 'message' => 'List Price must be a decimal number.']],
         ]);
 
         $job = new ProcessValidatedRowsJob($upload->id);
@@ -149,6 +152,8 @@ class CatalogUploadEndToEndTest extends TestCase
         $upload->refresh();
 
         $this->assertEquals(CatalogUploadStatus::Completed, $upload->status);
+        $this->assertEquals(1, $upload->created_rows);
+        $this->assertEquals(0, $upload->updated_rows);
         $this->assertEquals(1, $upload->success_rows);
         $this->assertEquals(1, $upload->error_rows);
         $this->assertEquals(2, $upload->total_rows);
@@ -175,7 +180,9 @@ class CatalogUploadEndToEndTest extends TestCase
         $upload->refresh();
 
         $this->assertEquals(CatalogUploadStatus::Completed, $upload->status);
+        $this->assertEquals(0, $upload->created_rows);
         $this->assertEquals(1, $upload->updated_rows);
+        $this->assertEquals(0, $upload->unchanged_rows);
         $existingItem->refresh();
         $this->assertEquals('Updated Name', $existingItem->name);
     }
@@ -202,7 +209,11 @@ class CatalogUploadEndToEndTest extends TestCase
 
         $this->assertEquals(CatalogUploadStatus::Completed, $upload->status);
         $this->assertCount(1, CatalogItem::where('vendor_id', $this->vendor->id)->get());
+        $this->assertEquals(0, $upload->created_rows);
+        $this->assertEquals(0, $upload->updated_rows);
         $this->assertEquals(0, $upload->success_rows);
+        $this->assertEquals(0, $upload->duplicate_rows);
+        $this->assertEquals(1, $upload->unchanged_rows);
         $this->assertEquals(1, $upload->skipped_rows);
     }
 
@@ -228,19 +239,23 @@ class CatalogUploadEndToEndTest extends TestCase
 
         $this->assertEquals(CatalogUploadStatus::Completed, $upload->status);
         $this->assertEquals(1, CatalogItem::where('vendor_id', $this->vendor->id)->count());
+        $this->assertEquals(0, $upload->created_rows);
         $this->assertEquals(1, $upload->updated_rows);
+        $this->assertEquals(0, $upload->unchanged_rows);
+        $this->assertEquals(0, $upload->duplicate_rows);
     }
 
     public function test_no_valid_rows_results_in_completed_status(): void
     {
         $upload = $this->createUpload(['status' => CatalogUploadStatus::Processing]);
+        // Row with a type error — genuinely bad data, not just a missing field
         CatalogUploadRow::create([
             'catalog_upload_id' => $upload->id,
             'row_number' => 1,
-            'data' => ['seller_sku' => 'SKU-BAD'],
+            'data' => ['seller_sku' => 'SKU-BAD', 'list_price' => 'not-a-number'],
             'raw_data' => json_encode([]),
             'status' => 'invalid',
-            'errors' => [['field_key' => 'name', 'message' => 'Item Name is required.']],
+            'errors' => [['field_key' => 'list_price', 'message' => 'List Price must be a decimal number.']],
         ]);
 
         $job = new ProcessValidatedRowsJob($upload->id);
@@ -248,7 +263,142 @@ class CatalogUploadEndToEndTest extends TestCase
         $upload->refresh();
 
         $this->assertEquals(CatalogUploadStatus::Completed, $upload->status);
+        $this->assertEquals(0, $upload->created_rows);
+        $this->assertEquals(0, $upload->updated_rows);
         $this->assertEquals(0, $upload->success_rows);
         $this->assertEquals(1, $upload->error_rows);
+    }
+
+    public function test_repeated_identical_upload_reports_unchanged(): void
+    {
+        // First upload: import 5 items
+        $uploadOne = $this->createUpload(['status' => CatalogUploadStatus::Processing]);
+        $this->createValidRow($uploadOne, 'SKU-A', 'Item A');
+        $this->createValidRow($uploadOne, 'SKU-B', 'Item B');
+        $this->createValidRow($uploadOne, 'SKU-C', 'Item C');
+        $this->createValidRow($uploadOne, 'SKU-D', 'Item D');
+        $this->createValidRow($uploadOne, 'SKU-E', 'Item E');
+
+        (new ProcessValidatedRowsJob($uploadOne->id))->handle();
+        $uploadOne->refresh();
+
+        $this->assertEquals(5, $uploadOne->created_rows);
+        $this->assertEquals(0, $uploadOne->updated_rows);
+        $this->assertEquals(0, $uploadOne->unchanged_rows);
+        $this->assertEquals(0, $uploadOne->duplicate_rows);
+        $this->assertCount(5, CatalogItem::where('vendor_id', $this->vendor->id)->get());
+
+        // Second upload: exact same CSV again — all items should be unchanged
+        $uploadTwo = $this->createUpload(['status' => CatalogUploadStatus::Processing]);
+        $this->createValidRow($uploadTwo, 'SKU-A', 'Item A');
+        $this->createValidRow($uploadTwo, 'SKU-B', 'Item B');
+        $this->createValidRow($uploadTwo, 'SKU-C', 'Item C');
+        $this->createValidRow($uploadTwo, 'SKU-D', 'Item D');
+        $this->createValidRow($uploadTwo, 'SKU-E', 'Item E');
+
+        (new ProcessValidatedRowsJob($uploadTwo->id))->handle();
+        $uploadTwo->refresh();
+
+        $this->assertEquals(0, $uploadTwo->created_rows, 'No new items should be created');
+        $this->assertEquals(0, $uploadTwo->updated_rows, 'No items should be updated — data is identical');
+        $this->assertEquals(5, $uploadTwo->unchanged_rows, 'All 5 items should be unchanged');
+        $this->assertEquals(0, $uploadTwo->duplicate_rows, 'No duplicates');
+        $this->assertCount(
+            5,
+            CatalogItem::where('vendor_id', $this->vendor->id)->get(),
+            'Total items should remain 5'
+        );
+    }
+
+    public function test_repeated_upload_with_price_change_reports_update(): void
+    {
+        // First upload: import 5 items
+        $uploadOne = $this->createUpload(['status' => CatalogUploadStatus::Processing]);
+        $this->createValidRow($uploadOne, 'SKU-A', 'Item A', ['list_price' => 10.00]);
+        $this->createValidRow($uploadOne, 'SKU-B', 'Item B', ['list_price' => 20.00]);
+        $this->createValidRow($uploadOne, 'SKU-C', 'Item C', ['list_price' => 30.00]);
+        $this->createValidRow($uploadOne, 'SKU-D', 'Item D', ['list_price' => 40.00]);
+        $this->createValidRow($uploadOne, 'SKU-E', 'Item E', ['list_price' => 50.00]);
+
+        (new ProcessValidatedRowsJob($uploadOne->id))->handle();
+        $uploadOne->refresh();
+
+        $this->assertEquals(5, $uploadOne->created_rows);
+
+        // Second upload: same data but with SKU-C's price changed
+        $uploadTwo = $this->createUpload(['status' => CatalogUploadStatus::Processing]);
+        $this->createValidRow($uploadTwo, 'SKU-A', 'Item A', ['list_price' => 10.00]);
+        $this->createValidRow($uploadTwo, 'SKU-B', 'Item B', ['list_price' => 20.00]);
+        $this->createValidRow($uploadTwo, 'SKU-C', 'Item C', ['list_price' => 35.00]); // changed!
+        $this->createValidRow($uploadTwo, 'SKU-D', 'Item D', ['list_price' => 40.00]);
+        $this->createValidRow($uploadTwo, 'SKU-E', 'Item E', ['list_price' => 50.00]);
+
+        (new ProcessValidatedRowsJob($uploadTwo->id))->handle();
+        $uploadTwo->refresh();
+
+        $this->assertEquals(0, $uploadTwo->created_rows, 'No new items should be created');
+        $this->assertEquals(1, $uploadTwo->updated_rows, 'One item should be updated (SKU-C price changed)');
+        $this->assertEquals(4, $uploadTwo->unchanged_rows, 'Four items should be unchanged');
+        $this->assertEquals(0, $uploadTwo->duplicate_rows, 'No duplicates');
+        $this->assertCount(
+            5,
+            CatalogItem::where('vendor_id', $this->vendor->id)->get(),
+            'Total items should remain 5'
+        );
+
+        // Verify the price was actually updated
+        $itemC = CatalogItem::where('vendor_id', $this->vendor->id)
+            ->where('seller_sku', 'SKU-C')
+            ->first();
+        $this->assertNotNull($itemC);
+        $this->assertEquals(35.00, (float) $itemC->list_price);
+    }
+
+    public function test_incomplete_csv_imports_successfully_with_null_fields(): void
+    {
+        // Simulate a row from a CSV that only has Product Name, SKU, and Price
+        // but is missing Description, Manufacturer, Brand, Weight, etc.
+        // This should still create a CatalogItem with null for missing fields.
+        $upload = $this->createUpload(['status' => CatalogUploadStatus::Processing]);
+
+        CatalogUploadRow::create([
+            'catalog_upload_id' => $upload->id,
+            'row_number' => 1,
+            'data' => [
+                'seller_sku' => 'SKU-INCOMPLETE',
+                'name' => 'Incomplete Item',
+                'list_price' => 10.00,
+                // description, unit_of_measure, unspsc_code, item_weight, etc. are all missing
+            ],
+            'raw_data' => json_encode([]),
+            'status' => 'valid', // Should be valid — missing fields are not errors
+        ]);
+
+        $job = new ProcessValidatedRowsJob($upload->id);
+        $job->handle();
+        $upload->refresh();
+
+        $this->assertEquals(CatalogUploadStatus::Completed, $upload->status);
+        $this->assertEquals(1, $upload->created_rows);
+        $this->assertEquals(0, $upload->updated_rows);
+        $this->assertEquals(0, $upload->unchanged_rows);
+        $this->assertEquals(0, $upload->duplicate_rows);
+        $this->assertEquals(1, $upload->success_rows);
+        $this->assertEquals(0, $upload->error_rows);
+
+        $item = CatalogItem::where('vendor_id', $this->vendor->id)
+            ->where('seller_sku', 'SKU-INCOMPLETE')
+            ->first();
+
+        $this->assertNotNull($item);
+        $this->assertSame('Incomplete Item', $item->name);
+        $this->assertSame('SKU-INCOMPLETE', $item->seller_sku);
+        // Missing fields should be null
+        $this->assertNull($item->description);
+        $this->assertNull($item->manufacturer);
+        $this->assertNull($item->brand_name);
+        $this->assertNull($item->unspsc_code);
+        // Completeness scoring should reflect the incomplete state
+        $this->assertSame('incomplete', $item->status);
     }
 }

@@ -74,8 +74,6 @@ class CatalogUploadController extends Controller
             'mappings.*.column_index' => ['required', 'integer', 'min:0'],
             'mappings.*.source_column_name' => ['required', 'string'],
             'mappings.*.field_key' => ['nullable', 'string'],
-            'save_as_template' => ['sometimes', 'boolean'],
-            'template_name' => ['required_if:save_as_template,true', 'string', 'max:255'],
         ]);
 
         $catalogUpload->columnMappings()->delete();
@@ -89,16 +87,9 @@ class CatalogUploadController extends Controller
             ]);
         }
 
-        if (! $catalogUpload->fresh()->isReadyToProcess()) {
-            return response()->json([
-                'message' => 'All required fields must be mapped before continuing.',
-                'ready_to_process' => false,
-            ], 422);
-        }
-
-        if ($request->boolean('save_as_template')) {
-            $this->saveMappingTemplate($catalogUpload, $data['template_name']);
-        }
+        // Silently persist/update the mapping template in the background.
+        // Completely transparent to the user — no notification, no prompt.
+        $this->saveMappingTemplate($catalogUpload);
 
         $catalogUpload->update([
             'mapping_confirmed_at' => now(),
@@ -202,19 +193,47 @@ class CatalogUploadController extends Controller
         });
 
         return $suggestions->isEmpty() ? null : [
-            'template_id' => $template->id,
-            'template_name' => $template->name,
             'suggested_mapping' => $suggestions,
         ];
     }
 
-    private function saveMappingTemplate(CatalogUpload $catalogUpload, string $name): void
+    /**
+     * Silently persist or update the mapping template for this file signature.
+     *
+     * If a template already exists for this vendor + file signature, its
+     * fields are replaced with the current mapping (an update). Otherwise
+     * a new template is created. This runs transparently in the background
+     * — the user is never asked or notified.
+     */
+    private function saveMappingTemplate(CatalogUpload $catalogUpload): void
     {
-        $template = VendorMappingTemplate::create([
-            'vendor_id' => $catalogUpload->vendor_id,
-            'created_by_client_id' => $catalogUpload->client_id,
-            'name' => $name,
-        ]);
+        // Compute the file signature from the stored file
+        $fileSignature = $this->inspector->computeFileSignature(
+            $catalogUpload->disk,
+            $catalogUpload->file_path,
+            $catalogUpload->file_type
+        );
+
+        // Find an existing template for this vendor + file signature
+        $template = VendorMappingTemplate::where('vendor_id', $catalogUpload->vendor_id)
+            ->where('active', true)
+            ->whereNotNull('file_signature')
+            ->where('file_signature', $fileSignature)
+            ->latest()
+            ->first();
+
+        if (! $template) {
+            // No existing template for this file layout — create one
+            $template = VendorMappingTemplate::create([
+                'vendor_id' => $catalogUpload->vendor_id,
+                'created_by_client_id' => $catalogUpload->client_id,
+                'name' => 'Auto-saved ' . now()->format('Y-m-d H:i'),
+                'file_signature' => $fileSignature,
+            ]);
+        } else {
+            // Update existing template — replace its fields
+            $template->fields()->delete();
+        }
 
         foreach ($catalogUpload->columnMappings as $mapping) {
             if (! $mapping->field_key) {

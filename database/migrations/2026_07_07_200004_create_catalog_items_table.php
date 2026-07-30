@@ -13,7 +13,8 @@ return new class extends Migration
             $table->foreignId('vendor_id')->constrained('vendors')->cascadeOnDelete();
 
             $table->string('name');
-            $table->text('description');
+
+            $table->text('description')->nullable();
 
             $table->string('manufacturer_sku')->nullable();
             $table->string('manufacturer')->nullable();
@@ -26,7 +27,7 @@ return new class extends Migration
             $table->string('unspsc_code')->nullable();
             $table->string('product_type_or_family')->nullable();
 
-            $table->string('unit_of_measure', 50);
+            $table->string('unit_of_measure', 50)->nullable();
             $table->decimal('quantity_per_unit', 10, 2)->nullable();
             $table->decimal('item_weight', 10, 2)->default(0.01);
             $table->decimal('min_qty_per_order', 10, 2)->nullable();

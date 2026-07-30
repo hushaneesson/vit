@@ -23,9 +23,12 @@ class CatalogUpload extends Model
         'status',
         'total_rows',
         'success_rows',
+        'created_rows',
         'error_rows',
         'updated_rows',
         'skipped_rows',
+        'unchanged_rows',
+        'duplicate_rows',
         'skipped_item_names',
         'failure_reason',
         'mapping_confirmed_at',
@@ -38,6 +41,9 @@ class CatalogUpload extends Model
         'status' => CatalogUploadStatus::class,
         'updated_rows' => 'integer',
         'skipped_rows' => 'integer',
+        'created_rows' => 'integer',
+        'unchanged_rows' => 'integer',
+        'duplicate_rows' => 'integer',
         'skipped_item_names' => 'array',
         'mapping_confirmed_at' => 'datetime',
         'processing_started_at' => 'datetime',
@@ -67,14 +73,16 @@ class CatalogUpload extends Model
 
     public function isReadyToProcess(): bool
     {
-        // Every required VIT field must be mapped to a column before we
-        // let the client kick off processing.
-        $mappedFieldKeys = $this->columnMappings()
+        // The application now imports a vendor's existing catalog so they
+        // can complete and edit it inside the application before submission.
+        // Missing VIT-required fields should NOT prevent importing — they
+        // simply become null on the CatalogItem and can be completed later.
+        //
+        // As long as at least one column is mapped to a field, the upload
+        // is ready to process. Structural CSV validation (unreadable file,
+        // corrupt CSV, etc.) is handled separately in the processing job.
+        return $this->columnMappings()
             ->whereNotNull('field_key')
-            ->pluck('field_key');
-
-        $requiredFieldKeys = VitFieldDefinition::requiredFieldKeys();
-
-        return $requiredFieldKeys->diff($mappedFieldKeys)->isEmpty();
+            ->exists();
     }
 }

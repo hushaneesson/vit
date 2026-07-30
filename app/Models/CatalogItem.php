@@ -37,6 +37,10 @@ class CatalogItem extends Model
         'list_price',
         'selling_price_per_unit',
 
+        // needed for the duplicate detection and completeness scoring, but not VIT-required:
+        // 'image_file_name',
+        // 'categorization_or_hierarchy',
+
         // not VIT, but useful for completeness scoring
         'status',
         'completeness_score',
@@ -60,6 +64,9 @@ class CatalogItem extends Model
     }
 
     // Fields that are considered "required" for a complete item.
+    // These are VIT-required fields — items missing them will have
+    // a lower completeness score and 'incomplete' status, but they
+    // can still be created/imported and completed later.
     protected static array $requiredFields = [
         'name',
         'description',

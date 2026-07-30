@@ -21,14 +21,17 @@ use Throwable;
 
 /**
  * Phase 8B: consumes the validated CatalogUploadRow records from
- * ProcessCatalogUploadJob and creates CatalogItem rows in the
- * vendor's catalog.
+ * ProcessCatalogUploadJob and creates/updates CatalogItem rows in
+ * the vendor's catalog.
  *
- * System-derived fields (e.g. seller → vendor.name) are populated
- * here, not from the uploaded file.
+ * Matching strategy (in order):
+ *   1. seller_sku (when available in the row data) — primary key for updates
+ *   2. data_fingerprint (fallback when SKU is not available) — exact duplicate detection
  *
- * CatalogItem columns now directly match VIT field keys, so no
- * fieldKeyToColumnMap translation is needed.
+ * When updating an existing CatalogItem, blank CSV values are NOT
+ * written back to the database — only non-blank values from the CSV
+ * overwrite the existing record. This preserves existing data that
+ * the CSV does not cover.
  */
 class ProcessValidatedRowsJob implements ShouldQueue
 {
@@ -40,7 +43,7 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
     public function handle(): void
     {
-        $upload = CatalogUpload::with('vendor')->findOrFail($this->catalogUploadId);
+        $upload = CatalogUpload::with(['vendor', 'columnMappings'])->findOrFail($this->catalogUploadId);
 
         if ($upload->status === CatalogUploadStatus::Completed) {
             return;
@@ -79,8 +82,11 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
             $createdCount = 0;
             $updatedCount = 0;
-            $skippedCount = 0;
-            $skippedNames = [];
+            $unchangedCount = 0;
+            $duplicateCount = 0;
+            $updatedNames = [];
+            $unchangedNames = [];
+            $duplicateNames = [];
 
             DB::beginTransaction();
 
@@ -90,16 +96,13 @@ class ProcessValidatedRowsJob implements ShouldQueue
                     $data = json_decode((string) ($data ?? ''), true) ?: [];
                 }
 
-                // Build the attribute map directly from VIT field keys
+                // Build the attribute map directly from VIT field keys.
                 // CatalogItem columns now match VIT field keys, so no translation needed.
                 $attrs = [
                     'vendor_id' => $vendor->id,
                     'catalog_upload_id' => $upload->id,
                 ];
 
-                // Map validated field data to CatalogItem columns.
-                // The field keys from the CSV mapping are already VIT field keys,
-                // and CatalogItem columns now match those keys directly.
                 foreach ($data as $fieldKey => $rawValue) {
                     if (is_null($rawValue) || $rawValue === '' || $rawValue === []) {
                         if ($fieldKey === 'item_weight') {
@@ -124,21 +127,20 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
                 $fingerprint = $this->computeFingerprint($attrs, $nonComparableColumns);
 
-                // STEP 1: Check by fingerprint first
-                $existingByFingerprint = CatalogItem::where('vendor_id', $vendor->id)
-                    ->where('data_fingerprint', $fingerprint)
-                    ->first();
+                // Build the update payload — only fields that have non-blank
+                // values in the CSV. This ensures we never overwrite existing
+                // data with blank CSV values.
+                $updateAttrs = array_filter(
+                    $attrs,
+                    fn($value) => $value !== null && $value !== '' && $value !== [],
+                    ARRAY_FILTER_USE_BOTH,
+                );
+                // Remove metadata fields that should never be bulk-overwritten
+                unset($updateAttrs['vendor_id'], $updateAttrs['catalog_upload_id']);
 
-                if ($existingByFingerprint) {
-                    $skippedCount++;
-                    $itemName = $attrs['name'] ?? $attrs['seller_sku'] ?? 'Unknown';
-                    if ($itemName) {
-                        $skippedNames[] = $itemName;
-                    }
-                    continue;
-                }
-
-                // STEP 2: Look for existing item with same seller_sku
+                // ----------------------------------------------------------
+                // STRATEGY 1: Match by seller_sku (when available in data)
+                // ----------------------------------------------------------
                 $sellerSku = $attrs['seller_sku'] ?? null;
 
                 if ($sellerSku) {
@@ -147,18 +149,24 @@ class ProcessValidatedRowsJob implements ShouldQueue
                         ->first();
 
                     if ($existing) {
-                        $hasChanges = $this->hasMeaningfulChanges($existing, $attrs, $nonComparableColumns);
+                        // Normalize the incoming values before comparison
+                        $normalizedUpdateAttrs = $this->normalizeForComparison($updateAttrs);
 
-                        if ($hasChanges) {
-                            $attrs['data_fingerprint'] = $fingerprint;
-                            $attrs['updated_at'] = now();
-                            $existing->update($attrs);
+                        if ($this->hasMeaningfulChanges($existing, $normalizedUpdateAttrs, $nonComparableColumns, $sellerSku)) {
+                            // Update only the fields that have values in the CSV
+                            $updateAttrs['data_fingerprint'] = $fingerprint;
+                            $updateAttrs['updated_at'] = now();
+                            $existing->update($updateAttrs);
                             $updatedCount++;
-                        } else {
-                            $skippedCount++;
                             $itemName = $attrs['name'] ?? $sellerSku;
                             if ($itemName) {
-                                $skippedNames[] = $itemName;
+                                $updatedNames[] = $itemName;
+                            }
+                        } else {
+                            $unchangedCount++;
+                            $itemName = $attrs['name'] ?? $sellerSku;
+                            if ($itemName) {
+                                $unchangedNames[] = $itemName;
                             }
                         }
 
@@ -166,7 +174,26 @@ class ProcessValidatedRowsJob implements ShouldQueue
                     }
                 }
 
+                // ----------------------------------------------------------
+                // STRATEGY 2: Match by fingerprint (fallback when SKU is not
+                //             available or no existing item was found by SKU)
+                // ----------------------------------------------------------
+                $existingByFingerprint = CatalogItem::where('vendor_id', $vendor->id)
+                    ->where('data_fingerprint', $fingerprint)
+                    ->first();
+
+                if ($existingByFingerprint) {
+                    $duplicateCount++;
+                    $itemName = $attrs['name'] ?? $attrs['seller_sku'] ?? 'Unknown';
+                    if ($itemName) {
+                        $duplicateNames[] = $itemName;
+                    }
+                    continue;
+                }
+
+                // ----------------------------------------------------------
                 // No existing item found — create new
+                // ----------------------------------------------------------
                 $attrs['id'] = (string) Str::uuid();
                 $attrs['data_fingerprint'] = $fingerprint;
                 $attrs['created_at'] = now();
@@ -182,10 +209,14 @@ class ProcessValidatedRowsJob implements ShouldQueue
                             ->first();
 
                         if ($existing) {
-                            $attrs['data_fingerprint'] = $fingerprint;
-                            $attrs['updated_at'] = now();
-                            $existing->update($attrs);
+                            $updateAttrs['data_fingerprint'] = $fingerprint;
+                            $updateAttrs['updated_at'] = now();
+                            $existing->update($updateAttrs);
                             $updatedCount++;
+                            $itemName = $attrs['name'] ?? $sellerSku;
+                            if ($itemName) {
+                                $updatedNames[] = $itemName;
+                            }
                         } else {
                             throw $e;
                         }
@@ -196,6 +227,9 @@ class ProcessValidatedRowsJob implements ShouldQueue
             }
 
             DB::commit();
+
+            $totalSkipped = $unchangedCount + $duplicateCount;
+            $allSkippedNames = array_merge($unchangedNames, $duplicateNames);
 
             $emailSent = false;
             if ($upload->error_rows > 10 && !$upload->validation_report_emailed_at) {
@@ -235,9 +269,12 @@ class ProcessValidatedRowsJob implements ShouldQueue
                     'status' => CatalogUploadStatus::Completed,
                     'total_rows' => $upload->rows()->count(),
                     'success_rows' => $createdCount + $updatedCount,
+                    'created_rows' => $createdCount,
                     'updated_rows' => $updatedCount,
-                    'skipped_rows' => $skippedCount,
-                    'skipped_item_names' => $skippedCount > 0 ? $skippedNames : null,
+                    'skipped_rows' => $totalSkipped,
+                    'unchanged_rows' => $unchangedCount,
+                    'duplicate_rows' => $duplicateCount,
+                    'skipped_item_names' => $totalSkipped > 0 ? $allSkippedNames : null,
                     'error_rows' => $upload->rows()->where('status', 'invalid')->count(),
                     'processing_completed_at' => now(),
                 ]);
@@ -255,13 +292,55 @@ class ProcessValidatedRowsJob implements ShouldQueue
         }
     }
 
+    /**
+     * Normalize incoming CSV values for comparison against database values.
+     *
+     * This ensures consistent comparison regardless of how the CSV data
+     * was typed (e.g. "10.00" string vs 10.0 float, null vs "").
+     */
+    private function normalizeForComparison(array $attrs): array
+    {
+        $normalized = [];
+
+        foreach ($attrs as $key => $value) {
+            // Treat default item_weight (0.01) as "blank" since it's a
+            // fallback when the CSV has no value for this field. We should
+            // not treat it as a real incoming value that would trigger an
+            // update overwrite.
+            if ($key === 'item_weight' && $value === 0.01) {
+                continue;
+            }
+
+            // Normalize numeric strings to floats for consistent comparison
+            if (is_numeric($value)) {
+                $normalized[$key] = (float) $value;
+                continue;
+            }
+
+            // Normalize empty strings to null
+            if ($value === '' || $value === []) {
+                continue;
+            }
+
+            $normalized[$key] = $value;
+        }
+
+        return $normalized;
+    }
+
     private function computeFingerprint(array $attrs, array $excludeColumns): string
     {
         return FingerprintService::compute($attrs, $excludeColumns);
     }
 
-    private function hasMeaningfulChanges(CatalogItem $existing, array $newAttrs, array $nonComparableColumns): bool
+    /**
+     * Compare incoming CSV values against existing database values to
+     * determine whether the item needs updating.
+     */
+    private function hasMeaningfulChanges(CatalogItem $existing, array $newAttrs, array $nonComparableColumns, ?string $sku = null): bool
     {
+        $detectedChanges = [];
+
         foreach ($newAttrs as $column => $newValue) {
             if (in_array($column, $nonComparableColumns, true)) {
                 continue;
@@ -269,13 +348,24 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
             $oldValue = $existing->getRawOriginal($column);
 
-            if (is_null($oldValue) && ($newValue === '' || $newValue === null)) {
-                continue;
-            }
-            if (is_null($newValue) && ($oldValue === '' || $oldValue === null)) {
+            // Normalize old value for comparison
+            $oldValue = $this->normalizeValueForComparison($oldValue);
+            $newValue = $this->normalizeValueForComparison($newValue);
+
+            // Both null/empty — skip
+            if ($oldValue === null && $newValue === null) {
                 continue;
             }
 
+            // One is null, other is empty string — skip (equivalent)
+            if ($oldValue === null && $newValue === '') {
+                continue;
+            }
+            if ($newValue === null && $oldValue === '') {
+                continue;
+            }
+
+            // JSON fields
             if (in_array($column, ['search_terms', 'classifications', 'specifications', 'selling_points'], true)) {
                 $decodedOld = is_array($oldValue) ? $oldValue : json_decode((string) $oldValue, true);
                 $decodedNew = is_array($newValue) ? $newValue : json_decode((string) $newValue, true);
@@ -288,23 +378,52 @@ class ProcessValidatedRowsJob implements ShouldQueue
                 }
 
                 if ($decodedOld !== $decodedNew) {
-                    return true;
+                    $detectedChanges[$column] = ['old' => $decodedOld, 'new' => $decodedNew];
                 }
                 continue;
             }
 
+            // Numeric comparison
             if (is_numeric($oldValue) && is_numeric($newValue)) {
                 if ((float) $oldValue !== (float) $newValue) {
-                    return true;
+                    $detectedChanges[$column] = ['old' => $oldValue, 'new' => $newValue];
                 }
                 continue;
             }
 
+            // String comparison
             if (trim((string) $oldValue) !== trim((string) $newValue)) {
-                return true;
+                $detectedChanges[$column] = ['old' => $oldValue, 'new' => $newValue];
             }
         }
 
+        if (!empty($detectedChanges)) {
+            Log::info('Catalog import: detected changes for SKU', [
+                'sku' => $sku,
+                'changes' => $detectedChanges,
+            ]);
+
+            return true;
+        }
+
         return false;
+    }
+
+    /**
+     * Normalize a single value for comparison by trimming whitespace and
+     * converting empty strings to null.
+     */
+    private function normalizeValueForComparison(mixed $value): mixed
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (is_string($value)) {
+            $trimmed = trim($value);
+            return $trimmed === '' ? null : $trimmed;
+        }
+
+        return $value;
     }
 }

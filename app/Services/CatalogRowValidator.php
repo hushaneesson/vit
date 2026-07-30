@@ -15,29 +15,21 @@ class CatalogRowValidator
     {
         $errors = [];
 
+        // NOTE: Required and conditional field checks have been removed.
+        //
+        // The application now imports a vendor's existing catalog so they
+        // can complete and edit it inside the application before submission.
+        // Missing business fields (e.g. description, manufacturer, brand)
+        // should NOT prevent importing — they simply become null on the
+        // CatalogItem and can be completed later from the Catalog Item List.
+        //
+        // Only type-level data quality errors (non-numeric values in number
+        // fields, values exceeding max length) are still reported. These
+        // represent genuinely bad data, not missing fields.
+
         foreach ($fieldDefinitions as $definition) {
             $value = $rowData[$definition->field_key] ?? null;
             $isEmpty = is_null($value) || $value === '';
-
-            if ($definition->requirement_type === 'required' && $isEmpty) {
-                $errors[] = [
-                    'field_key' => $definition->field_key,
-                    'message' => "{$definition->web_app_label} is required.",
-                ];
-
-                continue;
-            }
-
-            if ($definition->requirement_type === 'conditional' && $isEmpty) {
-                if ($this->conditionIsTriggered($definition, $rowData)) {
-                    $errors[] = [
-                        'field_key' => $definition->field_key,
-                        'message' => "{$definition->web_app_label} is required based on another field's value.",
-                    ];
-                }
-
-                continue;
-            }
 
             if ($isEmpty) {
                 continue;

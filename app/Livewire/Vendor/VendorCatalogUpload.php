@@ -48,29 +48,14 @@ class VendorCatalogUpload extends Component
      */
     public bool $suggestionsFinalized = false;
 
-    public bool $saveAsTemplate = false;
-    public string $templateName = '';
-
-    /**
-     * Snapshot of the mapping as it was when a saved template was applied.
-     * Null if no template was loaded. Used to determine whether the user
-     * has deviated from the template, and thus whether to show the
-     * "Remember this mapping" checkbox.
-     */
-    public ?array $originalTemplateMapping = null;
-
-    /**
-     * The name of the loaded template, if any. Used to display in the
-     * visual indicator and to auto-fill the template name input when
-     * the user modifies the mapping.
-     */
-    public ?string $loadedTemplateName = null;
-
     public array $progress = [
         'status' => null,
         'total_rows' => 0,
         'success_rows' => 0,
+        'created_rows' => 0,
         'updated_rows' => 0,
+        'unchanged_rows' => 0,
+        'duplicate_rows' => 0,
         'skipped_rows' => 0,
         'skipped_item_names' => null,
         'error_rows' => 0,
@@ -246,18 +231,22 @@ class VendorCatalogUpload extends Component
     }
 
     /**
-     * STEP 2: vendor confirms the field -> column mapping, we validate that
-     * every required field is mapped, save it, optionally save a reusable
-     * template, then move to processing.
+     * STEP 2: vendor confirms the field -> column mapping, we save it,
+     * silently persist/update the mapping template in the background,
+     * then move to processing.
+     *
+     * Missing VIT-required fields are no longer blocking — the vendor's
+     * existing catalog is imported as-is and missing fields become null
+     * on the CatalogItem. They can be completed later from the Catalog
+     * Item List before requesting review.
+     *
+     * The template save is completely transparent to the user — no
+     * notification, no checkbox, no name prompt. The template is
+     * matched/updated by file signature so the same file layout is
+     * remembered for next time.
      */
     public function confirmMapping(): void
     {
-        if ($this->unmappedRequiredFields()->isNotEmpty()) {
-            $this->addError('mapping', 'Please map all required fields before continuing.');
-
-            return;
-        }
-
         $upload = CatalogUpload::findOrFail($this->catalogUploadId);
 
         try {
@@ -283,9 +272,9 @@ class VendorCatalogUpload extends Component
                     ]);
                 }
 
-                if ($this->saveAsTemplate && $this->templateName !== '') {
-                    $this->persistMappingTemplate($upload);
-                }
+                // Silently persist/update the mapping template in the
+                // background. Completely transparent to the user.
+                $this->persistMappingTemplate($upload);
 
                 $upload->update([
                     'mapping_confirmed_at' => now(),
@@ -335,7 +324,10 @@ class VendorCatalogUpload extends Component
             'status' => $upload->status,
             'total_rows' => $upload->total_rows,
             'success_rows' => $upload->success_rows,
+            'created_rows' => $upload->created_rows ?? 0,
             'updated_rows' => $upload->updated_rows ?? 0,
+            'unchanged_rows' => $upload->unchanged_rows ?? 0,
+            'duplicate_rows' => $upload->duplicate_rows ?? 0,
             'skipped_rows' => $upload->skipped_rows ?? 0,
             'skipped_item_names' => $upload->skipped_item_names ?? null,
             'error_rows' => $upload->error_rows,
@@ -351,40 +343,10 @@ class VendorCatalogUpload extends Component
         }
     }
 
-    /**
-     * Whether a saved mapping template was loaded for this file.
-     * True when the user has an existing template that was applied.
-     */
-    public function templateIsLoaded(): bool
-    {
-        return $this->originalTemplateMapping !== null;
-    }
-
-    /**
-     * Whether the current mapping differs from the template that was loaded,
-     * or if no template was loaded at all. Returns true when the checkbox
-     * should be shown:
-     * - No template exists → user may want to save one
-     * - Template loaded but user changed mappings → may want to save updated version
-     *
-     * Returns false (hide checkbox) when a template was loaded and the
-     * mapping hasn't changed at all.
-     */
-    public function hasMappingChangedFromTemplate(): bool
-    {
-        // No template was loaded — always show the checkbox
-        if ($this->originalTemplateMapping === null) {
-            return true;
-        }
-
-        // Compare current mapping against the template snapshot
-        return $this->mapping !== $this->originalTemplateMapping;
-    }
-
     public function startOver(): void
     {
-        $this->reset(['file', 'catalogUploadId', 'columns', 'sampleRows', 'mapping', 'suggestedIndexes', 'saveAsTemplate', 'templateName', 'suggestionsFinalized', 'originalTemplateMapping', 'loadedTemplateName', 'currentFileSignature']);
-        $this->progress = ['status' => null, 'total_rows' => 0, 'success_rows' => 0, 'updated_rows' => 0, 'skipped_rows' => 0, 'skipped_item_names' => null, 'error_rows' => 0, 'failure_reason' => null];
+        $this->reset(['file', 'catalogUploadId', 'columns', 'sampleRows', 'mapping', 'suggestedIndexes', 'suggestionsFinalized', 'currentFileSignature']);
+        $this->progress = ['status' => null, 'total_rows' => 0, 'success_rows' => 0, 'created_rows' => 0, 'updated_rows' => 0, 'unchanged_rows' => 0, 'duplicate_rows' => 0, 'skipped_rows' => 0, 'skipped_item_names' => null, 'error_rows' => 0, 'failure_reason' => null];
         $this->step = 'upload';
     }
 
@@ -402,8 +364,6 @@ class VendorCatalogUpload extends Component
             ->first();
 
         if (! $template) {
-            $this->originalTemplateMapping = null;
-            $this->loadedTemplateName = null;
             return;
         }
 
@@ -420,13 +380,6 @@ class VendorCatalogUpload extends Component
                 $this->mapping[$field->field_key] = $index;
             }
         }
-
-        // Snapshot the mapping as it was applied from the template
-        $this->originalTemplateMapping = $this->mapping;
-
-        // Store the template name for display and auto-fill
-        $this->loadedTemplateName = $template->name;
-        $this->templateName = $template->name;
     }
 
     /**
@@ -512,14 +465,36 @@ class VendorCatalogUpload extends Component
         return $percent;
     }
 
+    /**
+     * Silently persist or update the mapping template for this file signature.
+     *
+     * If a template already exists for this vendor + file signature, its
+     * fields are replaced with the current mapping (an update). Otherwise
+     * a new template is created. This runs transparently in the background
+     * — the user is never asked or notified.
+     */
     private function persistMappingTemplate(CatalogUpload $upload): void
     {
-        $template = VendorMappingTemplate::create([
-            'vendor_id' => $upload->vendor_id,
-            'created_by_client_id' => $upload->client_id,
-            'name' => $this->templateName,
-            'file_signature' => $this->currentFileSignature,
-        ]);
+        // Find an existing template for this vendor + file signature
+        $template = VendorMappingTemplate::where('vendor_id', $upload->vendor_id)
+            ->where('active', true)
+            ->whereNotNull('file_signature')
+            ->where('file_signature', $this->currentFileSignature)
+            ->latest()
+            ->first();
+
+        if (! $template) {
+            // No existing template for this file layout — create one
+            $template = VendorMappingTemplate::create([
+                'vendor_id' => $upload->vendor_id,
+                'created_by_client_id' => $upload->client_id,
+                'name' => 'Auto-saved ' . now()->format('Y-m-d H:i'),
+                'file_signature' => $this->currentFileSignature,
+            ]);
+        } else {
+            // Update existing template — replace its fields
+            $template->fields()->delete();
+        }
 
         foreach ($upload->columnMappings as $mapping) {
             if (! $mapping->field_key) {
