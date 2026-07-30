@@ -367,7 +367,7 @@
                         <input type="text" wire:model="unspscCode"
                             class="mt-1.5 block w-full rounded-lg border-gray-300 shadow-sm text-sm focus:border-sky-500 focus:ring-sky-500 focus:ring-1" />
                         <p class="text-xs text-gray-400 mt-1.5">
-                            Don't know it? <a href="https://www.unspsc.org/search-code" target="_blank"
+                            Don't know it? <a href="https://www.unspsc.org" target="_blank"
                                 class="underline text-sky-600 hover:text-sky-700">Look it up here</a>.
                         </p>
                         @error('unspscCode')

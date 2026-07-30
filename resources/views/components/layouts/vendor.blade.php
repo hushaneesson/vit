@@ -24,7 +24,7 @@
                 <div class="flex items-center justify-between h-16">
 
                     <!-- Logo -->
-                    <a href="#">
+                    <a href="/vendor/dashboard">
                         <img src="/logo.png" class="h-20" />
                     </a>
 
