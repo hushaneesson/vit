@@ -16,21 +16,21 @@ return new class extends Migration
             $table->text('description');
 
             $table->string('manufacturer_sku')->nullable();
-            $table->string('manufacturer_name')->nullable();
+            $table->string('manufacturer')->nullable();
             $table->string('brand_name')->nullable();
 
-            $table->string('vendor_sku');
+            $table->string('seller_sku');
             $table->foreignId('catalog_upload_id')->nullable()->constrained('catalog_uploads')->nullOnDelete();
             $table->string('data_fingerprint', 32)->nullable();
 
             $table->string('unspsc_code')->nullable();
-            $table->string('product_type', 50)->nullable();
+            $table->string('product_type_or_family')->nullable();
 
             $table->string('unit_of_measure', 50);
             $table->decimal('quantity_per_unit', 10, 2)->nullable();
-            $table->decimal('weight', 10, 2)->default(0.01);
-            $table->decimal('min_order_quantity', 10, 2)->nullable();
-            $table->decimal('max_order_quantity', 10, 2)->nullable();
+            $table->decimal('item_weight', 10, 2)->default(0.01);
+            $table->decimal('min_qty_per_order', 10, 2)->nullable();
+            $table->decimal('max_qty_per_order', 10, 2)->nullable();
             $table->decimal('multiples', 10, 2)->nullable();
 
             $table->json('classifications')->nullable();
@@ -40,7 +40,7 @@ return new class extends Migration
             $table->string('msds_link', 300)->nullable();
 
             $table->decimal('list_price', 10, 2)->nullable();
-            $table->decimal('selling_price', 10, 2)->nullable();
+            $table->decimal('selling_price_per_unit', 10, 2)->nullable();
 
             $table->string('status', 20)->default('incomplete');
             $table->integer('completeness_score')->default(0);
@@ -49,7 +49,7 @@ return new class extends Migration
 
             $table->index(['vendor_id']);
             $table->index('data_fingerprint', 'catalog_items_fingerprint_index');
-            $table->unique(['vendor_id', 'vendor_sku'], 'catalog_items_vendor_sku_unique');
+            $table->unique(['vendor_id', 'seller_sku'], 'catalog_items_seller_sku_unique');
         });
     }
 

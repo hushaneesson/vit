@@ -38,11 +38,9 @@
                                 <td class="px-4 py-2">{{ $submission->requested_at?->format('M j, Y') }}</td>
                                 <td class="px-4 py-2">
                                     @if (
-                                        $submission->status === \App\Enums\CatalogSubmissionStatus::ReadyForUpload ||
+                                        $submission->status === \App\Enums\CatalogSubmissionStatus::Approved ||
                                             $submission->status === \App\Enums\CatalogSubmissionStatus::Uploaded)
                                         <span class="text-sm text-gray-400">Delivered</span>
-                                    @elseif ($submission->status === \App\Enums\CatalogSubmissionStatus::Approved)
-                                        <span class="text-sm text-emerald-600">Approved</span>
                                     @elseif ($submission->status === \App\Enums\CatalogSubmissionStatus::Rejected)
                                         <span class="text-sm text-red-600">Rejected</span>
                                     @else

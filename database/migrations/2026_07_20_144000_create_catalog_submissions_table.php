@@ -13,8 +13,11 @@ return new class extends Migration
      * vendor requested admin review. The items included are recorded in
      * the catalog_submission_items pivot table for auditability.
      *
-     * This is a business approval entity, not a technical event — it
-     * exists independently of CatalogUpload.
+     * This is the single source of truth for:
+     * - Business approval status (CatalogSubmissionStatus enum)
+     * - Generated Excel file path, size, disk
+     * - Technical processing state (processing_status column)
+     * - Generation and upload timestamps
      */
     public function up(): void
     {
@@ -47,9 +50,15 @@ return new class extends Migration
             $table->timestamp('rejected_at')->nullable();
             $table->text('rejection_reason')->nullable();
 
-            // The export generated from this submission (set after approval)
-            // FK is added in a later migration after catalog_exports table exists
-            $table->foreignId('catalog_export_id')->nullable();
+            // Export file metadata (merged from CatalogExport — now stored directly on submission)
+            $table->string('file_path')->nullable();
+            $table->string('disk')->default('local');
+            $table->unsignedBigInteger('file_size')->nullable();
+            $table->string('processing_status', 20)->default('pending');
+            $table->text('failure_reason')->nullable();
+            $table->timestamp('generating_started_at')->nullable();
+            $table->timestamp('generated_at')->nullable();
+            $table->timestamp('uploaded_at')->nullable();
 
             $table->timestamps();
 

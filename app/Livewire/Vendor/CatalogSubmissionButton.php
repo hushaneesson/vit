@@ -3,9 +3,9 @@
 namespace App\Livewire\Vendor;
 
 use App\Enums\CatalogSubmissionStatus;
+use App\Jobs\GenerateCatalogExportJob;
 use App\Models\CatalogItem;
 use App\Models\CatalogSubmission;
-use App\Models\CatalogSubmissionItem;
 use App\Notifications\CatalogReadyForReviewNotification;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -16,20 +16,14 @@ use Livewire\Component;
  * Dedicated Livewire component for the "Request VIT Upload" button
  * on the catalog items index page.
  *
- * This component replaces the submission logic that was previously
- * embedded in the CSV upload summary screen. It operates against
- * the vendor's full catalog state, not a single upload session.
+ * Creates a CatalogSubmission and attaches the selected CatalogItems
+ * through a simple pivot relationship. The Excel file is generated
+ * from the CatalogItems directly.
  */
 class CatalogSubmissionButton extends Component
 {
     /**
-     * Vendor ID is resolved from the authenticated client on each request.
-     * No property needed — we read from the guard.
-     */
-
-    /**
      * Catalog item stats scoped to the authenticated vendor.
-     * Counts items across all catalog_upload_ids (the vendor's full catalog).
      */
     #[Computed]
     public function catalogItemStats(): ?array
@@ -55,8 +49,14 @@ class CatalogSubmissionButton extends Component
     }
 
     /**
-     * Check if there is already a pending (review_requested) submission
-     * for this vendor.
+     * Check if there is already an active (pending) submission for this vendor.
+     *
+     * A submission is considered "active" while the vendor is waiting for
+     * admin review. This covers both ReviewRequested (just submitted, Excel
+     * generation may be in progress) and ReadyForReview (Excel generated,
+     * awaiting admin action). In both states the vendor should see the
+     * "Review Requested" panel and the "Withdraw Review Request" button
+     * instead of the "Request Review" button.
      */
     #[Computed]
     public function existingPendingSubmission(): ?CatalogSubmission
@@ -68,7 +68,10 @@ class CatalogSubmissionButton extends Component
         }
 
         return CatalogSubmission::where('vendor_id', $client->vendor_id)
-            ->where('status', CatalogSubmissionStatus::ReviewRequested)
+            ->whereIn('status', [
+                CatalogSubmissionStatus::ReviewRequested,
+                CatalogSubmissionStatus::ReadyForReview,
+            ])
             ->latest()
             ->first();
     }
@@ -76,13 +79,12 @@ class CatalogSubmissionButton extends Component
     /**
      * Vendor requests admin review of their catalog.
      *
-     * Creates a CatalogSubmission with a snapshot of the current eligible
-     * catalog items, wrapped in a database transaction for atomicity.
+     * Creates a CatalogSubmission for ALL current CatalogItems belonging to this vendor.
+     * There is no item selection — the entire vendor catalog is always submitted.
+     * The generated Excel file is the submission artifact.
      *
-     * Unlike the old upload-scoped version, this operates against the
-     * vendor's full catalog. catalog_upload_id is left null because
-     * this submission represents the current catalog state, not a
-     * specific upload event.
+     * Dispatches GenerateCatalogExportJob to build the Excel file from
+     * all current CatalogItems for this vendor.
      */
     public function requestReview(): void
     {
@@ -95,38 +97,40 @@ class CatalogSubmissionButton extends Component
 
         $vendorId = $client->vendor_id;
 
-        // Guard: must have exportable items across vendor's catalog
-        $exportableItems = CatalogItem::where('vendor_id', $vendorId)
-            ->whereIn('status', ['acceptable', 'excellent'])
-            ->get();
-
-        if ($exportableItems->isEmpty()) {
-            $this->addError('review', 'Your catalog has no complete items to submit for review. Please upload a catalog with valid data first.');
-            return;
-        }
-
-        // Guard: no duplicate pending review for this vendor
-        $pending = CatalogSubmission::where('vendor_id', $vendorId)
-            ->where('status', CatalogSubmissionStatus::ReviewRequested)
-            ->exists();
-
-        if ($pending) {
-            $this->addError('review', 'A review request is already pending for this catalog. Please wait for admin review.');
-            return;
-        }
-
-        // Count stats
-        $totalItems = CatalogItem::where('vendor_id', $vendorId)->count();
-        $completeItems = $exportableItems->count();
-        $incompleteItems = $totalItems - $completeItems;
-
-        $submission = null;
-
         try {
-            DB::transaction(function () use ($client, $vendorId, $exportableItems, $totalItems, $completeItems, $incompleteItems, &$submission) {
+            // Guard: vendor must have at least one catalog item
+            $totalItems = CatalogItem::where('vendor_id', $vendorId)->count();
+
+            if ($totalItems === 0) {
+                $this->addError('review', 'Your catalog is empty. Please upload catalog items before requesting review.');
+                return;
+            }
+
+            // Guard: no duplicate pending review for this vendor
+            $pending = CatalogSubmission::where('vendor_id', $vendorId)
+                ->whereIn('status', [
+                    CatalogSubmissionStatus::ReviewRequested,
+                    CatalogSubmissionStatus::ReadyForReview,
+                ])
+                ->exists();
+
+            if ($pending) {
+                $this->addError('review', 'A review request is already pending for this catalog. Please wait for admin review.');
+                return;
+            }
+
+            // Count stats based on ALL items (no filtering)
+            $completeItems = CatalogItem::where('vendor_id', $vendorId)
+                ->whereIn('status', ['acceptable', 'excellent'])
+                ->count();
+            $incompleteItems = $totalItems - $completeItems;
+
+            $submission = null;
+
+            DB::transaction(function () use ($client, $vendorId, $totalItems, $completeItems, $incompleteItems, &$submission) {
                 $submission = CatalogSubmission::create([
                     'vendor_id'              => $vendorId,
-                    'catalog_upload_id'      => null, // Not tied to a specific upload
+                    'catalog_upload_id'      => null,
                     'requested_by_client_id' => $client->id,
                     'status'                 => CatalogSubmissionStatus::ReviewRequested,
                     'total_items'            => $totalItems,
@@ -134,45 +138,97 @@ class CatalogSubmissionButton extends Component
                     'incomplete_items'       => $incompleteItems,
                     'requested_at'           => now(),
                 ]);
-
-                // Create snapshot records for each exportable catalog item
-                // This preserves the exact data at submission time for auditability
-                foreach ($exportableItems as $item) {
-                    CatalogSubmissionItem::create([
-                        'catalog_submission_id' => $submission->id,
-                        'catalog_item_id'       => $item->id,
-                        'vendor_id'             => $item->vendor_id,
-                        'vendor_sku'            => $item->vendor_sku,
-                        'name'                  => $item->name,
-                        'description'           => $item->description,
-                        'product_type'          => $item->product_type,
-                        'unit_of_measure'       => $item->unit_of_measure,
-                        'manufacturer_sku'      => $item->manufacturer_sku,
-                        'manufacturer_name'     => $item->manufacturer_name,
-                        'brand_name'            => $item->brand_name,
-                        'list_price'            => $item->list_price,
-                        'selling_price'         => $item->selling_price,
-                        'weight'                => $item->weight,
-                        'unspsc_code'           => $item->unspsc_code,
-                        'search_terms'          => $item->search_terms,
-                        'selling_points'        => $item->selling_points,
-                        'specifications'        => $item->specifications,
-                        'classifications'       => $item->classifications,
-                    ]);
-                }
             });
 
-            // Dispatch notification only after successful transaction commit
+            // Dispatch the Excel generation job after successful transaction commit
             if ($submission) {
-                \Illuminate\Support\Facades\Notification::route('mail', config('vit.admin_email'))
-                    ->notify(new CatalogReadyForReviewNotification(
-                        vendorName: $client->vendor->name,
-                    ));
+                try {
+                    GenerateCatalogExportJob::dispatch($submission->id);
+
+                    //logic to send notification to admin about the new review re
+
+                    $vendorName = 'Unknown Vendor';
+                    if ($client->vendor && is_object($client->vendor) && is_string($client->vendor->name)) {
+                        $vendorName = $client->vendor->name;
+                    }
+
+                    $adminEmail = config('vit.admin_email');
+
+                    // Ensure admin_email is a valid string before sending notification
+                    if (is_string($adminEmail) && $adminEmail !== '') {
+                        \Illuminate\Support\Facades\Notification::route('mail', $adminEmail)
+                            ->notify(new CatalogReadyForReviewNotification(
+                                vendorId: $vendorId,
+                            ));
+                    }
+                } catch (\Throwable $e) {
+                    // Log notification failure but don't block the review request
+                    \Illuminate\Support\Facades\Log::error('Catalog review notification failed', [
+                        'submission_id' => $submission->id,
+                        'vendor_id' => $vendorId,
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString(),
+                    ]);
+                }
             }
+
+            // Invalidate the cached computed property so the re-render
+            // picks up the newly created submission immediately.
+            unset($this->existingPendingSubmission);
 
             $this->dispatch('review-requested');
         } catch (\Throwable $e) {
-            $this->addError('review', 'Failed to submit review request: ' . $e->getMessage());
+            // Log detailed error for debugging
+            \Illuminate\Support\Facades\Log::error('Catalog review request failed', [
+                'vendor_id' => $vendorId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            // Show friendly error to vendor
+            $this->addError('review', 'Unable to submit catalog for review. Our team has been notified.');
+        }
+    }
+
+    /**
+     * Vendor withdraws a pending review request.
+     *
+     * Changes the submission status to Withdrawn so the vendor can
+     * submit a new review request later if needed.
+     */
+    public function withdrawReview(CatalogSubmission $submission): void
+    {
+        $client = Auth::guard('client')->user();
+
+        if (! $client) {
+            $this->addError('withdraw', 'You must be logged in to withdraw a review request.');
+            return;
+        }
+
+        // Verify ownership
+        if ($submission->vendor_id !== $client->vendor_id) {
+            $this->addError('withdraw', 'You do not have permission to withdraw this submission.');
+            return;
+        }
+
+        // Guard: can only withdraw if still pending review
+        if (! in_array($submission->status, [CatalogSubmissionStatus::ReviewRequested, CatalogSubmissionStatus::ReadyForReview], true)) {
+            $this->addError('withdraw', 'This submission cannot be withdrawn in its current state.');
+            return;
+        }
+
+        try {
+            $submission->update([
+                'status' => CatalogSubmissionStatus::Withdrawn,
+            ]);
+
+            // Invalidate the cached computed property so the re-render
+            // reflects the withdrawn state immediately.
+            unset($this->existingPendingSubmission);
+
+            $this->dispatch('review-withdrawn');
+        } catch (\Throwable $e) {
+            $this->addError('withdraw', 'Failed to withdraw review request: ' . $e->getMessage());
         }
     }
 

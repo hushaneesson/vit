@@ -9,7 +9,7 @@ class FingerprintService
      * because they are metadata, not actual content data.
      */
     public const EXCLUDE_COLUMNS = [
-        'vendor_sku',
+        'seller_sku',
         'vendor_id',
         'catalog_upload_id',
         'data_fingerprint'

@@ -3,8 +3,7 @@
 namespace App\Filament\Resources\CatalogSubmissions\Tables;
 
 use App\Enums\CatalogSubmissionStatus;
-use App\Jobs\GenerateCatalogExportJob;
-use App\Models\CatalogExport;
+use App\Jobs\UploadCatalogSubmissionToVit;
 use App\Models\CatalogSubmission;
 use App\Notifications\CatalogSubmissionReviewedNotification;
 use Filament\Actions\Action;
@@ -13,8 +12,6 @@ use Filament\Notifications\Notification;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
-use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -39,12 +36,26 @@ class CatalogSubmissionsTable
                     ->color(fn($state): string => match ($state) {
                         CatalogSubmissionStatus::Draft => 'gray',
                         CatalogSubmissionStatus::ReviewRequested => 'warning',
+                        CatalogSubmissionStatus::ReadyForReview => 'info',
                         CatalogSubmissionStatus::Approved => 'success',
-                        CatalogSubmissionStatus::Rejected => 'danger ',
-                        CatalogSubmissionStatus::ReadyForUpload => 'info',
                         CatalogSubmissionStatus::Uploaded => 'success',
+                        CatalogSubmissionStatus::Rejected => 'danger',
                         default => 'gray',
                     }),
+                TextColumn::make('processing_status')
+                    ->badge()
+                    ->formatStateUsing(fn($state) => Str::headline($state ?? ''))
+                    ->color(fn($state): string => match ($state) {
+                        'pending' => 'gray',
+                        'generating' => 'warning',
+                        'completed' => 'success',
+                        'uploading' => 'info',
+                        'failed' => 'danger',
+                        default => 'gray',
+                    }),
+                TextColumn::make('generated_at')
+                    ->dateTime()
+                    ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('created_at')
                     ->dateTime()
                     ->sortable()
@@ -55,9 +66,9 @@ class CatalogSubmissionsTable
                     ->options([
                         'draft' => 'Draft',
                         'review_requested' => 'Review Requested',
+                        'ready_for_review' => 'Ready for Review',
                         'approved' => 'Approved',
                         'rejected' => 'Rejected',
-                        'ready_for_upload' => 'Ready for Upload',
                         'uploaded' => 'Uploaded',
                     ]),
                 SelectFilter::make('vendor_id')
@@ -67,77 +78,75 @@ class CatalogSubmissionsTable
             ->defaultSort('requested_at', 'desc')
             ->recordActions([
                 Action::make('approve')
-                    ->label('Approve & Generate Excel File')
+                    ->label('Approve & Upload to VIT')
                     ->icon('heroicon-o-check-circle')
                     ->color('success')
-                    ->visible(fn(CatalogSubmission $record) => $record->status === CatalogSubmissionStatus::ReviewRequested)
+                    ->visible(fn(CatalogSubmission $record) => $record->status === CatalogSubmissionStatus::ReadyForReview)
                     ->requiresConfirmation()
                     ->modalHeading('Approve catalog submission')
-                    ->modalDescription('This will approve the submission and generate the Excel export file. The vendor will be notified when the export is ready.')
+                    ->modalDescription('This will approve the submission and upload the already-generated Excel file to the VIT FTP server. The file will NOT be regenerated.')
                     ->action(function (CatalogSubmission $record) {
-                        // Guard: must be in review_requested status
-                        if ($record->status !== CatalogSubmissionStatus::ReviewRequested) {
+                        // Guard: must be in ready_for_review status
+                        if ($record->status !== CatalogSubmissionStatus::ReadyForReview) {
                             Notification::make()
                                 ->title('Cannot approve')
-                                ->body('This submission is not in "Review Requested" status.')
+                                ->body('This submission is not ready for review.')
                                 ->danger()
                                 ->send();
                             return;
                         }
 
-                        // Guard: must have catalog items attached (via submissionItems snapshot)
-                        $itemCount = $record->submissionItems()->count();
-                        if ($itemCount === 0) {
+                        // Guard: processing_status must be completed
+                        if ($record->processing_status !== 'completed') {
                             Notification::make()
                                 ->title('Cannot approve')
-                                ->body('This submission has no catalog items attached. The vendor may need to re-submit.')
+                                ->body('The Excel file has not been generated yet. Please wait for generation to complete.')
+                                ->warning()
+                                ->send();
+                            return;
+                        }
+
+                        // Guard: file_path must exist
+                        if (!$record->file_path) {
+                            Notification::make()
+                                ->title('Cannot approve')
+                                ->body('The Excel file path is missing. Please contact support.')
+                                ->danger()
+                                ->send();
+                            return;
+                        }
+
+                        // Guard: file must exist on storage
+                        if (!Storage::disk($record->disk ?? 'local')->exists($record->file_path)) {
+                            Notification::make()
+                                ->title('Cannot approve')
+                                ->body('The generated Excel file is missing from storage.')
                                 ->danger()
                                 ->send();
                             return;
                         }
 
                         try {
-                            DB::transaction(function () use ($record) {
-                                // 1. Update submission status
-                                $userId = auth()->id();
+                            $userId = auth()->id();
 
-                                $updateData = [
-                                    'status' => CatalogSubmissionStatus::Approved,
-                                    'approved_at' => now(),
-                                ];
+                            $updateData = [
+                                'status' => CatalogSubmissionStatus::Approved,
+                                'approved_at' => now(),
+                                'processing_status' => 'uploading',
+                            ];
 
-                                // Only set approved_by if we have a valid user ID
-                                if ($userId !== null) {
-                                    $updateData['approved_by'] = $userId;
-                                }
+                            if ($userId !== null) {
+                                $updateData['approved_by'] = $userId;
+                            }
 
-                                $record->update($updateData);
+                            $record->update($updateData);
 
-                                // 2. Create CatalogExport linked to this submission
-                                // Enforce 1:1 relationship at DB level; catch duplicate dispatch
-                                try {
-                                    $export = CatalogExport::create([
-                                        'vendor_id'             => $record->vendor_id,
-                                        'catalog_submission_id' => $record->id,
-                                        'total_items'           => $record->complete_items,
-                                        'disk'                  => 'spaces',
-                                        'status'                => \App\Enums\CatalogExportStatus::Pending,
-                                    ]);
-                                } catch (\Illuminate\Database\QueryException $e) {
-                                    // Duplicate export attempt
-                                    throw new \RuntimeException('An export for this submission already exists.');
-                                }
-
-                                // Link back
-                                $record->update(['catalog_export_id' => $export->id]);
-
-                                // 3. Dispatch the export generation job with export ID
-                                GenerateCatalogExportJob::dispatch($export->id);
-                            });
+                            // Dispatch the FTP upload job (uploads existing file, does NOT regenerate)
+                            UploadCatalogSubmissionToVit::dispatch($record->id);
 
                             Notification::make()
                                 ->title('Submission approved')
-                                ->body('The export has been queued for generation.')
+                                ->body('The Excel file is being uploaded to the VIT FTP server.')
                                 ->success()
                                 ->send();
                         } catch (\Throwable $e) {
@@ -152,7 +161,10 @@ class CatalogSubmissionsTable
                     ->label('Reject')
                     ->icon('heroicon-o-x-circle')
                     ->color('danger')
-                    ->visible(fn(CatalogSubmission $record) => $record->status === CatalogSubmissionStatus::ReviewRequested)
+                    ->visible(fn(CatalogSubmission $record) => in_array($record->status, [
+                        CatalogSubmissionStatus::ReviewRequested,
+                        CatalogSubmissionStatus::ReadyForReview,
+                    ]))
                     ->requiresConfirmation()
                     ->modalHeading('Reject catalog submission')
                     ->modalDescription('Enter the reason for rejection. The vendor will be notified.')
@@ -163,10 +175,13 @@ class CatalogSubmissionsTable
                             ->placeholder('Explain why the submission was rejected...'),
                     ])
                     ->action(function (CatalogSubmission $record, array $data) {
-                        if ($record->status !== CatalogSubmissionStatus::ReviewRequested) {
+                        if (!in_array($record->status, [
+                            CatalogSubmissionStatus::ReviewRequested,
+                            CatalogSubmissionStatus::ReadyForReview,
+                        ])) {
                             Notification::make()
                                 ->title('Cannot reject')
-                                ->body('This submission is not in "Review Requested" status.')
+                                ->body('This submission cannot be rejected in its current state.')
                                 ->danger()
                                 ->send();
                             return;
@@ -209,14 +224,12 @@ class CatalogSubmissionsTable
                     ->icon('heroicon-o-arrow-down-on-square')
                     ->color('info')
                     ->visible(fn(CatalogSubmission $record) => in_array($record->status, [
+                        CatalogSubmissionStatus::ReadyForReview,
                         CatalogSubmissionStatus::Approved,
-                        CatalogSubmissionStatus::ReadyForUpload,
                         CatalogSubmissionStatus::Uploaded,
                     ]))
                     ->action(function (CatalogSubmission $record) {
-                        $export = $record->catalogExport;
-
-                        if (!$export) {
+                        if (!$record->file_path) {
                             Notification::make()
                                 ->title('File not available')
                                 ->body('The Excel file has not been generated yet')
@@ -225,7 +238,7 @@ class CatalogSubmissionsTable
                             return;
                         }
 
-                        if (!$export->file_path || !Storage::disk($export->disk)->exists($export->file_path)) {
+                        if (!Storage::disk($record->disk ?? 'local')->exists($record->file_path)) {
                             Notification::make()
                                 ->title('File not found')
                                 ->body('The generated file is missing from storage')
@@ -236,55 +249,7 @@ class CatalogSubmissionsTable
 
                         $filename = 'catalog-submission-' . $record->id . '-' . now()->format('Y-m-d') . '.xlsx';
 
-                        return Storage::disk($export->disk)->download($export->file_path, $filename);
-                    }),
-                Action::make('confirmUpload')
-                    ->label('Confirm VIT Upload')
-                    ->icon('heroicon-o-arrow-up-on-square')
-                    ->color('success')
-                    ->visible(fn(CatalogSubmission $record) => $record->status === CatalogSubmissionStatus::ReadyForUpload)
-                    ->requiresConfirmation()
-                    ->modalHeading('Confirm VIT upload')
-                    ->modalDescription('This will mark the catalog as uploaded to the VIT FTP server. This action should only be taken after the file has been successfully transferred.')
-                    ->action(function (CatalogSubmission $record) {
-                        if ($record->status !== CatalogSubmissionStatus::ReadyForUpload) {
-                            Notification::make()
-                                ->title('Cannot upload')
-                                ->body('This submission is not ready for upload.')
-                                ->danger()
-                                ->send();
-                            return;
-                        }
-
-                        try {
-                            $updateData = [
-                                'status' => CatalogSubmissionStatus::Uploaded,
-                            ];
-
-                            // Record timestamp only if the field exists
-                            if (in_array('uploaded_at', $record->getFillable())) {
-                                $updateData['uploaded_at'] = now();
-                            }
-
-                            // Record acting user only if the field exists
-                            if (in_array('uploaded_by', $record->getFillable())) {
-                                $updateData['uploaded_by'] = auth()->id();
-                            }
-
-                            $record->update($updateData);
-
-                            Notification::make()
-                                ->title('VIT upload confirmed')
-                                ->body('The catalog has been marked as uploaded.')
-                                ->success()
-                                ->send();
-                        } catch (\Throwable $e) {
-                            Notification::make()
-                                ->title('Upload confirmation failed')
-                                ->body($e->getMessage())
-                                ->danger()
-                                ->send();
-                        }
+                        return Storage::disk($record->disk ?? 'local')->download($record->file_path, $filename);
                     }),
             ])
             ->toolbarActions([

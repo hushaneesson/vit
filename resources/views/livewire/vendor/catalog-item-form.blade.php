@@ -41,11 +41,11 @@
 
                 <div class="grid gap-5 md:grid-cols-2">
                     <div>
-                        <label>Vendor SKU <span class="text-red-600">*</span></label>
-                        <input type="text" wire:model="vendorSku"
+                        <label>Seller SKU <span class="text-red-600">*</span></label>
+                        <input type="text" wire:model="sellerSku"
                             class="mt-1.5 block w-full rounded-lg border-gray-300 shadow-sm text-sm focus:border-sky-500 focus:ring-sky-500 focus:ring-1" />
                         <p class="text-xs text-gray-400 mt-1.5">Must be unique across your catalog.</p>
-                        @error('vendorSku')
+                        @error('sellerSku')
                             <p class="text-sm text-red-600 mt-1.5">{{ $message }}</p>
                         @enderror
                     </div>

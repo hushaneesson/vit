@@ -6,20 +6,23 @@ use App\Enums\CatalogSubmissionStatus;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\BelongsToMany;
-use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * Represents a vendor's catalog review submission.
  *
- * Each submission is a snapshot of the vendor's catalog items at the
- * time the vendor requested admin review. The exact items are recorded
- * in the catalog_submission_items pivot table for auditability.
+ * Each submission tracks the lifecycle of a vendor requesting review,
+ * an admin approving or rejecting, and the resulting Excel file
+ * being uploaded to VIT.
  *
- * This is a business approval entity — it tracks the lifecycle of a
- * vendor requesting review, an admin approving or rejecting, and the
- * resulting export generation.
+ * This is the single source of truth for:
+ * - Business approval status (CatalogSubmissionStatus enum)
+ * - Generated Excel file path, size, disk
+ * - Technical processing state (processing_status column)
+ * - Generation and upload timestamps
+ *
+ * No item selection is performed — all current CatalogItems for the
+ * vendor are included in the generated Excel. The generated Excel
+ * file is the artifact — no database snapshot of item data is maintained.
  */
 class CatalogSubmission extends Model
 {
@@ -39,7 +42,15 @@ class CatalogSubmission extends Model
         'rejected_by',
         'rejected_at',
         'rejection_reason',
-        'catalog_export_id',
+        // Export file metadata
+        'file_path',
+        'disk',
+        'file_size',
+        'processing_status',
+        'failure_reason',
+        'generating_started_at',
+        'generated_at',
+        'uploaded_at',
     ];
 
     protected $casts = [
@@ -50,74 +61,33 @@ class CatalogSubmission extends Model
         'requested_at' => 'datetime',
         'approved_at' => 'datetime',
         'rejected_at' => 'datetime',
+        'generating_started_at' => 'datetime',
+        'generated_at' => 'datetime',
+        'uploaded_at' => 'datetime',
     ];
 
-    /**
-     * The vendor whose catalog is being submitted for review.
-     */
     public function vendor(): BelongsTo
     {
         return $this->belongsTo(Vendor::class);
     }
 
-    /**
-     * The upload that triggered this submission (nullable — submissions
-     * may be created independently of a specific upload).
-     */
     public function catalogUpload(): BelongsTo
     {
         return $this->belongsTo(CatalogUpload::class);
     }
 
-    /**
-     * The client (vendor user) who requested the review.
-     */
     public function requestedByClient(): BelongsTo
     {
         return $this->belongsTo(Client::class, 'requested_by_client_id');
     }
 
-    /**
-     * The admin who approved this submission.
-     */
     public function approvedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'approved_by');
     }
 
-    /**
-     * The admin who rejected this submission.
-     */
     public function rejectedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'rejected_by');
-    }
-
-    /**
-     * The export generated from this approved submission.
-     */
-    public function catalogExport(): HasOne
-    {
-        return $this->hasOne(CatalogExport::class, 'catalog_submission_id');
-    }
-
-    /**
-     * The CatalogItem records that were included in this submission.
-     * Snapshot recorded in the catalog_submission_items pivot table
-     * at the time of review request.
-     */
-    public function catalogItems(): BelongsToMany
-    {
-        return $this->belongsToMany(CatalogItem::class, 'catalog_submission_items')
-            ->withTimestamps();
-    }
-
-    /*
-     * The snapshot records for this submission.
-     * These contain the actual item data at the time of submission.
-     */
-    public function submissionItems(): HasMany
-    {
-        return $this->hasMany(CatalogSubmissionItem::class);
     }
 }

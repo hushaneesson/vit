@@ -26,6 +26,9 @@ use Throwable;
  *
  * System-derived fields (e.g. seller → vendor.name) are populated
  * here, not from the uploaded file.
+ *
+ * CatalogItem columns now directly match VIT field keys, so no
+ * fieldKeyToColumnMap translation is needed.
  */
 class ProcessValidatedRowsJob implements ShouldQueue
 {
@@ -39,27 +42,20 @@ class ProcessValidatedRowsJob implements ShouldQueue
     {
         $upload = CatalogUpload::with('vendor')->findOrFail($this->catalogUploadId);
 
-        // Guard against retrying completed uploads
         if ($upload->status === CatalogUploadStatus::Completed) {
-            return; // Already processed successfully - nothing to do
+            return;
         }
 
-        // Stale processing detection - check if processing started but never completed
-        // This allows recovery from abandoned jobs while preventing duplicate workers
         if ($upload->status === CatalogUploadStatus::ProcessingItems) {
             $processingTimeout = (int) config('catalog.processing_timeout_minutes', 60);
             $isStale = $upload->processing_started_at
                 && $upload->processing_started_at->addMinutes($processingTimeout)->isPast();
 
             if (!$isStale && $upload->processing_started_at !== null) {
-                // Another worker is still processing - exit to avoid conflict
                 return;
             }
-            // Stale job or retry after email failure (null timestamp) - continue processing
         }
 
-        // Atomically claim ownership by updating status
-        // This prevents concurrent workers from processing the same upload
         $claimed = DB::transaction(function () use ($upload) {
             $updated = CatalogUpload::where('id', $upload->id)
                 ->whereIn('status', [CatalogUploadStatus::Processing, CatalogUploadStatus::ProcessingItems])
@@ -69,22 +65,17 @@ class ProcessValidatedRowsJob implements ShouldQueue
         });
 
         if (!$claimed) {
-            // Another worker already claimed this upload
             return;
         }
 
         try {
             $vendor = $upload->vendor;
 
-            // Build field_key => CatalogItem column mapping
-            $fieldToColumn = $this->fieldKeyToColumnMap();
-
             $validRows = $upload->rows()
                 ->where('status', 'valid')
                 ->cursor();
 
-            // Columns that should NOT be compared when checking for changes
-            $nonComparableColumns = ['vendor_sku', 'vendor_id', 'catalog_upload_id', 'data_fingerprint'];
+            $nonComparableColumns = ['seller_sku', 'vendor_id', 'catalog_upload_id', 'data_fingerprint'];
 
             $createdCount = 0;
             $updatedCount = 0;
@@ -94,90 +85,78 @@ class ProcessValidatedRowsJob implements ShouldQueue
             DB::beginTransaction();
 
             foreach ($validRows as $row) {
-                // CatalogUploadRow.data is JSON; use accessor with fallback.
                 $data = $row->data;
                 if (!is_array($data)) {
                     $data = json_decode((string) ($data ?? ''), true) ?: [];
                 }
 
-                // Build the attribute map from the row data
+                // Build the attribute map directly from VIT field keys
+                // CatalogItem columns now match VIT field keys, so no translation needed.
                 $attrs = [
                     'vendor_id' => $vendor->id,
                     'catalog_upload_id' => $upload->id,
                 ];
 
                 // Map validated field data to CatalogItem columns.
-                foreach ($fieldToColumn as $fieldKey => $columnName) {
-                    $rawValue = $data[$fieldKey] ?? null;
-
+                // The field keys from the CSV mapping are already VIT field keys,
+                // and CatalogItem columns now match those keys directly.
+                foreach ($data as $fieldKey => $rawValue) {
                     if (is_null($rawValue) || $rawValue === '' || $rawValue === []) {
-                        // For weight, use the DB default (0.01). For other optional
-                        // fields leave as null and let completeness scoring decide.
-                        if ($columnName === 'weight') {
-                            $attrs[$columnName] = 0.01;
+                        if ($fieldKey === 'item_weight') {
+                            $attrs[$fieldKey] = 0.01;
                             continue;
                         }
-                        $attrs[$columnName] = null;
+                        $attrs[$fieldKey] = null;
                         continue;
                     }
 
                     // Cast multi-value arrays for JSON columns
-                    // Pass raw arrays directly — CatalogItem casts these as 'array',
-                    // so Laravel will handle the JSON encoding automatically. Passing
-                    // json_encode() strings would cause double encoding.
-                    if (in_array($columnName, ['search_terms', 'classifications', 'specifications', 'selling_points'], true)) {
-                        $attrs[$columnName] = is_array($rawValue) ? $rawValue : [$rawValue];
-                    } elseif ($columnName === 'weight') {
-                        $attrs[$columnName] = is_numeric($rawValue) ? (float) $rawValue : 0.01;
-                    } elseif (in_array($columnName, ['quantity_per_unit', 'min_order_quantity', 'max_order_quantity', 'multiples', 'list_price', 'selling_price'], true)) {
-                        $attrs[$columnName] = is_numeric($rawValue) ? (float) $rawValue : null;
+                    if (in_array($fieldKey, ['search_terms', 'classifications', 'specifications', 'selling_points'], true)) {
+                        $attrs[$fieldKey] = is_array($rawValue) ? $rawValue : [$rawValue];
+                    } elseif ($fieldKey === 'item_weight') {
+                        $attrs[$fieldKey] = is_numeric($rawValue) ? (float) $rawValue : 0.01;
+                    } elseif (in_array($fieldKey, ['quantity_per_unit', 'min_qty_per_order', 'max_qty_per_order', 'multiples', 'list_price', 'selling_price_per_unit'], true)) {
+                        $attrs[$fieldKey] = is_numeric($rawValue) ? (float) $rawValue : null;
                     } else {
-                        $attrs[$columnName] = (string) $rawValue;
+                        $attrs[$fieldKey] = (string) $rawValue;
                     }
                 }
 
-                // Compute a deterministic fingerprint of the content data only
-                // (excludes metadata like vendor_id, catalog_upload_id)
                 $fingerprint = $this->computeFingerprint($attrs, $nonComparableColumns);
 
-                // STEP 1: Check by fingerprint first — exact content match
+                // STEP 1: Check by fingerprint first
                 $existingByFingerprint = CatalogItem::where('vendor_id', $vendor->id)
                     ->where('data_fingerprint', $fingerprint)
                     ->first();
 
                 if ($existingByFingerprint) {
-                    // Exact same data already exists — skip entirely
                     $skippedCount++;
-                    $itemName = $attrs['name'] ?? $attrs['vendor_sku'] ?? 'Unknown';
+                    $itemName = $attrs['name'] ?? $attrs['seller_sku'] ?? 'Unknown';
                     if ($itemName) {
                         $skippedNames[] = $itemName;
                     }
                     continue;
                 }
 
-                // STEP 2: Look for an existing item with the same vendor_sku for this vendor.
-                // This way re-uploads update rather than duplicate rows.
-                $vendorSku = $attrs['vendor_sku'] ?? null;
+                // STEP 2: Look for existing item with same seller_sku
+                $sellerSku = $attrs['seller_sku'] ?? null;
 
-                if ($vendorSku) {
+                if ($sellerSku) {
                     $existing = CatalogItem::where('vendor_id', $vendor->id)
-                        ->where('vendor_sku', $vendorSku)
+                        ->where('seller_sku', $sellerSku)
                         ->first();
 
                     if ($existing) {
-                        // Check if anything actually changed before updating
                         $hasChanges = $this->hasMeaningfulChanges($existing, $attrs, $nonComparableColumns);
 
                         if ($hasChanges) {
-                            // Update the existing record with new data
                             $attrs['data_fingerprint'] = $fingerprint;
                             $attrs['updated_at'] = now();
                             $existing->update($attrs);
                             $updatedCount++;
                         } else {
-                            // No changes — skip to save resources
                             $skippedCount++;
-                            $itemName = $attrs['name'] ?? $vendorSku;
+                            $itemName = $attrs['name'] ?? $sellerSku;
                             if ($itemName) {
                                 $skippedNames[] = $itemName;
                             }
@@ -187,7 +166,7 @@ class ProcessValidatedRowsJob implements ShouldQueue
                     }
                 }
 
-                // No existing item found — create a new one
+                // No existing item found — create new
                 $attrs['id'] = (string) Str::uuid();
                 $attrs['data_fingerprint'] = $fingerprint;
                 $attrs['created_at'] = now();
@@ -197,11 +176,9 @@ class ProcessValidatedRowsJob implements ShouldQueue
                     CatalogItem::create($attrs);
                     $createdCount++;
                 } catch (\Illuminate\Database\QueryException $e) {
-                    // Handle race condition: another process created this SKU between our check and insert.
-                    // Fall back to update logic.
-                    if ($e->getCode() === '23000' && str_contains($e->getMessage(), 'catalog_items_vendor_sku_unique')) {
+                    if ($e->getCode() === '23000' && str_contains($e->getMessage(), 'catalog_items_seller_sku_unique')) {
                         $existing = CatalogItem::where('vendor_id', $vendor->id)
-                            ->where('vendor_sku', $vendorSku)
+                            ->where('seller_sku', $sellerSku)
                             ->first();
 
                         if ($existing) {
@@ -210,7 +187,6 @@ class ProcessValidatedRowsJob implements ShouldQueue
                             $existing->update($attrs);
                             $updatedCount++;
                         } else {
-                            // Genuinely unique constraint violation — re-throw
                             throw $e;
                         }
                     } else {
@@ -221,9 +197,6 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
             DB::commit();
 
-            // Send validation report by email if there are too many errors
-            // to display on-screen. Only mark as Completed after email succeeds,
-            // so failed sends can be retried automatically.
             $emailSent = false;
             if ($upload->error_rows > 10 && !$upload->validation_report_emailed_at) {
                 try {
@@ -250,8 +223,6 @@ class ProcessValidatedRowsJob implements ShouldQueue
                         $emailSent = true;
                     }
                 } catch (\Throwable $e) {
-                    // Email failed — leave upload retryable by not marking Completed.
-                    // Reset processing_started_at so the stale check allows immediate retry.
                     $upload->update(['processing_started_at' => null]);
                     Log::warning('Failed to send validation report email for upload ' . $upload->id . ': ' . $e->getMessage());
                 }
@@ -259,8 +230,6 @@ class ProcessValidatedRowsJob implements ShouldQueue
                 $emailSent = true;
             }
 
-            // Only mark as Completed after rows are processed AND email is sent (if required).
-            // This allows automatic retry when email delivery fails.
             if ($emailSent) {
                 $upload->update([
                     'status' => CatalogUploadStatus::Completed,
@@ -286,19 +255,11 @@ class ProcessValidatedRowsJob implements ShouldQueue
         }
     }
 
-    /**
-     * Compute a deterministic MD5 fingerprint from the content fields of a row,
-     * excluding metadata columns that don't represent actual data.
-     */
     private function computeFingerprint(array $attrs, array $excludeColumns): string
     {
         return FingerprintService::compute($attrs, $excludeColumns);
     }
 
-    /**
-     * Determine if the new row data has meaningful differences from the existing record.
-     * Handles type coercion, null/empty equivalence, and JSON comparison.
-     */
     private function hasMeaningfulChanges(CatalogItem $existing, array $newAttrs, array $nonComparableColumns): bool
     {
         foreach ($newAttrs as $column => $newValue) {
@@ -308,7 +269,6 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
             $oldValue = $existing->getRawOriginal($column);
 
-            // Handle null vs empty string equivalence
             if (is_null($oldValue) && ($newValue === '' || $newValue === null)) {
                 continue;
             }
@@ -316,14 +276,10 @@ class ProcessValidatedRowsJob implements ShouldQueue
                 continue;
             }
 
-            // JSON columns — decode both sides for comparison
             if (in_array($column, ['search_terms', 'classifications', 'specifications', 'selling_points'], true)) {
-                // $oldValue comes from the database (JSON string), $newValue may be
-                // a raw array (from our fix) or a JSON string. Handle both.
                 $decodedOld = is_array($oldValue) ? $oldValue : json_decode((string) $oldValue, true);
                 $decodedNew = is_array($newValue) ? $newValue : json_decode((string) $newValue, true);
 
-                // Normalize both: sort arrays for deterministic comparison
                 if (is_array($decodedOld)) {
                     sort($decodedOld);
                 }
@@ -337,7 +293,6 @@ class ProcessValidatedRowsJob implements ShouldQueue
                 continue;
             }
 
-            // Numeric comparison — cast both to float for consistency
             if (is_numeric($oldValue) && is_numeric($newValue)) {
                 if ((float) $oldValue !== (float) $newValue) {
                     return true;
@@ -345,60 +300,11 @@ class ProcessValidatedRowsJob implements ShouldQueue
                 continue;
             }
 
-            // Default string comparison — trim both sides
             if (trim((string) $oldValue) !== trim((string) $newValue)) {
                 return true;
             }
         }
 
         return false;
-    }
-
-    /**
-     * Columns in catalog_items that are NOT NULL and come from user uploads.
-     * These must always have a value in every row.
-     */
-    private function getRequiredFieldKeys(): array
-    {
-        return [
-            'seller_sku',
-            'name',
-            'description',
-            'product_type_or_family',
-            'unspsc_code',
-            'unit_of_measure',
-            'list_price',
-            'selling_price_per_unit',
-        ];
-    }
-
-    /**
-     * Map VIT field_key values to CatalogItem database columns.
-     */
-    private function fieldKeyToColumnMap(): array
-    {
-        return [
-            'seller_sku' => 'vendor_sku',
-            'manufacturer_sku' => 'manufacturer_sku',
-            'manufacturer' => 'manufacturer_name',
-            'brand_name' => 'brand_name',
-            'name' => 'name',
-            'description' => 'description',
-            'product_type_or_family' => 'product_type',
-            'unit_of_measure' => 'unit_of_measure',
-            'quantity_per_unit' => 'quantity_per_unit',
-            'unspsc_code' => 'unspsc_code',
-            'list_price' => 'list_price',
-            'selling_price_per_unit' => 'selling_price',
-            'item_weight' => 'weight',
-            'min_qty_per_order' => 'min_order_quantity',
-            'max_qty_per_order' => 'max_order_quantity',
-            'multiples' => 'multiples',
-            'search_terms' => 'search_terms',
-            'classifications' => 'classifications',
-            'specifications' => 'specifications',
-            'selling_points' => 'selling_points',
-            'msds_link' => 'msds_link',
-        ];
     }
 }

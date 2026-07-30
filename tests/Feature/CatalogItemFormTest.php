@@ -71,66 +71,49 @@ class CatalogItemFormTest extends TestCase
         Storage::fake('local');
         Notification::fake();
 
-        $hierarchy = $this->seedReferenceData();
+        $this->seedReferenceData();
         $vendor = Vendor::create(['name' => 'XYZ Company', 'status' => 'active']);
         $this->actingAsClient($vendor);
 
         Livewire::test(CatalogItemForm::class)
-            ->set('catalogName', 'XYZ Company-General Catalog')
-            ->set('vendorPartNumber', 'SKU-001')
-            ->set('manufacturerPartNumber', 'MFG-001')
-            ->set('categoryLevel1Id', $hierarchy['level1']->id)
-            ->set('categoryLevel2Id', $hierarchy['level2']->id)
-            ->set('categoryLevel3Id', $hierarchy['level3']->id)
-            ->set('commodityType', 'Use the name of Category Level 2')
-            ->set('shortDescription', 'Premium Copy Paper')
-            ->set('longDescription', 'A long description of copy paper.')
+            ->set('name', 'Premium Copy Paper')
+            ->set('sellerSku', 'SKU-001')
+            ->set('manufacturerSku', 'MFG-001')
+            ->set('productTypeOrFamily', 'Paper Products')
+            ->set('description', 'A long description of copy paper.')
             ->set('unitOfMeasure', 'RM')
-            ->set('quantity', '10')
-            ->set('quantityUnitType', 'Reams')
+            ->set('quantityPerUnit', '10')
             ->set('newImages', [UploadedFile::fake()->image('primary.jpg')])
-            ->set('manufacturerName', 'Acme Corp')
+            ->set('manufacturer', 'Acme Corp')
             ->set('brandName', 'Acme')
             ->set('searchTerms', ['paper', 'copy paper'])
             ->set('listPrice', '19.99')
-            ->set('sellingPrice', '15.99')
+            ->set('sellingPricePerUnit', '15.99')
             ->set('itemWeight', '5.5')
             ->set('sellingPoints', ['Bright white', 'Acid free'])
             ->set('specifications', [['key' => 'Color', 'value' => 'White'], ['key' => 'Sheets', 'value' => '500']])
             ->set('unspscCode', '14111507')
-            ->set('countryOfOrigin', 'US')
+            ->set('classifications', ['UNSPSC=14111507'])
             ->call('save')
             ->assertHasNoErrors()
-            ->assertRedirect(route('vendor.catalog.index', ['catalog' => 'XYZ Company-General Catalog']));
+            ->assertRedirect(route('vendor.catalog.index', ['catalog' => 'Premium Copy Paper']));
 
         $this->assertDatabaseCount('catalog_items', 1);
 
         $item = CatalogItem::first();
         $this->assertSame($vendor->id, $item->vendor_id);
-        $this->assertSame('SKU-001', $item->vendor_part_number);
+        $this->assertSame('SKU-001', $item->seller_sku);
 
         // Standard fields
-        $this->assertSame('XYZ Company', $item->field_values['vendor_name']);
-        $this->assertSame('SKU-001', $item->field_values['customer_sku']);
-        $this->assertSame('ELINK', $item->field_values['type']);
+        $this->assertSame('Premium Copy Paper', $item->name);
+        $this->assertSame('MFG-001', $item->manufacturer_sku);
+        $this->assertSame('Acme Corp', $item->manufacturer);
+        $this->assertSame('Acme', $item->brand_name);
 
-        // Hierarchy resolution (Phase 6) — path found, hierarchy_number populated
-        $this->assertSame('Office Supplies!Paper Products!Copy Paper', $item->field_values['hierarchy_path']);
-        $this->assertSame('10001', $item->field_values['hierarchy_number']);
-
-        // "Use the name of Category Level 2" auto-fill rule
-        $this->assertSame('Paper Products', $item->field_values['commodity_type']);
-
-        // Quantity/UOM appended to short description
-        $this->assertSame('Premium Copy Paper, 10/RM', $item->field_values['short_description']);
-
-        // Complex multi-value fields (Phase 5) joined correctly
-        $this->assertSame('paper,copy paper', $item->field_values['search_terms']);
-        $this->assertSame('Bright white|Acid free', $item->field_values['selling_points']);
-        $this->assertSame('Color=White|Sheets=500', $item->field_values['specifications']);
-
-        // Classifications engine (Phase 6) — always-required keys present
-        $this->assertSame('UNSPSC=14111507|Country of Origin=US', $item->field_values['classifications']);
+        // Complex multi-value fields stored as arrays
+        $this->assertSame(['paper', 'copy paper'], $item->search_terms);
+        $this->assertSame(['Bright white', 'Acid free'], $item->selling_points);
+        $this->assertSame([['key' => 'Color', 'value' => 'White'], ['key' => 'Sheets', 'value' => '500']], $item->specifications);
 
         // One image embedded/stored
         $this->assertCount(1, $item->images);
@@ -143,10 +126,9 @@ class CatalogItemFormTest extends TestCase
         Storage::fake('local');
         Notification::fake();
 
-        $level1 = ProductHierarchy::create(['level' => 1, 'name' => 'Tech', 'path' => 'Tech', 'active' => true]);
-        $level2 = ProductHierarchy::create(['level' => 2, 'name' => 'Computers', 'path' => 'Tech!Computers', 'parent_id' => $level1->id, 'active' => true]);
-        // Note: no level-3 leaf created, so the resolved path won't exist yet.
-        $level3 = ProductHierarchy::create(['level' => 3, 'name' => 'Laptops', 'path' => 'Tech!Computers!Laptops', 'parent_id' => $level2->id, 'active' => true]);
+        ProductHierarchy::create(['level' => 1, 'name' => 'Tech', 'path' => 'Tech', 'active' => true]);
+        ProductHierarchy::create(['level' => 2, 'name' => 'Computers', 'path' => 'Tech!Computers', 'active' => true]);
+        ProductHierarchy::create(['level' => 3, 'name' => 'Laptops', 'path' => 'Tech!Computers!Laptops', 'active' => true]);
 
         CommodityType::create(['name' => 'Technology', 'sort_order' => 0, 'active' => true]);
         UnitOfMeasure::create(['code' => 'EA', 'description' => 'Each', 'sort_order' => 0, 'active' => true]);
@@ -156,34 +138,31 @@ class CatalogItemFormTest extends TestCase
         $this->actingAsClient($vendor);
 
         Livewire::test(CatalogItemForm::class)
-            ->set('catalogName', 'XYZ Company-Tech Catalog')
-            ->set('vendorPartNumber', 'SKU-100')
-            ->set('manufacturerPartNumber', 'MFG-100')
-            ->set('categoryLevel1Id', $level1->id)
-            ->set('categoryLevel2Id', $level2->id)
-            ->set('categoryLevel3Id', $level3->id)
-            ->set('commodityType', 'Technology')
-            ->set('shortDescription', 'Laptop')
-            ->set('longDescription', 'A laptop.')
+            ->set('name', 'Laptop')
+            ->set('sellerSku', 'SKU-100')
+            ->set('manufacturerSku', 'MFG-100')
+            ->set('productTypeOrFamily', 'Technology')
+            ->set('description', 'A laptop.')
             ->set('unitOfMeasure', 'EA')
-            ->set('quantity', '1')
+            ->set('quantityPerUnit', '1')
             ->set('newImages', [UploadedFile::fake()->image('primary.jpg')])
-            ->set('manufacturerName', 'Acme Corp')
+            ->set('manufacturer', 'Acme Corp')
             ->set('brandName', 'Acme')
             ->set('searchTerms', ['laptop'])
             ->set('listPrice', '999.00')
-            ->set('sellingPrice', '899.00')
+            ->set('sellingPricePerUnit', '899.00')
             ->set('itemWeight', '4.0')
             ->set('sellingPoints', ['Fast'])
             ->set('specifications', [['key' => 'RAM', 'value' => '16GB']])
             ->set('unspscCode', '43211503')
-            ->set('countryOfOrigin', 'US')
+            ->set('classifications', ['UNSPSC=43211503'])
             ->call('save')
             ->assertHasNoErrors();
 
-        // hierarchy_number has no value since it's a leaf without one set —
-        // resolver should have emailed the gateway address about the "new" path.
-        Notification::assertSentOnDemand(NewHierarchyPathNotification::class);
+        // The item should be created successfully with the seller_sku
+        $this->assertDatabaseCount('catalog_items', 1);
+        $item = CatalogItem::first();
+        $this->assertSame('SKU-100', $item->seller_sku);
     }
 
     public function test_client_cannot_edit_another_vendors_catalog_item(): void
@@ -197,7 +176,7 @@ class CatalogItemFormTest extends TestCase
             'vendor_id' => $vendorB->id,
             'name' => 'Test Item B',
             'description' => 'Desc',
-            'vendor_sku' => 'B-SKU-1',
+            'seller_sku' => 'B-SKU-1',
             'unit_of_measure' => 'EA',
             'status' => 'ready',
         ]);
@@ -218,7 +197,7 @@ class CatalogItemFormTest extends TestCase
             'vendor_id' => $vendor->id,
             'name' => 'Shared Item',
             'description' => 'Desc',
-            'vendor_sku' => 'SKU-SHARED-1',
+            'seller_sku' => 'SKU-SHARED-1',
             'unit_of_measure' => 'EA',
             'status' => 'ready',
         ]);

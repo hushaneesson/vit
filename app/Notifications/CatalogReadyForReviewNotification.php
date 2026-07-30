@@ -19,10 +19,10 @@ class CatalogReadyForReviewNotification extends Notification implements ShouldQu
     use Queueable;
 
     /**
-     * @param  string  $vendorName     Name of the vendor requesting review
+     * @param  int     $vendorId       ID of the vendor requesting review
      */
     public function __construct(
-        protected string $vendorName,
+        protected int $vendorId,
     ) {}
 
     public function via(object $notifiable): array
@@ -32,12 +32,17 @@ class CatalogReadyForReviewNotification extends Notification implements ShouldQu
 
     public function toMail(object $notifiable): MailMessage
     {
-        return (new MailMessage)
-            ->subject("Catalog review requested for {$this->vendorName}")
-            ->greeting('Catalog Review Requested')
-            ->line("Vendor **{$this->vendorName}** has submitted their catalog for review.")
-            ->line('')
-            ->line('Please review the catalog and approve or reject the submission.')
-            ->action('Review Catalog', route('filament.admin.resources.catalog-submissions.index'));
+        $vendor = \App\Models\Vendor::find($this->vendorId);
+        $vendorName = $vendor && is_string($vendor->name) ? $vendor->name : 'Unknown Vendor';
+
+        $mail = new MailMessage;
+        $mail->subject('Catalog review requested');
+        $mail->greeting('Catalog Review Requested');
+        $mail->line('Vendor ' . $vendorName . ' has submitted their catalog for review.');
+        $mail->line('');
+        $mail->line('Please review the catalog and approve or reject the submission.');
+        $mail->action('Review Catalog', url('/admin/catalog-submissions'));
+
+        return $mail;
     }
 }

@@ -45,10 +45,23 @@
                     <path stroke-linecap="round" stroke-linejoin="round"
                         d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
                 </svg>
-                <div class="text-sm text-sky-800">
-                    <p class="font-semibold">Review requested</p>
-                    <p class="mt-1">Your catalog has been submitted for admin review. You will be
-                        notified when the review is complete.</p>
+                <div class="flex-1">
+                    <div class="text-sm text-sky-800">
+                        <p class="font-semibold">Review requested</p>
+                        <p class="mt-1">Your catalog has been submitted</p>
+                    </div>
+                    <button wire:click="withdrawReview({{ $pendingSubmission->id }})" wire:loading.attr="disabled"
+                        class="inline-flex items-center gap-2 px-4 py-2 mt-3 text-sm font-medium transition bg-white border rounded-lg text-slate-700 border-slate-300 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed">
+                        <span wire:loading.remove wire:target="withdrawReview">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                                stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M9 15 9.75 15M9 18.75 9.75 18.75M15 15 15.75 15M15 18.75 15.75 18.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                            </svg>
+                            Withdraw Submission
+                        </span>
+                        <span wire:loading wire:target="withdrawReview">Withdrawing&hellip;</span>
+                    </button>
                 </div>
             </div>
         </div>
@@ -61,7 +74,7 @@
                         <path stroke-linecap="round" stroke-linejoin="round"
                             d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
                     </svg>
-                    Request VIT Upload
+                    Submit catalog
                 </span>
                 <span wire:loading wire:target="requestReview">Submitting&hellip;</span>
             </button>

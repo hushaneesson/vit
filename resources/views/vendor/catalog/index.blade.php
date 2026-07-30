@@ -130,7 +130,7 @@
                                             Product</th>
                                         <th
                                             class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">
-                                            Vendor Part #</th>
+                                            Seller SKU</th>
                                         <th
                                             class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">
                                             Status</th>
@@ -151,7 +151,7 @@
                                             <td class="px-6 py-4">
                                                 <div class="font-medium">{{ $item->name }}</div>
                                             </td>
-                                            <td class="px-6 py-4 text-gray-500">{{ $item->vendor_sku }}</td>
+                                            <td class="px-6 py-4 text-gray-500">{{ $item->seller_sku }}</td>
                                             <td class="px-6 py-4">
                                                 @php $status = $item->status ?? 'incomplete'; @endphp
                                                 <span @class([

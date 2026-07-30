@@ -19,7 +19,7 @@ class BackfillCatalogFingerprints extends Command
      * because they are metadata, not actual content data.
      * MUST match the exclusions used in ProcessValidatedRowsJob::computeFingerprint.
      */
-    private array $nonComparableColumns = ['vendor_sku', 'vendor_id', 'catalog_upload_id', 'data_fingerprint'];
+    private array $nonComparableColumns = ['seller_sku', 'vendor_id', 'catalog_upload_id', 'data_fingerprint'];
 
     public function handle(): int
     {
@@ -32,8 +32,6 @@ class BackfillCatalogFingerprints extends Command
         $duplicatesRemoved = 0;
         $backfilled = 0;
 
-        // Process ordered by created_at so the earliest record is kept
-        // Wrap each chunk in a transaction for atomicity
         CatalogItem::orderBy('created_at')
             ->chunk(100, function ($items) use (&$dedupTracker, &$duplicatesRemoved, &$backfilled, $bar) {
                 foreach ($items as $item) {
@@ -47,14 +45,12 @@ class BackfillCatalogFingerprints extends Command
 
                             $backfilled++;
 
-                            // Check for duplicates within the same vendor
                             $vendorId = $item->vendor_id;
                             if (!isset($dedupTracker[$vendorId])) {
                                 $dedupTracker[$vendorId] = [];
                             }
 
                             if (isset($dedupTracker[$vendorId][$fingerprint])) {
-                                // Exact duplicate found — remove this one (keep the earliest)
                                 $existing = $dedupTracker[$vendorId][$fingerprint];
                                 $item->delete();
                                 $duplicatesRemoved++;
@@ -80,9 +76,6 @@ class BackfillCatalogFingerprints extends Command
         return Command::SUCCESS;
     }
 
-    /**
-     * Compute fingerprint using the shared FingerprintService.
-     */
     private function computeFingerprint(CatalogItem $item): string
     {
         return FingerprintService::compute($item->getAttributes(), $this->nonComparableColumns);
