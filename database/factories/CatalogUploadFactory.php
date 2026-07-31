@@ -18,16 +18,14 @@ class CatalogUploadFactory extends Factory
             'client_id' => Client::factory(),
             'vendor_id' => fn(array $attrs) => Client::find($attrs['client_id'])?->vendor_id ?? Vendor::factory(),
             'original_filename' => $this->faker->word() . '.csv',
-            'catalog_name' => $this->faker->words(3, true),
             'file_path' => 'catalog-uploads/' . $this->faker->uuid() . '.csv',
             'disk' => 'local',
             'file_type' => 'csv',
             'status' => CatalogUploadStatus::Completed,
             'total_rows' => 0,
             'success_rows' => 0,
-            'error_rows' => 0,
+            'invalid_rows' => 0,
             'updated_rows' => 0,
-            'skipped_rows' => 0,
         ];
     }
 
@@ -42,7 +40,7 @@ class CatalogUploadFactory extends Factory
     public function withErrors(int $count): static
     {
         return $this->state(fn(array $attrs) => [
-            'error_rows' => $count,
+            'invalid_rows' => $count,
         ]);
     }
 }

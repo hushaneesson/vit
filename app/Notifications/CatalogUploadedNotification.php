@@ -28,9 +28,9 @@ class CatalogUploadedNotification extends Notification implements ShouldQueue
         return (new MailMessage)
             ->subject('Catalog successfully uploaded to VIT')
             ->greeting('Good news!')
-            ->line('Catalog "'.$this->submission->catalog_name.'" has been successfully uploaded to VIT.')
-            ->line('Product count: '.$this->submission->product_count)
-            ->line('Uploaded at: '.optional($this->submission->uploaded_at)->format('Y-m-d H:i'))
+            ->line('Catalog has been successfully uploaded to VIT.')
+            ->line('Product count: ' . $this->submission->product_count)
+            ->line('Uploaded at: ' . optional($this->submission->uploaded_at)->format('Y-m-d H:i'))
             ->action('View Submission', url('/vendor/dashboard'));
     }
 }

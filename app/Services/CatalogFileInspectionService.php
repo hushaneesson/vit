@@ -39,7 +39,7 @@ class CatalogFileInspectionService
         $rows = $sheet->toArray(null, true, true, false);
 
         $headerRow = array_map(
-            fn ($value) => is_string($value) ? trim($value) : $value,
+            fn($value) => is_string($value) ? trim($value) : $value,
             $rows[0] ?? []
         );
 
@@ -49,7 +49,7 @@ class CatalogFileInspectionService
         $lastNonEmptyIndex = $this->lastNonEmptyColumnIndex($headerRow);
         $headerRow = array_slice($headerRow, 0, $lastNonEmptyIndex + 1);
         $sampleData = array_map(
-            fn ($row) => array_slice($row, 0, $lastNonEmptyIndex + 1),
+            fn($row) => array_slice($row, 0, $lastNonEmptyIndex + 1),
             $sampleData
         );
 
@@ -60,11 +60,16 @@ class CatalogFileInspectionService
     }
 
     /**
-     * Count total data rows (excluding header) without loading everything
-     * into memory at once - used to populate catalog_uploads.total_rows
-     * before the queued job does the heavy processing.
+     * Compute a stable signature for a file's column structure.
+     *
+     * The signature is an MD5 of the sorted, lowercased, trimmed non-empty
+     * column headers. Two files with the same set of headers (regardless
+     * of order or case) produce the same signature, which is exactly what
+     * we want for matching mapping templates.
+     *
+     * If the file has no detectable columns, returns null.
      */
-    public function countDataRows(string $disk, string $path, string $fileType): int
+    public function computeFileSignature(string $disk, string $path, string $fileType): ?string
     {
         $localPath = $this->resolveLocalPath($disk, $path);
 
@@ -72,8 +77,30 @@ class CatalogFileInspectionService
         $reader->setReadDataOnly(true);
         $spreadsheet = $reader->load($localPath);
         $sheet = $spreadsheet->getActiveSheet();
+        $rows = $sheet->toArray(null, true, true, false);
 
-        return max(0, $sheet->getHighestDataRow() - 1); // minus header row
+        $headerRow = array_map(
+            fn($value) => is_string($value) ? trim($value) : $value,
+            $rows[0] ?? []
+        );
+
+        // Drop fully-empty trailing columns
+        $lastNonEmptyIndex = $this->lastNonEmptyColumnIndex($headerRow);
+        $headerRow = array_slice($headerRow, 0, $lastNonEmptyIndex + 1);
+
+        // Normalize: lowercase, trim, drop empties, sort for stability
+        $normalized = collect($headerRow)
+            ->filter(fn($v) => !is_null($v) && trim((string) $v) !== '')
+            ->map(fn($v) => strtolower(trim((string) $v)))
+            ->sort()
+            ->values()
+            ->all();
+
+        if (empty($normalized)) {
+            return null;
+        }
+
+        return md5(json_encode($normalized));
     }
 
     /**

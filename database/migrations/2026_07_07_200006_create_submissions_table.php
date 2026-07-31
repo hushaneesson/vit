@@ -18,7 +18,6 @@ return new class extends Migration
             $table->foreignId('vendor_id')->constrained('vendors')->cascadeOnDelete();
             $table->foreignId('client_id')->constrained('clients')->cascadeOnDelete();
 
-            $table->string('catalog_name');
             $table->string('file_path'); // storage/app/submissions/vendor-{id}/catalog-{name}-{timestamp}.xlsx
             $table->unsignedBigInteger('file_size')->nullable(); // bytes
             $table->unsignedInteger('product_count')->default(0);

@@ -8,7 +8,6 @@ use Filament\Panel;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
-use Spatie\Permission\Traits\HasRoles;
 use Zap\Models\Concerns\HasSchedules;
 
 /**
@@ -18,7 +17,7 @@ use Zap\Models\Concerns\HasSchedules;
 class User extends Authenticatable implements FilamentUser
 {
     /** @use HasFactory<UserFactory> */
-    use HasFactory, HasRoles, HasSchedules, Notifiable;
+    use HasFactory, HasSchedules, Notifiable;
 
     /**
      * The attributes that are mass assignable.

@@ -5,7 +5,6 @@ namespace Database\Seeders;
 use App\Models\User;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
-use Spatie\Permission\Models\Role;
 
 class DatabaseSeeder extends Seeder
 {
@@ -16,11 +15,6 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        // Ensure the super_admin role exists (Filament Shield's default
-        // super-admin role name) and grant it every existing permission.
-        $superAdminRole = Role::firstOrCreate(
-            ['name' => 'super_admin', 'guard_name' => 'web']
-        );
 
         // Default Onboarding Manager (admin) account — email + password auth.
         $admin = User::firstOrCreate(
@@ -30,10 +24,6 @@ class DatabaseSeeder extends Seeder
                 'password' => bcrypt('password'),
             ]
         );
-
-        if (! $admin->hasRole('super_admin')) {
-            $admin->assignRole($superAdminRole);
-        }
 
         $this->call([
             ReferenceDataSeeder::class,

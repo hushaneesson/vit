@@ -70,18 +70,6 @@
                     Upload your file exactly as it is. We'll help you match the columns in the next step.
                 </p>
 
-                <div class="mt-6">
-                    <label for="catalog-name" class="block text-sm font-medium text-slate-700">
-                        Catalog Name
-                    </label>
-                    <input id="catalog-name" type="text" wire:model="catalogName"
-                        placeholder="e.g. Q3 2026 Product Catalog"
-                        class="block w-full px-3 py-2 mt-1 text-sm border rounded-lg border-slate-300 focus:border-slate-500 focus:ring-1 focus:ring-slate-500" />
-                    @error('catalogName')
-                        <p class="mt-1 text-sm text-rose-600">{{ $message }}</p>
-                    @enderror
-                </div>
-
                 {{-- Drop zone --}}
                 <label for="catalog-file" @class([
                     'relative flex flex-col items-center justify-center gap-2 px-6 py-12 mt-4 text-center transition border-2 border-dashed rounded-lg cursor-pointer',
@@ -125,11 +113,6 @@
                     <p class="mt-3 text-sm text-rose-600">{{ $message }}</p>
                 @enderror
 
-                <p class="mt-3 text-xs text-slate-400">
-                    Your catalog will be named
-                    &ldquo;{{ $catalogName ?: $file?->getClientOriginalName() ?: 'Untitled' }}&rdquo;
-                </p>
-
                 <button wire:click="uploadFile" wire:loading.attr="disabled" wire:target="uploadFile"
                     @disabled(!$file)
                     class="inline-flex items-center gap-2 px-5 py-2.5 mt-4 text-sm font-semibold text-white rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition
@@ -149,10 +132,12 @@
                     <div class="min-w-0">
                         <h2 class="text-xl font-semibold text-slate-900">Match your columns</h2>
                         <p class="py-2 mt-1 text-sm text-slate-500">
-                            <span class="block">For each VIT field, tell us which column in your file contains the
-                                data.</span>
+                            <span class="block">Map the columns from your file to the VIT fields below. Only map the
+                                columns that exist in your file — anything missing can be completed later from the
+                                Catalog Item List.</span>
                             <span class="block">
-                                Fields marked <span class="font-semibold text-rose-600">*</span> are required.
+                                Fields marked <span class="font-semibold text-amber-600">*</span> are recommended for
+                                VIT submission. Mapping more fields now will reduce manual editing later.
                             </span>
                         </p>
                     </div>
@@ -170,49 +155,20 @@
 
                 {{-- Mapping progress --}}
                 @php
-                    $totalRequired = $this->catalogFields->where('requirement_type', 'required')->count();
-                    $mappedRequired = $totalRequired - $this->unmappedRequiredFields()->count();
-                    $progressPercent = $totalRequired > 0 ? round(($mappedRequired / $totalRequired) * 100) : 0;
+                    $totalRecommended = $this->catalogFields->where('requirement_type', 'required')->count();
+                    $mappedRecommended = $totalRecommended - $this->unmappedRequiredFields()->count();
+                    $progressPercent =
+                        $totalRecommended > 0 ? round(($mappedRecommended / $totalRecommended) * 100) : 0;
                 @endphp
                 <div class="flex items-center gap-3 mt-4">
                     <div class="flex-1 h-2 overflow-hidden rounded-full bg-slate-100">
-                        <div class="h-full rounded-full transition-all duration-500 {{ $mappedRequired === $totalRequired ? 'bg-emerald-500' : 'bg-slate-500' }}"
+                        <div class="h-full rounded-full transition-all duration-500 {{ $mappedRecommended === $totalRecommended ? 'bg-emerald-500' : 'bg-slate-500' }}"
                             style="width: {{ $progressPercent }}%"></div>
                     </div>
                     <span class="text-xs font-medium text-slate-500 whitespace-nowrap">
-                        {{ $mappedRequired }} of {{ $totalRequired }} required fields
+                        {{ $mappedRecommended }} of {{ $totalRecommended }} recommended fields
                     </span>
                 </div>
-
-                @if ($this->templateIsLoaded())
-                    <div @class([
-                        'flex items-center gap-2 px-3 py-2 mt-4 text-sm border rounded-lg',
-                        'bg-indigo-50 text-indigo-700 border-indigo-200' => !$this->hasMappingChangedFromTemplate(),
-                        'bg-amber-50 text-amber-700 border-amber-200' => $this->hasMappingChangedFromTemplate(),
-                    ])>
-                        @if ($this->hasMappingChangedFromTemplate())
-                            <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"
-                                stroke-width="2">
-                                <path stroke-linecap="round" stroke-linejoin="round"
-                                    d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
-                            </svg>
-                            <span><strong>Template modified.</strong> &ldquo;{{ $this->loadedTemplateName }}&rdquo; has
-                                been updated — you can save
-                                these changes below.</span>
-                        @else
-                            <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"
-                                stroke-width="2">
-                                <path stroke-linecap="round" stroke-linejoin="round"
-                                    d="m6.115 5.19.319 1.913A6 6 0 0 0 8.11 10.36L9.75 12l-.387.775c-.217.433-.132.956.21 1.298l1.348 1.348c.21.21.329.497.329.795v1.089c0 .426.24.815.622 1.006l.153.076c.433.217.956.132 1.298-.21l.723-.723a8.7 8.7 0 0 0 2.288-4.042 1.087 1.087 0 0 0-.358-1.099l-1.33-1.108c-.251-.21-.402-.513-.422-.827l-.077-1.002a.75.75 0 0 0-.747-.668.75.75 0 0 0-.747.668l-.077 1.002c-.02.314-.171.617-.422.827l-1.33 1.108a1.087 1.087 0 0 0-.358 1.099l.077.268" />
-                                <path stroke-linecap="round" stroke-linejoin="round"
-                                    d="M15.75 9h.01v.01h-.01V9Zm-4.5 3.75h.01v.01h-.01v-.01Z" />
-                            </svg>
-                            <span><strong>Using saved mapping template.</strong>
-                                &ldquo;{{ $this->loadedTemplateName }}&rdquo; — your columns were automatically matched
-                                from a previous upload.</span>
-                        @endif
-                    </div>
-                @endif
 
                 <div class="mt-4 overflow-hidden border rounded-lg border-slate-200">
                     <table class="w-full text-sm border-collapse">
@@ -220,7 +176,7 @@
                             <tr class="text-xs font-semibold tracking-wide uppercase bg-slate-50 text-slate-500">
                                 <th class="p-3 text-left border-b border-slate-200">VIT Field</th>
                                 <th class="p-3 text-left border-b border-slate-200">Description</th>
-                                <th class="p-3 text-left border-b border-slate-200">Requirement</th>
+                                <th class="p-3 text-left border-b border-slate-200">Priority</th>
                                 <th class="p-3 text-left border-b border-slate-200 w-80">Uploaded File Column</th>
                             </tr>
                         </thead>
@@ -236,8 +192,7 @@
                                 ])>
                                     <td class="p-3">
                                         <div class="flex items-center gap-2">
-                                            <span
-                                                class="font-medium text-slate-900">{{ $field->web_app_label }}</span>
+                                            <span class="font-medium text-slate-900">{{ $field->web_app_label }}</span>
                                         </div>
                                     </td>
                                     <td class="p-3">
@@ -249,8 +204,8 @@
                                     <td class="p-3">
                                         @if ($field->requirement_type === 'required')
                                             <span
-                                                class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-rose-50 text-rose-700 border border-rose-200">
-                                                Required <span class="text-rose-400">*</span>
+                                                class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                                                Recommended <span class="text-amber-400">*</span>
                                             </span>
                                         @else
                                             <span
@@ -306,31 +261,17 @@
 
                 @if ($this->unmappedRequiredFields()->isNotEmpty())
                     <div
-                        class="flex items-start gap-2 p-3 mt-4 text-sm border rounded-lg bg-amber-50 text-amber-800 border-amber-200">
+                        class="flex items-start gap-2 p-3 mt-4 text-sm border rounded-lg bg-sky-50 text-sky-800 border-sky-200">
                         <svg class="w-5 h-5 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24"
                             stroke="currentColor" stroke-width="1.5">
                             <path stroke-linecap="round" stroke-linejoin="round"
-                                d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+                                d="m11.25 11.25.04-.02a.75.75 0 0 1 1.063.452l.255.766a.75.75 0 0 0 1.063.452l.04-.02a.75.75 0 0 1 1.063.452l.255.766a.75.75 0 0 0 1.063.452l.04-.02a.75.75 0 0 1 1.063.452l.255.766a.75.75 0 0 0 1.063.452l.04-.02a.75.75 0 0 1 1.063.452l.255.766M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
                         </svg>
                         <span>
-                            <strong>Still needed:</strong> {{ $this->unmappedRequiredFields()->join(', ') }}
+                            <strong>Not in this file:</strong> {{ $this->unmappedRequiredFields()->join(', ') }}.
+                            You can continue without these — they can be completed later from the Catalog Item List
+                            before requesting review.
                         </span>
-                    </div>
-                @endif
-
-                @if ($this->hasMappingChangedFromTemplate())
-                    <div class="pt-5 mt-6 border-t border-slate-100">
-                        <label class="flex items-center gap-2 text-sm cursor-pointer text-slate-700">
-                            <input type="checkbox" wire:model.live="saveAsTemplate"
-                                class="rounded border-slate-300 text-slate-900 focus:ring-slate-500" />
-                            Remember this mapping for next time
-                        </label>
-
-                        @if ($saveAsTemplate)
-                            <input type="text" wire:model="templateName"
-                                placeholder="Name this template (e.g. Our standard export)"
-                                class="w-full max-w-sm px-3 py-2 mt-3 text-sm border rounded-lg border-slate-300 focus:border-slate-500 focus:ring-1 focus:ring-slate-500" />
-                        @endif
                     </div>
                 @endif
 
@@ -349,9 +290,8 @@
                         Start over
                     </button>
 
-                    <button wire:click="confirmMapping" wire:loading.attr="disabled" @disabled($this->unmappedRequiredFields()->isNotEmpty())
-                        class="inline-flex items-center gap-2 px-6 py-2.5 text-sm font-semibold text-white rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition
-                               {{ $this->unmappedRequiredFields()->isEmpty() ? 'bg-slate-900 hover:bg-slate-800' : 'bg-slate-400' }}">
+                    <button wire:click="confirmMapping" wire:loading.attr="disabled"
+                        class="inline-flex items-center gap-2 px-6 py-2.5 text-sm font-semibold text-white rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition bg-slate-900 hover:bg-slate-800">
                         <span wire:loading.remove wire:target="confirmMapping">
                             Process file &rarr;
                         </span>
@@ -400,16 +340,10 @@
                             <div class="text-lg font-semibold text-amber-700">{{ $progress['updated_rows'] }}</div>
                         </div>
                     @endif
-                    @if ($progress['skipped_rows'] > 0)
-                        <div class="text-center">
-                            <div class="text-xs font-medium uppercase text-sky-600">Unchanged</div>
-                            <div class="text-lg font-semibold text-sky-700">{{ $progress['skipped_rows'] }}</div>
-                        </div>
-                    @endif
-                    @if ($progress['error_rows'] > 0)
+                    @if ($progress['invalid_rows'] > 0)
                         <div class="text-center">
                             <div class="text-xs font-medium uppercase text-rose-600">Errors</div>
-                            <div class="text-lg font-semibold text-rose-700">{{ $progress['error_rows'] }}</div>
+                            <div class="text-lg font-semibold text-rose-700">{{ $progress['invalid_rows'] }}</div>
                         </div>
                     @endif
                 </div>
@@ -437,46 +371,45 @@
                 </div>
                 <h2 class="mt-4 text-xl font-semibold text-center text-slate-900">Upload complete</h2>
 
-                {{-- Visual summary cards --}}
-                <dl class="grid grid-cols-4 gap-3 mt-6">
-                    <div class="p-4 text-center border rounded-lg border-slate-200 bg-slate-50">
+                {{-- Visual summary cards — only show a card when its value > 0 --}}
+                <dl class="flex flex-wrap gap-3 mt-6">
+                    <div class="p-4 text-center border rounded-lg border-slate-200 bg-slate-50 min-w-[120px] flex-1">
                         <dt class="text-xs font-medium tracking-wide uppercase text-slate-500">Total Rows</dt>
                         <dd class="mt-1 text-2xl font-semibold text-slate-900">{{ $progress['total_rows'] }}</dd>
                     </div>
-                    <div class="p-4 text-center border rounded-lg border-emerald-200 bg-emerald-50">
-                        <dt class="text-xs font-medium tracking-wide uppercase text-emerald-700">Created</dt>
-                        <dd class="mt-1 text-2xl font-semibold text-emerald-700">{{ $progress['success_rows'] }}</dd>
-                    </div>
-                    <div class="p-4 text-center border rounded-lg border-amber-200 bg-amber-50">
-                        <dt class="text-xs font-medium tracking-wide uppercase text-amber-700">
-                            Updated
-                            @if ($progress['skipped_rows'] > 0)
-                                <span class="ml-1 text-xs font-normal text-amber-500">({{ $progress['skipped_rows'] }}
-                                    unchanged)</span>
-                            @endif
-                        </dt>
-                        <dd class="mt-1 text-2xl font-semibold text-amber-700">{{ $progress['updated_rows'] }}</dd>
-                    </div>
-                    <div class="p-4 text-center border rounded-lg border-rose-200 bg-rose-50">
-                        <dt class="text-xs font-medium tracking-wide uppercase text-rose-700">Errors</dt>
-                        <dd class="mt-1 text-2xl font-semibold text-rose-700">{{ $progress['error_rows'] }}</dd>
-                    </div>
+                    @if ($progress['created_rows'] > 0)
+                        <div
+                            class="p-4 text-center border rounded-lg border-emerald-200 bg-emerald-50 min-w-[120px] flex-1">
+                            <dt class="text-xs font-medium tracking-wide uppercase text-emerald-700">Created</dt>
+                            <dd class="mt-1 text-2xl font-semibold text-emerald-700">{{ $progress['created_rows'] }}
+                            </dd>
+                        </div>
+                    @endif
+                    @if ($progress['updated_rows'] > 0)
+                        <div
+                            class="p-4 text-center border rounded-lg border-amber-200 bg-amber-50 min-w-[120px] flex-1">
+                            <dt class="text-xs font-medium tracking-wide uppercase text-amber-700">Updated</dt>
+                            <dd class="mt-1 text-2xl font-semibold text-amber-700">{{ $progress['updated_rows'] }}
+                            </dd>
+                        </div>
+                    @endif
+                    @if ($progress['unchanged_rows'] > 0)
+                        <div class="p-4 text-center border rounded-lg border-sky-200 bg-sky-50 min-w-[120px] flex-1">
+                            <dt class="text-xs font-medium tracking-wide uppercase text-sky-700">Unchanged</dt>
+                            <dd class="mt-1 text-2xl font-semibold text-sky-700">{{ $progress['unchanged_rows'] }}
+                            </dd>
+                        </div>
+                    @endif
+                    @if ($progress['invalid_rows'] > 0)
+                        <div class="p-4 text-center border rounded-lg border-rose-200 bg-rose-50 min-w-[120px] flex-1">
+                            <dt class="text-xs font-medium tracking-wide uppercase text-rose-700">Invalid</dt>
+                            <dd class="mt-1 text-2xl font-semibold text-rose-700">{{ $progress['invalid_rows'] }}</dd>
+                        </div>
+                    @endif
                 </dl>
 
-                {{-- Items that were already up to date --}}
-                @if ($progress['skipped_rows'] > 0 && $progress['skipped_item_names'])
-                    <div class="p-3 mt-4 text-sm border rounded-lg bg-sky-50 text-sky-800 border-sky-200">
-                        <span class="font-semibold">{{ $progress['skipped_rows'] }} item(s) already up to date:</span>
-                        <ul class="mt-1 ml-4 overflow-y-auto list-disc max-h-32">
-                            @foreach ($progress['skipped_item_names'] as $name)
-                                <li>{{ $name }}</li>
-                            @endforeach
-                        </ul>
-                    </div>
-                @endif
-
                 {{-- Failed rows --}}
-                @if ($progress['error_rows'] > 0 && $this->failedRows->isNotEmpty())
+                @if ($progress['invalid_rows'] > 0 && $this->failedRows->isNotEmpty())
                     @php
                         $totalMessages = $this->failedRows->count();
                         $showFullTable = $totalMessages <= 10;

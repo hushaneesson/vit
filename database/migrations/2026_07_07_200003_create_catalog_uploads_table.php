@@ -20,7 +20,7 @@ return new class extends Migration
             $table->foreignId('vendor_id')->constrained('vendors')->cascadeOnDelete();
 
             $table->string('original_filename');
-            $table->string('catalog_name')->nullable();
+
             $table->string('file_path'); // path on the configured disk (DigitalOcean Spaces)
             $table->string('disk')->default('spaces');
             $table->enum('file_type', ['csv', 'xlsx', 'xls']);
@@ -38,10 +38,11 @@ return new class extends Migration
 
             $table->unsignedInteger('total_rows')->nullable();
             $table->unsignedInteger('success_rows')->default(0);
-            $table->unsignedInteger('error_rows')->default(0);
+            $table->unsignedInteger('created_rows')->default(0);
+            $table->unsignedInteger('invalid_rows')->default(0);
             $table->unsignedInteger('updated_rows')->default(0);
-            $table->unsignedInteger('skipped_rows')->default(0);
-            $table->json('skipped_item_names')->nullable();
+            $table->unsignedInteger('unchanged_rows')->default(0);
+
 
             $table->text('failure_reason')->nullable(); // set if the whole job fails (bad file, etc.)
 

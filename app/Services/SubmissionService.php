@@ -18,14 +18,14 @@ class SubmissionService
 {
     public function __construct(protected CatalogExcelGenerator $generator) {}
 
-    public function createSubmissionForCatalog(Vendor $vendor, Client $client, string $catalogName): Submission
+    public function createSubmission(Vendor $vendor, Client $client): Submission
     {
         $items = CatalogItem::query()
             ->where('vendor_id', $vendor->id)
-            ->where('catalog_name', $catalogName)
             ->with('images')
             ->get();
 
+        $catalogName = 'Catalog Submission ' . $vendor->name;
         $disk = 'local';
         $path = $this->generator->generateAndStore($vendor, $catalogName, $items, $disk);
 
@@ -34,7 +34,6 @@ class SubmissionService
         return Submission::create([
             'vendor_id' => $vendor->id,
             'client_id' => $client->id,
-            'catalog_name' => $catalogName,
             'file_path' => $path,
             'file_size' => $fileSize,
             'product_count' => $items->count(),

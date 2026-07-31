@@ -16,19 +16,16 @@ class CatalogItem extends Model
         'name',
         'description',
         'manufacturer_sku',
-        'manufacturer_name',
+        'manufacturer',
         'brand_name',
-        'vendor_sku',
-        'catalog_name',
-        'catalog_upload_id',
-        'data_fingerprint',
+        'seller_sku',
         'unspsc_code',
-        'product_type',
+        'product_type_or_family',
         'unit_of_measure',
         'quantity_per_unit',
-        'weight',
-        'min_order_quantity',
-        'max_order_quantity',
+        'item_weight',
+        'min_qty_per_order',
+        'max_qty_per_order',
         'multiples',
         'search_terms',
         'classifications',
@@ -36,7 +33,11 @@ class CatalogItem extends Model
         'selling_points',
         'msds_link',
         'list_price',
-        'selling_price',
+        'selling_price_per_unit',
+
+        // needed for the duplicate detection and completeness scoring, but not VIT-required:
+        // 'image_file_name',
+        // 'categorization_or_hierarchy',
 
         // not VIT, but useful for completeness scoring
         'status',
@@ -48,7 +49,6 @@ class CatalogItem extends Model
         'specifications' => 'array',
         'selling_points' => 'array',
         'classifications' => 'array',
-
     ];
 
     public function vendor()
@@ -62,65 +62,58 @@ class CatalogItem extends Model
     }
 
     // Fields that are considered "required" for a complete item.
-    // These are the data points a vendor MUST provide for the item
-    // to be usable. Missing required fields mark the item as 'incomplete'.
+    // These are VIT-required fields — items missing them will have
+    // a lower completeness score and 'incomplete' status, but they
+    // can still be created/imported and completed later.
     protected static array $requiredFields = [
         'name',
         'description',
-        'vendor_sku',
+        'seller_sku',
         'unit_of_measure',
     ];
 
     // Fields that push an item from "acceptable" to "excellent"
     protected static array $excellentFields = [
         'manufacturer_sku',
-        'manufacturer_name',
+        'manufacturer',
         'brand_name',
         'unspsc_code',
-        'product_type',
+        'product_type_or_family',
         'search_terms',
         'specifications',
         'selling_points',
         'classifications',
         'msds_link',
         'quantity_per_unit',
-        'weight',
-        'min_order_quantity',
-        'max_order_quantity',
+        'item_weight',
+        'min_qty_per_order',
+        'max_qty_per_order',
         'multiples',
         'list_price',
-        'selling_price',
+        'selling_price_per_unit',
     ];
-
 
     protected static function booted()
     {
         static::saving(function ($item) {
-            // Calculate using the dirty/updated attributes of this model instance
             $stats = self::calculateCompleteness($item->toArray());
-
             $item->completeness_score = $stats['score'];
             $item->status = $stats['status'];
         });
     }
 
-    /**
-     * Static Engine: Calculates completeness using raw array data.
-     */
     public static function calculateCompleteness(array $data): array
     {
         $allFields = array_merge(self::$requiredFields, self::$excellentFields);
         $filledCount = 0;
 
-        // 1. Calculate the score (0 to 100)
         foreach ($allFields as $field) {
-            if (!empty($data[$field])) {
+            if (array_key_exists($field, $data) && $data[$field] !== null && $data[$field] !== '') {
                 $filledCount++;
             }
         }
         $score = (int) round(($filledCount / count($allFields)) * 100);
 
-        // 2. Determine the status state
         $status = 'acceptable';
         foreach (self::$requiredFields as $field) {
             if (empty($data[$field])) {

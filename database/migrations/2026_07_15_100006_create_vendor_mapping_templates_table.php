@@ -10,6 +10,13 @@ return new class extends Migration
      * A vendor may opt to save a column mapping so future uploads can be
      * pre-filled automatically. A vendor can have more than one saved
      * template (e.g. different suppliers export different layouts).
+     *
+     * Each template is tied to a specific file structure via `file_signature`,
+     * which is a hash of the sorted, normalized column headers from the file
+     * the template was created from. When a new file is uploaded, we compute
+     * the same signature and only match templates that have an identical
+     * signature — this prevents templates from being applied to incompatible
+     * file formats.
      */
     public function up(): void
     {
@@ -22,6 +29,10 @@ return new class extends Migration
 
             $table->string('name'); // e.g. "Standard export from our ERP"
             $table->boolean('active')->default(true);
+
+            // Hash of the normalized, sorted column headers from the file this
+            // template applies to. Used to match templates to compatible files.
+            $table->string('file_signature')->nullable()->index();
 
             $table->timestamps();
         });

@@ -15,29 +15,33 @@ class CatalogRowValidator
     {
         $errors = [];
 
+        // seller_sku is the unique identifier for catalog items. Without it,
+        // the row cannot be matched to an existing item or created as a new
+        // one. Unlike other "required" business fields (description,
+        // manufacturer, brand) which can be left null and completed later,
+        // a missing seller_sku is a data quality error that prevents import.
+        if (empty($rowData['seller_sku'])) {
+            $errors[] = [
+                'field_key' => 'seller_sku',
+                'message' => 'Seller SKU is required to identify and import a catalog item.',
+            ];
+        }
+
+        // NOTE: Other required and conditional field checks have been removed.
+        //
+        // The application now imports a vendor's existing catalog so they
+        // can complete and edit it inside the application before submission.
+        // Missing business fields (e.g. description, manufacturer, brand)
+        // should NOT prevent importing — they simply become null on the
+        // CatalogItem and can be completed later from the Catalog Item List.
+        //
+        // Only type-level data quality errors (non-numeric values in number
+        // fields, values exceeding max length) are still reported. These
+        // represent genuinely bad data, not missing fields.
+
         foreach ($fieldDefinitions as $definition) {
             $value = $rowData[$definition->field_key] ?? null;
             $isEmpty = is_null($value) || $value === '';
-
-            if ($definition->requirement_type === 'required' && $isEmpty) {
-                $errors[] = [
-                    'field_key' => $definition->field_key,
-                    'message' => "{$definition->web_app_label} is required.",
-                ];
-
-                continue;
-            }
-
-            if ($definition->requirement_type === 'conditional' && $isEmpty) {
-                if ($this->conditionIsTriggered($definition, $rowData)) {
-                    $errors[] = [
-                        'field_key' => $definition->field_key,
-                        'message' => "{$definition->web_app_label} is required based on another field's value.",
-                    ];
-                }
-
-                continue;
-            }
 
             if ($isEmpty) {
                 continue;
@@ -53,21 +57,6 @@ class CatalogRowValidator
         }
 
         return ['errors' => $errors];
-    }
-
-    private function conditionIsTriggered($definition, array $rowData): bool
-    {
-        if (! $definition->conditional_on_field) {
-            return false;
-        }
-
-        $triggerValue = $rowData[$definition->conditional_on_field] ?? null;
-
-        if (is_null($definition->conditional_on_value)) {
-            return ! is_null($triggerValue) && $triggerValue !== '';
-        }
-
-        return (string) $triggerValue === (string) $definition->conditional_on_value;
     }
 
     private function validateType($definition, mixed $value): ?string

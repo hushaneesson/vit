@@ -23,15 +23,15 @@ class CatalogItemForm extends Component
     // Identification
     public string $name = '';
 
-    public string $vendorSku = '';
+    public string $sellerSku = '';
 
     public string $manufacturerSku = '';
 
-    public string $manufacturerName = '';
+    public string $manufacturer = '';
 
     public string $brandName = '';
 
-    public string $productType = '';
+    public string $productTypeOrFamily = '';
 
     public string $description = '';
 
@@ -39,7 +39,7 @@ class CatalogItemForm extends Component
 
     public ?string $quantityPerUnit = null;
 
-    public ?string $weight = '0.01';
+    public ?string $itemWeight = null;
 
     // Images
     /** @var array<int, \Livewire\Features\SupportFileUploads\TemporaryUploadedFile> */
@@ -53,7 +53,7 @@ class CatalogItemForm extends Component
 
     public ?string $listPrice = null;
 
-    public ?string $sellingPrice = null;
+    public ?string $sellingPricePerUnit = null;
 
     /** @var array<int, string> */
     public array $sellingPoints = [''];
@@ -68,9 +68,9 @@ class CatalogItemForm extends Component
     /** @var array<int, string> */
     public array $classifications = [''];
 
-    public ?string $minOrderQuantity = null;
+    public ?string $minQtyPerOrder = null;
 
-    public ?string $maxOrderQuantity = null;
+    public ?string $maxQtyPerOrder = null;
 
     public ?string $multiples = null;
 
@@ -93,21 +93,21 @@ class CatalogItemForm extends Component
         $this->catalogItemId = $catalogItem->id;
 
         $this->name = $catalogItem->name;
-        $this->vendorSku = $catalogItem->vendor_sku;
+        $this->sellerSku = $catalogItem->seller_sku;
         $this->manufacturerSku = $catalogItem->manufacturer_sku ?? '';
-        $this->manufacturerName = $catalogItem->manufacturer_name ?? '';
+        $this->manufacturer = $catalogItem->manufacturer ?? '';
         $this->brandName = $catalogItem->brand_name ?? '';
-        $this->productType = $catalogItem->product_type;
-        $this->description = $catalogItem->description;
-        $this->unitOfMeasure = $catalogItem->unit_of_measure;
+        $this->productTypeOrFamily = $catalogItem->product_type_or_family ?? '';
+        $this->description = $catalogItem->description ?? '';
+        $this->unitOfMeasure = $catalogItem->unit_of_measure ?? '';
         $this->quantityPerUnit = $catalogItem->quantity_per_unit;
-        $this->weight = $catalogItem->weight;
-        $this->minOrderQuantity = $catalogItem->min_order_quantity;
-        $this->maxOrderQuantity = $catalogItem->max_order_quantity;
+        $this->itemWeight = $catalogItem->item_weight;
+        $this->minQtyPerOrder = $catalogItem->min_qty_per_order;
+        $this->maxQtyPerOrder = $catalogItem->max_qty_per_order;
         $this->multiples = $catalogItem->multiples;
         $this->listPrice = $catalogItem->list_price;
-        $this->sellingPrice = $catalogItem->selling_price;
-        $this->unspscCode = $catalogItem->unspsc_code;
+        $this->sellingPricePerUnit = $catalogItem->selling_price_per_unit;
+        $this->unspscCode = $catalogItem->unspsc_code ?? '';
         $this->msdsLink = $catalogItem->msds_link ?? '';
 
         $this->searchTerms = ! empty($catalogItem->search_terms) ? $catalogItem->search_terms : [''];
@@ -194,17 +194,18 @@ class CatalogItemForm extends Component
         $client = Auth::guard('client')->user();
 
         return [
-            'name' => ['required'],
-            'vendorSku' => [
+            'name' => ['required', 'string', 'max:255'],
+            'sellerSku' => [
                 'required',
                 'string',
                 'max:255',
-                Rule::unique('catalog_items', 'vendor_sku')
+                Rule::unique('catalog_items', 'seller_sku')
+                    ->where('vendor_id', $client->vendor_id)
                     ->ignore($this->catalogItemId),
             ],
             'manufacturerSku' => ['nullable', 'string', 'max:255'],
 
-            'productType' => ['required', 'string', 'max:50'],
+            'productTypeOrFamily' => ['required', 'string', 'max:50'],
 
             'description' => ['required', 'string'],
             'unitOfMeasure' => ['required', 'string', 'max:50'],
@@ -213,15 +214,15 @@ class CatalogItemForm extends Component
             'newImages' => [$this->catalogItemId || count($this->existingImages) ? 'nullable' : 'required', 'array'],
             'newImages.*' => ['image', 'max:8192'],
 
-            'manufacturerName' => ['nullable', 'string', 'max:255'],
+            'manufacturer' => ['nullable', 'string', 'max:255'],
             'brandName' => ['nullable', 'string', 'max:255'],
 
             'searchTerms' => ['required', 'array', 'min:1'],
             'searchTerms.*' => ['nullable', 'string'],
 
             'listPrice' => ['required', 'numeric', 'min:0'],
-            'sellingPrice' => ['required', 'numeric', 'min:0'],
-            'weight' => ['required', 'numeric', 'min:0'],
+            'sellingPricePerUnit' => ['required', 'numeric', 'min:0', 'lte:listPrice'],
+            'itemWeight' => ['required', 'numeric', 'min:0'],
 
             'sellingPoints' => ['required', 'array', 'min:1'],
             'sellingPoints.*' => ['nullable', 'string'],
@@ -236,8 +237,8 @@ class CatalogItemForm extends Component
             'classifications' => ['nullable', 'array'],
             'classifications.*' => ['nullable', 'string'],
 
-            'minOrderQuantity' => ['nullable', 'numeric', 'min:0'],
-            'maxOrderQuantity' => ['nullable', 'numeric', 'min:0'],
+            'minQtyPerOrder' => ['nullable', 'numeric', 'min:0'],
+            'maxQtyPerOrder' => ['nullable', 'numeric', 'min:0'],
             'multiples' => ['nullable', 'numeric', 'min:0'],
         ];
     }
@@ -263,35 +264,45 @@ class CatalogItemForm extends Component
         }
 
         $catalogItem = DB::transaction(function () use ($vendor, $searchTermsClean, $sellingPointsClean, $specPairs, $classificationsClean) {
-            $match = $this->catalogItemId ? ['id' => $this->catalogItemId] : [];
+            $attrs = [
+                'name' => $this->name,
+                'seller_sku' => $this->sellerSku,
+                'manufacturer_sku' => $this->manufacturerSku,
+                'manufacturer' => $this->manufacturer,
+                'brand_name' => $this->brandName,
+                'product_type_or_family' => $this->productTypeOrFamily,
+                'description' => $this->description,
+                'unit_of_measure' => $this->unitOfMeasure,
+                'quantity_per_unit' => $this->quantityPerUnit,
+                'item_weight' => $this->itemWeight,
+                'min_qty_per_order' => $this->minQtyPerOrder,
+                'max_qty_per_order' => $this->maxQtyPerOrder,
+                'multiples' => $this->multiples,
+                'search_terms' => $searchTermsClean,
+                'selling_points' => $sellingPointsClean,
+                'specifications' => $specPairs,
+                'unspsc_code' => $this->unspscCode,
+                'msds_link' => $this->msdsLink,
+                'classifications' => $classificationsClean,
+                'list_price' => number_format((float) $this->listPrice, 2, '.', ''),
+                'selling_price_per_unit' => number_format((float) $this->sellingPricePerUnit, 2, '.', ''),
+            ];
 
-            $item = CatalogItem::updateOrCreate(
-                $match,
-                [
-                    'vendor_id' => $vendor->id,
-                    'name' => $this->name,
-                    'vendor_sku' => $this->vendorSku,
-                    'manufacturer_sku' => $this->manufacturerSku,
-                    'manufacturer_name' => $this->manufacturerName,
-                    'brand_name' => $this->brandName,
-                    'product_type' => $this->productType,
-                    'description' => $this->description,
-                    'unit_of_measure' => $this->unitOfMeasure,
-                    'quantity_per_unit' => $this->quantityPerUnit,
-                    'weight' => $this->weight,
-                    'min_order_quantity' => $this->minOrderQuantity,
-                    'max_order_quantity' => $this->maxOrderQuantity,
-                    'multiples' => $this->multiples,
-                    'search_terms' => $searchTermsClean,
-                    'selling_points' => $sellingPointsClean,
-                    'specifications' => $specPairs,
-                    'unspsc_code' => $this->unspscCode,
-                    'msds_link' => $this->msdsLink,
-                    'classifications' => $classificationsClean,
-                    'list_price' => number_format((float) $this->listPrice, 2, '.', ''),
-                    'selling_price' => number_format((float) $this->sellingPrice, 2, '.', ''),
-                ]
-            );
+            // Explicit update/create branch instead of updateOrCreate() — when
+            // catalogItemId was null, updateOrCreate([], $attrs) matched with an
+            // empty WHERE clause and could silently overwrite an unrelated item.
+            // This also adds a vendor_id check on update so a tampered
+            // catalogItemId can't write to another vendor's item.
+
+            if ($this->catalogItemId) {
+                $item = CatalogItem::where('id', $this->catalogItemId)
+                    ->where('vendor_id', $vendor->id)
+                    ->firstOrFail();
+
+                $item->update($attrs);
+            } else {
+                $item = CatalogItem::create(array_merge(['vendor_id' => $vendor->id], $attrs));
+            }
 
             foreach ($this->newImages as $index => $upload) {
                 $path = $upload->store('catalog-images/vendor-' . $vendor->id, 'local');

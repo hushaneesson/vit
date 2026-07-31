@@ -15,7 +15,7 @@
                     {{ $catalogItemId ? 'Edit Catalog Item' : 'Add Catalog Item' }}
                 </h1>
                 <p class="text-sm text-gray-500 mt-0.5">
-                    Fields marked <span class="font-medium text-red-600">*</span> are required.
+                    Fields marked <span class="font-medium text-red-600">*</span> are required for VIT submission.
                 </p>
             </div>
         </div>
@@ -41,11 +41,11 @@
 
                 <div class="grid gap-5 md:grid-cols-2">
                     <div>
-                        <label>Vendor SKU <span class="text-red-600">*</span></label>
-                        <input type="text" wire:model="vendorSku"
+                        <label>Seller SKU <span class="text-red-600">*</span></label>
+                        <input type="text" wire:model="sellerSku"
                             class="mt-1.5 block w-full rounded-lg border-gray-300 shadow-sm text-sm focus:border-sky-500 focus:ring-sky-500 focus:ring-1" />
                         <p class="text-xs text-gray-400 mt-1.5">Must be unique across your catalog.</p>
-                        @error('vendorSku')
+                        @error('sellerSku')
                             <p class="text-sm text-red-600 mt-1.5">{{ $message }}</p>
                         @enderror
                     </div>
@@ -71,14 +71,14 @@
             <div class="p-6">
                 <div>
                     <label>Product Type <span class="text-red-600">*</span></label>
-                    <select wire:model="productType"
+                    <select wire:model="productTypeOrFamily"
                         class="mt-1.5 block w-full rounded-lg border-gray-300 shadow-sm text-sm focus:border-sky-500 focus:ring-sky-500 focus:ring-1">
                         <option value="">Select...</option>
                         @foreach ($this->commodityTypeOptions as $option)
                             <option value="{{ $option->name }}">{{ $option->name }}</option>
                         @endforeach
                     </select>
-                    @error('productType')
+                    @error('productTypeOrFamily')
                         <p class="text-sm text-red-600 mt-1.5">{{ $message }}</p>
                     @enderror
                 </div>
@@ -194,9 +194,9 @@
                 <div class="grid gap-5 md:grid-cols-2">
                     <div>
                         <label>Manufacturer's Name</label>
-                        <input type="text" wire:model="manufacturerName"
+                        <input type="text" wire:model="manufacturer"
                             class="mt-1.5 block w-full rounded-lg border-gray-300 shadow-sm text-sm focus:border-sky-500 focus:ring-sky-500 focus:ring-1" />
-                        @error('manufacturerName')
+                        @error('manufacturer')
                             <p class="text-sm text-red-600 mt-1.5">{{ $message }}</p>
                         @enderror
                     </div>
@@ -265,19 +265,19 @@
                         <div class="relative mt-1.5">
                             <span
                                 class="absolute inset-y-0 left-0 flex items-center pl-3 text-sm text-gray-400">$</span>
-                            <input type="number" step="0.01" wire:model="sellingPrice"
+                            <input type="number" step="0.01" wire:model="sellingPricePerUnit"
                                 class="block w-full pl-6 text-sm border-gray-300 rounded-lg shadow-sm focus:border-sky-500 focus:ring-sky-500 focus:ring-1">
                         </div>
                         <p class="text-xs text-gray-400 mt-1.5">Cannot exceed List Price.</p>
-                        @error('sellingPrice')
+                        @error('sellingPricePerUnit')
                             <p class="text-sm text-red-600 mt-1.5">{{ $message }}</p>
                         @enderror
                     </div>
                     <div>
                         <label>Weight (lbs) <span class="text-red-600">*</span></label>
-                        <input type="number" step="0.01" wire:model="weight"
+                        <input type="number" step="0.01" wire:model="itemWeight"
                             class="mt-1.5 block w-full rounded-lg border-gray-300 shadow-sm text-sm focus:border-sky-500 focus:ring-sky-500 focus:ring-1" />
-                        @error('weight')
+                        @error('itemWeight')
                             <p class="text-sm text-red-600 mt-1.5">{{ $message }}</p>
                         @enderror
                     </div>
@@ -424,17 +424,17 @@
                 <div class="grid gap-5 md:grid-cols-2">
                     <div>
                         <label>Minimum Order Qty</label>
-                        <input type="number" step="0.01" wire:model="minOrderQuantity"
+                        <input type="number" step="0.01" wire:model="minQtyPerOrder"
                             class="mt-1.5 block w-full rounded-lg border-gray-300 shadow-sm text-sm focus:border-sky-500 focus:ring-sky-500 focus:ring-1" />
-                        @error('minOrderQuantity')
+                        @error('minQtyPerOrder')
                             <p class="text-sm text-red-600 mt-1.5">{{ $message }}</p>
                         @enderror
                     </div>
                     <div>
                         <label>Maximum Order Qty</label>
-                        <input type="number" step="0.01" wire:model="maxOrderQuantity"
+                        <input type="number" step="0.01" wire:model="maxQtyPerOrder"
                             class="mt-1.5 block w-full rounded-lg border-gray-300 shadow-sm text-sm focus:border-sky-500 focus:ring-sky-500 focus:ring-1" />
-                        @error('maxOrderQuantity')
+                        @error('maxQtyPerOrder')
                             <p class="text-sm text-red-600 mt-1.5">{{ $message }}</p>
                         @enderror
                     </div>
@@ -443,7 +443,8 @@
         </section>
 
         <div class="flex justify-end mt-2">
-            <button class="btn btn-primary" type="submit">
+            <button type="submit"
+                class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-slate-900 rounded-lg hover:bg-slate-800 transition disabled:opacity-50 disabled:cursor-not-allowed">
                 {{ $catalogItemId ? 'Save Changes' : 'Create Item' }}
             </button>
         </div>

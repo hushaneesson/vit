@@ -17,17 +17,16 @@ class CatalogUpload extends Model
         'client_id',
         'vendor_id',
         'original_filename',
-        'catalog_name',
         'file_path',
         'disk',
         'file_type',
         'status',
         'total_rows',
         'success_rows',
-        'error_rows',
+        'created_rows',
+        'invalid_rows',
         'updated_rows',
-        'skipped_rows',
-        'skipped_item_names',
+        'unchanged_rows',
         'failure_reason',
         'mapping_confirmed_at',
         'processing_started_at',
@@ -38,8 +37,9 @@ class CatalogUpload extends Model
     protected $casts = [
         'status' => CatalogUploadStatus::class,
         'updated_rows' => 'integer',
-        'skipped_rows' => 'integer',
-        'skipped_item_names' => 'array',
+        'invalid_rows' => 'integer',
+        'created_rows' => 'integer',
+        'unchanged_rows' => 'integer',
         'mapping_confirmed_at' => 'datetime',
         'processing_started_at' => 'datetime',
         'processing_completed_at' => 'datetime',
@@ -68,14 +68,8 @@ class CatalogUpload extends Model
 
     public function isReadyToProcess(): bool
     {
-        // Every required VIT field must be mapped to a column before we
-        // let the client kick off processing.
-        $mappedFieldKeys = $this->columnMappings()
+        return $this->columnMappings()
             ->whereNotNull('field_key')
-            ->pluck('field_key');
-
-        $requiredFieldKeys = VitFieldDefinition::requiredFieldKeys();
-
-        return $requiredFieldKeys->diff($mappedFieldKeys)->isEmpty();
+            ->exists();
     }
 }
