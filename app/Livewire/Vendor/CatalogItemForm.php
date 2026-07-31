@@ -97,9 +97,9 @@ class CatalogItemForm extends Component
         $this->manufacturerSku = $catalogItem->manufacturer_sku ?? '';
         $this->manufacturer = $catalogItem->manufacturer ?? '';
         $this->brandName = $catalogItem->brand_name ?? '';
-        $this->productTypeOrFamily = $catalogItem->product_type_or_family;
-        $this->description = $catalogItem->description;
-        $this->unitOfMeasure = $catalogItem->unit_of_measure;
+        $this->productTypeOrFamily = $catalogItem->product_type_or_family ?? '';
+        $this->description = $catalogItem->description ?? '';
+        $this->unitOfMeasure = $catalogItem->unit_of_measure ?? '';
         $this->quantityPerUnit = $catalogItem->quantity_per_unit;
         $this->itemWeight = $catalogItem->item_weight;
         $this->minQtyPerOrder = $catalogItem->min_qty_per_order;
@@ -107,7 +107,7 @@ class CatalogItemForm extends Component
         $this->multiples = $catalogItem->multiples;
         $this->listPrice = $catalogItem->list_price;
         $this->sellingPricePerUnit = $catalogItem->selling_price_per_unit;
-        $this->unspscCode = $catalogItem->unspsc_code;
+        $this->unspscCode = $catalogItem->unspsc_code ?? '';
         $this->msdsLink = $catalogItem->msds_link ?? '';
 
         $this->searchTerms = ! empty($catalogItem->search_terms) ? $catalogItem->search_terms : [''];
@@ -264,35 +264,45 @@ class CatalogItemForm extends Component
         }
 
         $catalogItem = DB::transaction(function () use ($vendor, $searchTermsClean, $sellingPointsClean, $specPairs, $classificationsClean) {
-            $match = $this->catalogItemId ? ['id' => $this->catalogItemId] : [];
+            $attrs = [
+                'name' => $this->name,
+                'seller_sku' => $this->sellerSku,
+                'manufacturer_sku' => $this->manufacturerSku,
+                'manufacturer' => $this->manufacturer,
+                'brand_name' => $this->brandName,
+                'product_type_or_family' => $this->productTypeOrFamily,
+                'description' => $this->description,
+                'unit_of_measure' => $this->unitOfMeasure,
+                'quantity_per_unit' => $this->quantityPerUnit,
+                'item_weight' => $this->itemWeight,
+                'min_qty_per_order' => $this->minQtyPerOrder,
+                'max_qty_per_order' => $this->maxQtyPerOrder,
+                'multiples' => $this->multiples,
+                'search_terms' => $searchTermsClean,
+                'selling_points' => $sellingPointsClean,
+                'specifications' => $specPairs,
+                'unspsc_code' => $this->unspscCode,
+                'msds_link' => $this->msdsLink,
+                'classifications' => $classificationsClean,
+                'list_price' => number_format((float) $this->listPrice, 2, '.', ''),
+                'selling_price_per_unit' => number_format((float) $this->sellingPricePerUnit, 2, '.', ''),
+            ];
 
-            $item = CatalogItem::updateOrCreate(
-                $match,
-                [
-                    'vendor_id' => $vendor->id,
-                    'name' => $this->name,
-                    'seller_sku' => $this->sellerSku,
-                    'manufacturer_sku' => $this->manufacturerSku,
-                    'manufacturer' => $this->manufacturer,
-                    'brand_name' => $this->brandName,
-                    'product_type_or_family' => $this->productTypeOrFamily,
-                    'description' => $this->description,
-                    'unit_of_measure' => $this->unitOfMeasure,
-                    'quantity_per_unit' => $this->quantityPerUnit,
-                    'item_weight' => $this->itemWeight,
-                    'min_qty_per_order' => $this->minQtyPerOrder,
-                    'max_qty_per_order' => $this->maxQtyPerOrder,
-                    'multiples' => $this->multiples,
-                    'search_terms' => $searchTermsClean,
-                    'selling_points' => $sellingPointsClean,
-                    'specifications' => $specPairs,
-                    'unspsc_code' => $this->unspscCode,
-                    'msds_link' => $this->msdsLink,
-                    'classifications' => $classificationsClean,
-                    'list_price' => number_format((float) $this->listPrice, 2, '.', ''),
-                    'selling_price_per_unit' => number_format((float) $this->sellingPricePerUnit, 2, '.', ''),
-                ]
-            );
+            // Explicit update/create branch instead of updateOrCreate() — when
+            // catalogItemId was null, updateOrCreate([], $attrs) matched with an
+            // empty WHERE clause and could silently overwrite an unrelated item.
+            // This also adds a vendor_id check on update so a tampered
+            // catalogItemId can't write to another vendor's item.
+
+            if ($this->catalogItemId) {
+                $item = CatalogItem::where('id', $this->catalogItemId)
+                    ->where('vendor_id', $vendor->id)
+                    ->firstOrFail();
+
+                $item->update($attrs);
+            } else {
+                $item = CatalogItem::create(array_merge(['vendor_id' => $vendor->id], $attrs));
+            }
 
             foreach ($this->newImages as $index => $upload) {
                 $path = $upload->store('catalog-images/vendor-' . $vendor->id, 'local');

@@ -80,7 +80,7 @@ class ProcessValidatedRowsJob implements ShouldQueue
                 ->where('status', 'valid')
                 ->cursor();
 
-            $nonComparableColumns = ['seller_sku', 'vendor_id', 'catalog_upload_id'];
+            $nonComparableColumns = ['seller_sku', 'vendor_id'];
 
             $createdCount = 0;
             $updatedCount = 0;
@@ -100,7 +100,6 @@ class ProcessValidatedRowsJob implements ShouldQueue
                 // CatalogItem columns now match VIT field keys, so no translation needed.
                 $attrs = [
                     'vendor_id' => $vendor->id,
-                    'catalog_upload_id' => $upload->id,
                 ];
 
                 foreach ($data as $fieldKey => $rawValue) {
@@ -134,7 +133,7 @@ class ProcessValidatedRowsJob implements ShouldQueue
                     ARRAY_FILTER_USE_BOTH,
                 );
                 // Remove metadata fields that should never be bulk-overwritten
-                unset($updateAttrs['vendor_id'], $updateAttrs['catalog_upload_id']);
+                unset($updateAttrs['vendor_id']);
 
                 // ----------------------------------------------------------
                 // Match by seller_sku (the unique identifier for catalog items)

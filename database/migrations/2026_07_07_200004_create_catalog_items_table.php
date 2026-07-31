@@ -21,7 +21,6 @@ return new class extends Migration
             $table->string('brand_name')->nullable();
 
             $table->string('seller_sku');
-            $table->foreignId('catalog_upload_id')->nullable()->constrained('catalog_uploads')->nullOnDelete();
 
             $table->string('unspsc_code')->nullable();
             $table->string('product_type_or_family')->nullable();
