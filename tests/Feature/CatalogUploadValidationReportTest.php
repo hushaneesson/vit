@@ -36,7 +36,6 @@ class CatalogUploadValidationReportTest extends TestCase
             ->create([
                 'client_id' => $client->id,
                 'vendor_id' => $vendor->id,
-                // catalog_name removed from schema
                 'status' => CatalogUploadStatus::Processing,
                 'processing_started_at' => now(),
             ]);
@@ -53,10 +52,6 @@ class CatalogUploadValidationReportTest extends TestCase
         return compact('upload', 'client', 'vendor');
     }
 
-    // -----------------------------------------------------------------------
-    //  1. Validation results display limits
-    // -----------------------------------------------------------------------
-
     public function test_10_or_fewer_errors_shows_full_table_and_no_email(): void
     {
         Notification::fake();
@@ -68,7 +63,7 @@ class CatalogUploadValidationReportTest extends TestCase
 
         Notification::assertNothingSent();
         $this->assertNull($upload->validation_report_emailed_at);
-        $this->assertEquals(5, $upload->error_rows);
+        $this->assertEquals(5, $upload->invalid_rows);
         $this->assertEquals(5, $upload->rows()->where('status', 'invalid')->count());
     }
 
@@ -83,13 +78,11 @@ class CatalogUploadValidationReportTest extends TestCase
 
         Notification::assertSentOnDemand(CatalogUploadValidationReportNotification::class);
         $this->assertNotNull($upload->validation_report_emailed_at);
-        $this->assertEquals(11, $upload->error_rows);
+        $this->assertEquals(11, $upload->invalid_rows);
     }
 
     public function test_more_than_10_errors_but_email_fails_falls_back_gracefully(): void
     {
-        // Do NOT use Notification::fake() - we need the actual mail driver to fail
-        // Mock the Log facade to verify the warning is logged
         Log::shouldReceive('warning')
             ->once()
             ->withArgs(fn($message) => str_contains($message, 'Failed to send validation report email'));
@@ -97,7 +90,6 @@ class CatalogUploadValidationReportTest extends TestCase
         $result = $this->createCompletedUploadWithErrors(11);
         $upload = $result['upload'];
 
-        // Override the mailer config to force an actual connection failure
         config(['mail.default' => 'smtp']);
         config(['mail.mailers.smtp' => [
             'transport' => 'smtp',
@@ -109,13 +101,11 @@ class CatalogUploadValidationReportTest extends TestCase
         (new ProcessValidatedRowsJob($upload->id))->handle();
         $upload->refresh();
 
-        // Status should remain ProcessingItems to allow retry when email fails
         $this->assertEquals(CatalogUploadStatus::ProcessingItems, $upload->status);
         $this->assertNull($upload->validation_report_emailed_at);
-        $this->assertEquals(11, $upload->error_rows);
+        $this->assertEquals(11, $upload->invalid_rows);
         $this->assertEquals(11, $upload->rows()->where('status', 'invalid')->count());
 
-        // Restore config
         config(['mail.default' => 'array']);
     }
 
@@ -156,12 +146,8 @@ class CatalogUploadValidationReportTest extends TestCase
 
         Notification::assertNothingSent();
         $this->assertNull($upload->validation_report_emailed_at);
-        $this->assertEquals(0, $upload->error_rows);
+        $this->assertEquals(0, $upload->invalid_rows);
     }
-
-    // -----------------------------------------------------------------------
-    //  2. Email notification tests
-    // -----------------------------------------------------------------------
 
     public function test_notification_is_sent_to_on_demand_route_with_email(): void
     {
@@ -195,7 +181,7 @@ class CatalogUploadValidationReportTest extends TestCase
         $notification = new CatalogUploadValidationReportNotification(
             catalogName: 'Upload #' . $upload->id,
             processedAt: $upload->processing_completed_at,
-            totalErrors: $upload->error_rows,
+            totalErrors: $upload->invalid_rows,
             totalWarnings: 0,
             errors: $failedRows,
             warnings: collect(),
@@ -221,6 +207,7 @@ class CatalogUploadValidationReportTest extends TestCase
         $failedRows = $upload->rows()
             ->where('status', 'invalid')
             ->whereNotNull('errors')
+            ->orderBy('row_number')
             ->get(['row_number', 'errors']);
 
         $warningRows = collect([
@@ -231,7 +218,7 @@ class CatalogUploadValidationReportTest extends TestCase
         $notification = new CatalogUploadValidationReportNotification(
             catalogName: 'Upload #' . $upload->id,
             processedAt: $upload->processing_completed_at,
-            totalErrors: $upload->error_rows,
+            totalErrors: $upload->invalid_rows,
             totalWarnings: 2,
             errors: $failedRows,
             warnings: $warningRows,
@@ -268,10 +255,6 @@ class CatalogUploadValidationReportTest extends TestCase
         $this->assertStringContainsString('Total error rows:', $rendered);
     }
 
-    // -----------------------------------------------------------------------
-    //  3. Duplicate email prevention
-    // -----------------------------------------------------------------------
-
     public function test_duplicate_email_not_sent_when_already_emailed(): void
     {
         Notification::fake();
@@ -301,10 +284,6 @@ class CatalogUploadValidationReportTest extends TestCase
         Notification::assertNothingSent();
     }
 
-    // -----------------------------------------------------------------------
-    //  4. Upload processing tests
-    // -----------------------------------------------------------------------
-
     public function test_invalid_rows_are_stored_with_correct_errors(): void
     {
         $result = $this->createCompletedUploadWithErrors(3);
@@ -327,21 +306,13 @@ class CatalogUploadValidationReportTest extends TestCase
         $upload = $result['upload'];
 
         Mail::fake();
-        // The mailer is faked so sending will "fail" silently but the job
-        // should still complete and preserve counts.
-        // Since Mail::fake() captures instead of throwing, the log warning
-        // path won't be hit — but the data will still be preserved.
 
         (new ProcessValidatedRowsJob($upload->id))->handle();
         $upload->refresh();
 
-        $this->assertEquals(11, $upload->error_rows);
+        $this->assertEquals(11, $upload->invalid_rows);
         $this->assertEquals(11, $upload->rows()->where('status', 'invalid')->count());
     }
-
-    // -----------------------------------------------------------------------
-    //  5. Livewire screen tests
-    // -----------------------------------------------------------------------
 
     public function test_summary_shows_failed_rows_table_when_10_or_fewer(): void
     {
@@ -359,9 +330,6 @@ class CatalogUploadValidationReportTest extends TestCase
                 'created_rows' => 0,
                 'updated_rows' => 0,
                 'unchanged_rows' => 0,
-                'duplicate_rows' => 0,
-                'skipped_rows' => 0,
-                'skipped_item_names' => null,
                 'error_rows' => 5,
                 'failure_reason' => null,
             ])
@@ -395,9 +363,6 @@ class CatalogUploadValidationReportTest extends TestCase
                 'created_rows' => 0,
                 'updated_rows' => 0,
                 'unchanged_rows' => 0,
-                'duplicate_rows' => 0,
-                'skipped_rows' => 0,
-                'skipped_item_names' => null,
                 'error_rows' => 11,
                 'failure_reason' => null,
             ])
@@ -413,8 +378,6 @@ class CatalogUploadValidationReportTest extends TestCase
         $upload = $result['upload'];
         $this->actingAs($result['client'], 'client');
 
-        // Test the fallback UI state directly without refreshStatus()
-        // which always sets validationReportFailed = false.
         Livewire::test(VendorCatalogUpload::class)
             ->set('catalogUploadId', $upload->id)
             ->set('step', 'summary')
@@ -425,9 +388,6 @@ class CatalogUploadValidationReportTest extends TestCase
                 'created_rows' => 0,
                 'updated_rows' => 0,
                 'unchanged_rows' => 0,
-                'duplicate_rows' => 0,
-                'skipped_rows' => 0,
-                'skipped_item_names' => null,
                 'error_rows' => 11,
                 'failure_reason' => null,
             ])
@@ -460,19 +420,12 @@ class CatalogUploadValidationReportTest extends TestCase
                 'created_rows' => 0,
                 'updated_rows' => 0,
                 'unchanged_rows' => 0,
-                'duplicate_rows' => 0,
-                'skipped_rows' => 0,
-                'skipped_item_names' => null,
                 'error_rows' => 11,
                 'failure_reason' => null,
             ])
             ->call('refreshStatus')
             ->assertSee($result['client']->email);
     }
-
-    // -----------------------------------------------------------------------
-    //  6. Edge cases
-    // -----------------------------------------------------------------------
 
     public function test_duplicate_invalid_rows_are_preserved(): void
     {
@@ -518,7 +471,6 @@ class CatalogUploadValidationReportTest extends TestCase
         $result = $this->createCompletedUploadWithErrors(11);
         $upload = $result['upload'];
 
-        // Override the mailer config to force a failure
         config(['mail.default' => 'smtp']);
         config(['mail.mailers.smtp' => [
             'transport' => 'smtp',
@@ -530,9 +482,7 @@ class CatalogUploadValidationReportTest extends TestCase
         (new ProcessValidatedRowsJob($upload->id))->handle();
         $upload->refresh();
 
-        // Email failed, so status stays ProcessingItems for retry
         $this->assertEquals(CatalogUploadStatus::ProcessingItems, $upload->status);
-        // Restore config
         config(['mail.default' => 'array']);
     }
 
@@ -541,7 +491,6 @@ class CatalogUploadValidationReportTest extends TestCase
         $result = $this->createCompletedUploadWithErrors(11);
         $upload = $result['upload'];
 
-        // First attempt with misconfigured mail
         config(['mail.default' => 'smtp']);
         config(['mail.mailers.smtp' => [
             'transport' => 'smtp',
@@ -553,10 +502,8 @@ class CatalogUploadValidationReportTest extends TestCase
         (new ProcessValidatedRowsJob($upload->id))->handle();
         $upload->refresh();
         $this->assertNull($upload->validation_report_emailed_at);
-        // Email failed, so status stays ProcessingItems for retry
         $this->assertEquals(CatalogUploadStatus::ProcessingItems, $upload->status);
 
-        // Retry with working mail
         config(['mail.default' => 'array']);
         Notification::fake();
 

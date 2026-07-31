@@ -9,7 +9,6 @@ use App\Models\CatalogUpload;
 use App\Models\CatalogUploadRow;
 use App\Models\Client;
 use App\Models\Vendor;
-use App\Services\FingerprintService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -108,34 +107,6 @@ class CatalogUploadReliabilityTest extends TestCase
             'data' => json_encode(['name' => 'Row 1 Duplicate']),
             'status' => 'valid',
         ]);
-    }
-
-    public function test_fingerprint_produces_consistent_output(): void
-    {
-        $data = [
-            'name' => 'Test Product',
-            'description' => 'Test Description',
-            'seller_sku' => 'SKU-123',
-            'vendor_id' => 1,
-        ];
-
-        $fp1 = FingerprintService::compute($data);
-        $fp2 = FingerprintService::compute($data);
-
-        $this->assertEquals($fp1, $fp2, 'Same input produces same fingerprint');
-        $this->assertEquals(32, strlen($fp1), 'MD5 hash length is 32 characters');
-    }
-
-    public function test_fingerprint_excludes_metadata_columns(): void
-    {
-        $data1 = ['name' => 'Product', 'seller_sku' => 'SKU-1', 'vendor_id' => 1];
-        $data2 = ['name' => 'Product', 'seller_sku' => 'SKU-2', 'vendor_id' => 999];
-
-        $this->assertEquals(
-            FingerprintService::compute($data1),
-            FingerprintService::compute($data2),
-            'Excluded columns do not affect fingerprint'
-        );
     }
 
     public function test_failed_upload_has_status_guard(): void

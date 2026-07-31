@@ -7,7 +7,6 @@ use App\Models\CatalogItem;
 use App\Models\CatalogUpload;
 use App\Models\Vendor;
 use App\Notifications\CatalogUploadValidationReportNotification;
-use App\Services\FingerprintService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -24,9 +23,12 @@ use Throwable;
  * ProcessCatalogUploadJob and creates/updates CatalogItem rows in
  * the vendor's catalog.
  *
- * Matching strategy (in order):
- *   1. seller_sku (when available in the row data) — primary key for updates
- *   2. data_fingerprint (fallback when SKU is not available) — exact duplicate detection
+ * Matching strategy:
+ *   1. seller_sku (primary key for matching existing items)
+ *
+ * seller_sku is the unique identifier for catalog items. The schema
+ * enforces a unique constraint on (vendor_id, seller_sku), so every
+ * CatalogItem has exactly one seller_sku per vendor.
  *
  * When updating an existing CatalogItem, blank CSV values are NOT
  * written back to the database — only non-blank values from the CSV
@@ -78,15 +80,13 @@ class ProcessValidatedRowsJob implements ShouldQueue
                 ->where('status', 'valid')
                 ->cursor();
 
-            $nonComparableColumns = ['seller_sku', 'vendor_id', 'catalog_upload_id', 'data_fingerprint'];
+            $nonComparableColumns = ['seller_sku', 'vendor_id', 'catalog_upload_id'];
 
             $createdCount = 0;
             $updatedCount = 0;
             $unchangedCount = 0;
-            $duplicateCount = 0;
             $updatedNames = [];
             $unchangedNames = [];
-            $duplicateNames = [];
 
             DB::beginTransaction();
 
@@ -125,8 +125,6 @@ class ProcessValidatedRowsJob implements ShouldQueue
                     }
                 }
 
-                $fingerprint = $this->computeFingerprint($attrs, $nonComparableColumns);
-
                 // Build the update payload — only fields that have non-blank
                 // values in the CSV. This ensures we never overwrite existing
                 // data with blank CSV values.
@@ -139,7 +137,7 @@ class ProcessValidatedRowsJob implements ShouldQueue
                 unset($updateAttrs['vendor_id'], $updateAttrs['catalog_upload_id']);
 
                 // ----------------------------------------------------------
-                // STRATEGY 1: Match by seller_sku (when available in data)
+                // Match by seller_sku (the unique identifier for catalog items)
                 // ----------------------------------------------------------
                 $sellerSku = $attrs['seller_sku'] ?? null;
 
@@ -154,7 +152,6 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
                         if ($this->hasMeaningfulChanges($existing, $normalizedUpdateAttrs, $nonComparableColumns, $sellerSku)) {
                             // Update only the fields that have values in the CSV
-                            $updateAttrs['data_fingerprint'] = $fingerprint;
                             $updateAttrs['updated_at'] = now();
                             $existing->update($updateAttrs);
                             $updatedCount++;
@@ -175,27 +172,9 @@ class ProcessValidatedRowsJob implements ShouldQueue
                 }
 
                 // ----------------------------------------------------------
-                // STRATEGY 2: Match by fingerprint (fallback when SKU is not
-                //             available or no existing item was found by SKU)
-                // ----------------------------------------------------------
-                $existingByFingerprint = CatalogItem::where('vendor_id', $vendor->id)
-                    ->where('data_fingerprint', $fingerprint)
-                    ->first();
-
-                if ($existingByFingerprint) {
-                    $duplicateCount++;
-                    $itemName = $attrs['name'] ?? $attrs['seller_sku'] ?? 'Unknown';
-                    if ($itemName) {
-                        $duplicateNames[] = $itemName;
-                    }
-                    continue;
-                }
-
-                // ----------------------------------------------------------
                 // No existing item found — create new
                 // ----------------------------------------------------------
                 $attrs['id'] = (string) Str::uuid();
-                $attrs['data_fingerprint'] = $fingerprint;
                 $attrs['created_at'] = now();
                 $attrs['updated_at'] = now();
 
@@ -209,7 +188,6 @@ class ProcessValidatedRowsJob implements ShouldQueue
                             ->first();
 
                         if ($existing) {
-                            $updateAttrs['data_fingerprint'] = $fingerprint;
                             $updateAttrs['updated_at'] = now();
                             $existing->update($updateAttrs);
                             $updatedCount++;
@@ -228,8 +206,8 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
             DB::commit();
 
-            $totalSkipped = $unchangedCount + $duplicateCount;
-            $allSkippedNames = array_merge($unchangedNames, $duplicateNames);
+            $totalSkipped = $unchangedCount;
+            $allSkippedNames = $unchangedNames;
 
             $emailSent = false;
             if ($upload->error_rows > 10 && !$upload->validation_report_emailed_at) {
@@ -268,13 +246,10 @@ class ProcessValidatedRowsJob implements ShouldQueue
                 $upload->update([
                     'status' => CatalogUploadStatus::Completed,
                     'total_rows' => $upload->rows()->count(),
-                    'success_rows' => $createdCount + $updatedCount,
+                    'success_rows' => $createdCount + $updatedCount + $unchangedCount,
                     'created_rows' => $createdCount,
                     'updated_rows' => $updatedCount,
-                    'skipped_rows' => $totalSkipped,
                     'unchanged_rows' => $unchangedCount,
-                    'duplicate_rows' => $duplicateCount,
-                    'skipped_item_names' => $totalSkipped > 0 ? $allSkippedNames : null,
                     'error_rows' => $upload->rows()->where('status', 'invalid')->count(),
                     'processing_completed_at' => now(),
                 ]);
@@ -326,11 +301,6 @@ class ProcessValidatedRowsJob implements ShouldQueue
         }
 
         return $normalized;
-    }
-
-    private function computeFingerprint(array $attrs, array $excludeColumns): string
-    {
-        return FingerprintService::compute($attrs, $excludeColumns);
     }
 
     /**

@@ -24,9 +24,8 @@ class CatalogUploadFactory extends Factory
             'status' => CatalogUploadStatus::Completed,
             'total_rows' => 0,
             'success_rows' => 0,
-            'error_rows' => 0,
+            'invalid_rows' => 0,
             'updated_rows' => 0,
-            'skipped_rows' => 0,
         ];
     }
 
@@ -41,7 +40,7 @@ class CatalogUploadFactory extends Factory
     public function withErrors(int $count): static
     {
         return $this->state(fn(array $attrs) => [
-            'error_rows' => $count,
+            'invalid_rows' => $count,
         ]);
     }
 }

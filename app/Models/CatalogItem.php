@@ -20,7 +20,6 @@ class CatalogItem extends Model
         'brand_name',
         'seller_sku',
         'catalog_upload_id',
-        'data_fingerprint',
         'unspsc_code',
         'product_type_or_family',
         'unit_of_measure',

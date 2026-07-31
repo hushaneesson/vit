@@ -340,12 +340,6 @@
                             <div class="text-lg font-semibold text-amber-700">{{ $progress['updated_rows'] }}</div>
                         </div>
                     @endif
-                    @if ($progress['skipped_rows'] > 0)
-                        <div class="text-center">
-                            <div class="text-xs font-medium uppercase text-sky-600">Unchanged</div>
-                            <div class="text-lg font-semibold text-sky-700">{{ $progress['skipped_rows'] }}</div>
-                        </div>
-                    @endif
                     @if ($progress['error_rows'] > 0)
                         <div class="text-center">
                             <div class="text-xs font-medium uppercase text-rose-600">Errors</div>
@@ -406,14 +400,6 @@
                             </dd>
                         </div>
                     @endif
-                    @if ($progress['duplicate_rows'] > 0)
-                        <div
-                            class="p-4 text-center border border-indigo-200 rounded-lg bg-indigo-50 min-w-[120px] flex-1">
-                            <dt class="text-xs font-medium tracking-wide text-indigo-700 uppercase">Duplicates</dt>
-                            <dd class="mt-1 text-2xl font-semibold text-indigo-700">{{ $progress['duplicate_rows'] }}
-                            </dd>
-                        </div>
-                    @endif
                     @if ($progress['error_rows'] > 0)
                         <div class="p-4 text-center border rounded-lg border-rose-200 bg-rose-50 min-w-[120px] flex-1">
                             <dt class="text-xs font-medium tracking-wide uppercase text-rose-700">Invalid</dt>
@@ -421,18 +407,6 @@
                         </div>
                     @endif
                 </dl>
-
-                {{-- Items that were already up to date --}}
-                @if ($progress['skipped_rows'] > 0 && $progress['skipped_item_names'])
-                    <div class="p-3 mt-4 text-sm border rounded-lg bg-sky-50 text-sky-800 border-sky-200">
-                        <span class="font-semibold">{{ $progress['skipped_rows'] }} item(s) already up to date:</span>
-                        <ul class="mt-1 ml-4 overflow-y-auto list-disc max-h-32">
-                            @foreach ($progress['skipped_item_names'] as $name)
-                                <li>{{ $name }}</li>
-                            @endforeach
-                        </ul>
-                    </div>
-                @endif
 
                 {{-- Failed rows --}}
                 @if ($progress['error_rows'] > 0 && $this->failedRows->isNotEmpty())

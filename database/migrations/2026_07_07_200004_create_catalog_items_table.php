@@ -22,7 +22,6 @@ return new class extends Migration
 
             $table->string('seller_sku');
             $table->foreignId('catalog_upload_id')->nullable()->constrained('catalog_uploads')->nullOnDelete();
-            $table->string('data_fingerprint', 32)->nullable();
 
             $table->string('unspsc_code')->nullable();
             $table->string('product_type_or_family')->nullable();
@@ -49,7 +48,6 @@ return new class extends Migration
             $table->timestamps();
 
             $table->index(['vendor_id']);
-            $table->index('data_fingerprint', 'catalog_items_fingerprint_index');
             $table->unique(['vendor_id', 'seller_sku'], 'catalog_items_seller_sku_unique');
         });
     }

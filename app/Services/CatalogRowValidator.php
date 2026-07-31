@@ -15,7 +15,19 @@ class CatalogRowValidator
     {
         $errors = [];
 
-        // NOTE: Required and conditional field checks have been removed.
+        // seller_sku is the unique identifier for catalog items. Without it,
+        // the row cannot be matched to an existing item or created as a new
+        // one. Unlike other "required" business fields (description,
+        // manufacturer, brand) which can be left null and completed later,
+        // a missing seller_sku is a data quality error that prevents import.
+        if (empty($rowData['seller_sku'])) {
+            $errors[] = [
+                'field_key' => 'seller_sku',
+                'message' => 'Seller SKU is required to identify and import a catalog item.',
+            ];
+        }
+
+        // NOTE: Other required and conditional field checks have been removed.
         //
         // The application now imports a vendor's existing catalog so they
         // can complete and edit it inside the application before submission.
