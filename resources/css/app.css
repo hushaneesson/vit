@@ -47,4 +47,12 @@
     .btn-primary {
         @apply font-semibold text-white transition-all duration-200 focus:outline-none bg-gradient-to-r from-sky-500 to-teal-500 hover:from-sky-600 hover:to-teal-600;
     }
+
+    .btn-success {
+        @apply font-semibold text-white transition-all duration-200 focus:outline-none bg-gradient-to-r from-emerald-500 to-emerald-700 hover:from-emerald-600 hover:to-emerald-800;
+    }
+
+     .btn-gray {
+        @apply font-semibold text-white transition-all duration-200 focus:outline-none bg-gradient-to-r from-gray-700 to-gray-900;
+    }
 }

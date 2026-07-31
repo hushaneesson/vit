@@ -444,7 +444,7 @@
 
         <div class="flex justify-end mt-2">
             <button type="submit"
-                class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-slate-900 rounded-lg hover:bg-slate-800 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                class="btn btn-primary">
                 {{ $catalogItemId ? 'Save Changes' : 'Create Item' }}
             </button>
         </div>

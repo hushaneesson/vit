@@ -1,6 +1,6 @@
 <x-layouts.vendor title="My Appointments">
     <div class="space-y-6">
-        <div class="flex flex-col items-center gap-3 md:justify-between md:flex-row">
+        <div class="flex flex-col gap-3 md:items-center md:justify-between md:flex-row">
             <div>
                 <h1 class="text-xl font-semibold">My Appointments</h1>
                 <p class="text-sm text-gray-500">{{ auth('client')->user()->vendor->name }}</p>
