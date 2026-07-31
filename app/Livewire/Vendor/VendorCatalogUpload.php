@@ -42,7 +42,7 @@ class VendorCatalogUpload extends Component
         'created_rows' => 0,
         'updated_rows' => 0,
         'unchanged_rows' => 0,
-        'error_rows' => 0,
+        'invalid_rows' => 0,
         'failure_reason' => null,
     ];
 
@@ -230,7 +230,7 @@ class VendorCatalogUpload extends Component
             'created_rows' => $upload->created_rows ?? 0,
             'updated_rows' => $upload->updated_rows ?? 0,
             'unchanged_rows' => $upload->unchanged_rows ?? 0,
-            'error_rows' => $upload->invalid_rows ?? 0,
+            'invalid_rows' => $upload->invalid_rows ?? 0,
             'failure_reason' => $upload->failure_reason,
         ];
 
@@ -246,7 +246,7 @@ class VendorCatalogUpload extends Component
     public function startOver(): void
     {
         $this->reset(['file', 'catalogUploadId', 'columns', 'sampleRows', 'mapping', 'suggestedIndexes', 'suggestionsFinalized', 'currentFileSignature']);
-        $this->progress = ['status' => null, 'total_rows' => 0, 'success_rows' => 0, 'created_rows' => 0, 'updated_rows' => 0, 'unchanged_rows' => 0, 'error_rows' => 0, 'failure_reason' => null];
+        $this->progress = ['status' => null, 'total_rows' => 0, 'success_rows' => 0, 'created_rows' => 0, 'updated_rows' => 0, 'unchanged_rows' => 0, 'invalid_rows' => 0, 'failure_reason' => null];
         $this->step = 'upload';
     }
 

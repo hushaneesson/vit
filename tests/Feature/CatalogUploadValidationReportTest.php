@@ -330,7 +330,7 @@ class CatalogUploadValidationReportTest extends TestCase
                 'created_rows' => 0,
                 'updated_rows' => 0,
                 'unchanged_rows' => 0,
-                'error_rows' => 5,
+                'invalid_rows' => 5,
                 'failure_reason' => null,
             ])
             ->set('validationReportEmailed', false)
@@ -363,7 +363,7 @@ class CatalogUploadValidationReportTest extends TestCase
                 'created_rows' => 0,
                 'updated_rows' => 0,
                 'unchanged_rows' => 0,
-                'error_rows' => 11,
+                'invalid_rows' => 11,
                 'failure_reason' => null,
             ])
             ->call('refreshStatus')
@@ -388,7 +388,7 @@ class CatalogUploadValidationReportTest extends TestCase
                 'created_rows' => 0,
                 'updated_rows' => 0,
                 'unchanged_rows' => 0,
-                'error_rows' => 11,
+                'invalid_rows' => 11,
                 'failure_reason' => null,
             ])
             ->set('validationReportEmailed', false)
@@ -420,7 +420,7 @@ class CatalogUploadValidationReportTest extends TestCase
                 'created_rows' => 0,
                 'updated_rows' => 0,
                 'unchanged_rows' => 0,
-                'error_rows' => 11,
+                'invalid_rows' => 11,
                 'failure_reason' => null,
             ])
             ->call('refreshStatus')

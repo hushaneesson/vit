@@ -128,7 +128,7 @@ class CatalogUploadController extends Controller
             'status' => $catalogUpload->status,
             'total_rows' => $catalogUpload->total_rows,
             'success_rows' => $catalogUpload->success_rows,
-            'error_rows' => $catalogUpload->error_rows,
+            'invalid_rows' => $catalogUpload->invalid_rows,
             'failure_reason' => $catalogUpload->failure_reason,
         ]);
     }

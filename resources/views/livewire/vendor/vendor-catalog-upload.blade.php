@@ -340,10 +340,10 @@
                             <div class="text-lg font-semibold text-amber-700">{{ $progress['updated_rows'] }}</div>
                         </div>
                     @endif
-                    @if ($progress['error_rows'] > 0)
+                    @if ($progress['invalid_rows'] > 0)
                         <div class="text-center">
                             <div class="text-xs font-medium uppercase text-rose-600">Errors</div>
-                            <div class="text-lg font-semibold text-rose-700">{{ $progress['error_rows'] }}</div>
+                            <div class="text-lg font-semibold text-rose-700">{{ $progress['invalid_rows'] }}</div>
                         </div>
                     @endif
                 </div>
@@ -400,16 +400,16 @@
                             </dd>
                         </div>
                     @endif
-                    @if ($progress['error_rows'] > 0)
+                    @if ($progress['invalid_rows'] > 0)
                         <div class="p-4 text-center border rounded-lg border-rose-200 bg-rose-50 min-w-[120px] flex-1">
                             <dt class="text-xs font-medium tracking-wide uppercase text-rose-700">Invalid</dt>
-                            <dd class="mt-1 text-2xl font-semibold text-rose-700">{{ $progress['error_rows'] }}</dd>
+                            <dd class="mt-1 text-2xl font-semibold text-rose-700">{{ $progress['invalid_rows'] }}</dd>
                         </div>
                     @endif
                 </dl>
 
                 {{-- Failed rows --}}
-                @if ($progress['error_rows'] > 0 && $this->failedRows->isNotEmpty())
+                @if ($progress['invalid_rows'] > 0 && $this->failedRows->isNotEmpty())
                     @php
                         $totalMessages = $this->failedRows->count();
                         $showFullTable = $totalMessages <= 10;

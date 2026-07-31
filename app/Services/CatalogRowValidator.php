@@ -59,21 +59,6 @@ class CatalogRowValidator
         return ['errors' => $errors];
     }
 
-    private function conditionIsTriggered($definition, array $rowData): bool
-    {
-        if (! $definition->conditional_on_field) {
-            return false;
-        }
-
-        $triggerValue = $rowData[$definition->conditional_on_field] ?? null;
-
-        if (is_null($definition->conditional_on_value)) {
-            return ! is_null($triggerValue) && $triggerValue !== '';
-        }
-
-        return (string) $triggerValue === (string) $definition->conditional_on_value;
-    }
-
     private function validateType($definition, mixed $value): ?string
     {
         return match ($definition->field_type) {

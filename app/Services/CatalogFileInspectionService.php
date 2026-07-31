@@ -60,23 +60,6 @@ class CatalogFileInspectionService
     }
 
     /**
-     * Count total data rows (excluding header) without loading everything
-     * into memory at once - used to populate catalog_uploads.total_rows
-     * before the queued job does the heavy processing.
-     */
-    public function countDataRows(string $disk, string $path, string $fileType): int
-    {
-        $localPath = $this->resolveLocalPath($disk, $path);
-
-        $reader = $this->makeReader($fileType, $localPath);
-        $reader->setReadDataOnly(true);
-        $spreadsheet = $reader->load($localPath);
-        $sheet = $spreadsheet->getActiveSheet();
-
-        return max(0, $sheet->getHighestDataRow() - 1); // minus header row
-    }
-
-    /**
      * Compute a stable signature for a file's column structure.
      *
      * The signature is an MD5 of the sorted, lowercased, trimmed non-empty

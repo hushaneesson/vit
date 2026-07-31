@@ -121,6 +121,13 @@ class ProcessCatalogUploadJob implements ShouldQueue
                 });
             }
 
+            // Persist the final counts so tests and the progress screen can read them.
+            $upload->update([
+                'total_rows' => $successCount + $errorCount,
+                'success_rows' => $successCount,
+                'invalid_rows' => $errorCount,
+            ]);
+
             // Phase 8B: convert validated rows into CatalogItem records.
             // ProcessValidatedRowsJob will claim ownership and finalize the upload.
             if ($successCount > 0) {
@@ -137,7 +144,7 @@ class ProcessCatalogUploadJob implements ShouldQueue
                     'status' => CatalogUploadStatus::Completed,
                     'total_rows' => $successCount + $errorCount,
                     'success_rows' => $successCount,
-                    'error_rows' => $errorCount,
+                    'invalid_rows' => $errorCount,
                     'processing_completed_at' => now(),
                 ]);
             }

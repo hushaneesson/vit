@@ -206,11 +206,8 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
             DB::commit();
 
-            $totalSkipped = $unchangedCount;
-            $allSkippedNames = $unchangedNames;
-
             $emailSent = false;
-            if ($upload->error_rows > 10 && !$upload->validation_report_emailed_at) {
+            if ($upload->invalid_rows > 10 && !$upload->validation_report_emailed_at) {
                 try {
                     $client = $upload->client;
 
@@ -225,7 +222,7 @@ class ProcessValidatedRowsJob implements ShouldQueue
                             ->notify(new CatalogUploadValidationReportNotification(
                                 catalogName: 'Upload #' . $upload->id,
                                 processedAt: $upload->processing_completed_at,
-                                totalErrors: $upload->error_rows,
+                                totalErrors: $upload->invalid_rows,
                                 totalWarnings: 0,
                                 errors: $failedRows,
                                 warnings: collect(),
@@ -250,7 +247,7 @@ class ProcessValidatedRowsJob implements ShouldQueue
                     'created_rows' => $createdCount,
                     'updated_rows' => $updatedCount,
                     'unchanged_rows' => $unchangedCount,
-                    'error_rows' => $upload->rows()->where('status', 'invalid')->count(),
+                    'invalid_rows' => $upload->rows()->where('status', 'invalid')->count(),
                     'processing_completed_at' => now(),
                 ]);
             }
