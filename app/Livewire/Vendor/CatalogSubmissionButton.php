@@ -91,22 +91,20 @@ class CatalogSubmissionButton extends Component
         $client = Auth::guard('client')->user();
 
         if (! $client) {
-            $this->addError('review', 'You must be logged in to complete this action.');
+            $this->dispatch('notify', type: 'error', message: 'You must be logged in to complete this action.');
             return;
         }
 
         $vendorId = $client->vendor_id;
 
         try {
-            // Guard: vendor must have at least one catalog item
             $totalItems = CatalogItem::where('vendor_id', $vendorId)->count();
 
             if ($totalItems === 0) {
-                $this->addError('review', 'Your catalog is empty. Please upload catalog items before submitting a catalog.');
+                $this->dispatch('notify', type: 'error', message: 'Your catalog is empty. Please upload catalog items before submitting.');
                 return;
             }
 
-            // Guard: no duplicate pending review for this vendor
             $pending = CatalogSubmission::where('vendor_id', $vendorId)
                 ->whereIn('status', [
                     CatalogSubmissionStatus::ReviewRequested,
@@ -115,11 +113,10 @@ class CatalogSubmissionButton extends Component
                 ->exists();
 
             if ($pending) {
-                $this->addError('review', 'A review request is already pending for this catalog. Please wait for admin review.');
+                $this->dispatch('notify', type: 'error', message: 'A submission is already pending for this catalog.');
                 return;
             }
 
-            // Count stats based on ALL items (no filtering)
             $completeItems = CatalogItem::where('vendor_id', $vendorId)
                 ->whereIn('status', ['acceptable', 'excellent'])
                 ->count();
@@ -140,12 +137,9 @@ class CatalogSubmissionButton extends Component
                 ]);
             });
 
-            // Dispatch the Excel generation job after successful transaction commit
             if ($submission) {
                 try {
                     GenerateCatalogExportJob::dispatch($submission->id);
-
-                    //logic to send notification to admin about the new review re
 
                     $vendorName = 'Unknown Vendor';
                     if ($client->vendor && is_object($client->vendor) && is_string($client->vendor->name)) {
@@ -154,7 +148,6 @@ class CatalogSubmissionButton extends Component
 
                     $adminEmail = config('vit.admin_email');
 
-                    // Ensure admin_email is a valid string before sending notification
                     if (is_string($adminEmail) && $adminEmail !== '') {
                         \Illuminate\Support\Facades\Notification::route('mail', $adminEmail)
                             ->notify(new CatalogReadyForReviewNotification(
@@ -162,8 +155,7 @@ class CatalogSubmissionButton extends Component
                             ));
                     }
                 } catch (\Throwable $e) {
-                    // Log notification failure but don't block the review request
-                    \Illuminate\Support\Facades\Log::error('Catalog review notification failed', [
+                    \Illuminate\Support\Facades\Log::error('Catalog admin notification failed', [
                         'submission_id' => $submission->id,
                         'vendor_id' => $vendorId,
                         'error' => $e->getMessage(),
@@ -172,48 +164,37 @@ class CatalogSubmissionButton extends Component
                 }
             }
 
-            // Invalidate the cached computed property so the re-render
-            // picks up the newly created submission immediately.
             unset($this->existingPendingSubmission);
 
-            $this->dispatch('review-requested');
+            $this->dispatch('notify', type: 'success', message: 'Your catalog has been submitted.');
+            // $this->dispatch('review-requested');
         } catch (\Throwable $e) {
-            // Log detailed error for debugging
-            \Illuminate\Support\Facades\Log::error('Catalog review request failed', [
+            \Illuminate\Support\Facades\Log::error('Catalog submission failed', [
                 'vendor_id' => $vendorId,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            // Show friendly error to vendor
-            $this->addError('review', 'Unable to submit catalog for review. Our team has been notified.');
+            $this->dispatch('notify', type: 'error', message: 'Unable to submit catalog. Our team has been notified.');
         }
     }
 
-    /**
-     * Vendor withdraws a pending review request.
-     *
-     * Changes the submission status to Withdrawn so the vendor can
-     * submit a new review request later if needed.
-     */
     public function withdrawSubmission(CatalogSubmission $submission): void
     {
         $client = Auth::guard('client')->user();
 
         if (! $client) {
-            $this->addError('withdraw', 'You must be logged in to withdraw a review request.');
+            $this->dispatch('notify', type: 'error', message: 'You must be logged in to withdraw a submission.');
             return;
         }
 
-        // Verify ownership
         if ($submission->vendor_id !== $client->vendor_id) {
-            $this->addError('withdraw', 'You do not have permission to withdraw this submission.');
+            $this->dispatch('notify', type: 'error', message: 'You do not have permission to withdraw this submission.');
             return;
         }
 
-        // Guard: can only withdraw if still pending review
         if (! in_array($submission->status, [CatalogSubmissionStatus::ReviewRequested, CatalogSubmissionStatus::ReadyForReview], true)) {
-            $this->addError('withdraw', 'This submission cannot be withdrawn in its current state.');
+            $this->dispatch('notify', type: 'error', message: 'This submission cannot be withdrawn in its current state.');
             return;
         }
 
@@ -222,15 +203,16 @@ class CatalogSubmissionButton extends Component
                 'status' => CatalogSubmissionStatus::Withdrawn,
             ]);
 
-            // Invalidate the cached computed property so the re-render
-            // reflects the withdrawn state immediately.
             unset($this->existingPendingSubmission);
 
-            $this->dispatch('review-withdrawn');
+            $this->dispatch('notify', type: 'success', message: 'Submission withdrawn.');
+            // $this->dispatch('review-withdrawn');
         } catch (\Throwable $e) {
-            $this->addError('withdraw', 'Failed to withdraw review request: ' . $e->getMessage());
+            $this->dispatch('notify', type: 'error', message: 'Failed to withdraw submission: ' . $e->getMessage());
         }
     }
+
+
 
     public function render()
     {
