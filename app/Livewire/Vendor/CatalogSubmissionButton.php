@@ -86,12 +86,12 @@ class CatalogSubmissionButton extends Component
      * Dispatches GenerateCatalogExportJob to build the Excel file from
      * all current CatalogItems for this vendor.
      */
-    public function requestReview(): void
+    public function submitCatalog(): void
     {
         $client = Auth::guard('client')->user();
 
         if (! $client) {
-            $this->addError('review', 'You must be logged in to request a review.');
+            $this->addError('review', 'You must be logged in to complete this action.');
             return;
         }
 
@@ -102,7 +102,7 @@ class CatalogSubmissionButton extends Component
             $totalItems = CatalogItem::where('vendor_id', $vendorId)->count();
 
             if ($totalItems === 0) {
-                $this->addError('review', 'Your catalog is empty. Please upload catalog items before requesting review.');
+                $this->addError('review', 'Your catalog is empty. Please upload catalog items before submitting a catalog.');
                 return;
             }
 
@@ -196,7 +196,7 @@ class CatalogSubmissionButton extends Component
      * Changes the submission status to Withdrawn so the vendor can
      * submit a new review request later if needed.
      */
-    public function withdrawReview(CatalogSubmission $submission): void
+    public function withdrawSubmission(CatalogSubmission $submission): void
     {
         $client = Auth::guard('client')->user();
 

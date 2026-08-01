@@ -1,5 +1,5 @@
 <div>
-    <div class="max-w-4xl px-4 py-10 mx-auto catalog-upload-mapper">
+    <div class="max-w-4xl px-4 py-6 mx-auto sm:py-10 catalog-upload-mapper">
 
         {{-- STEP RAIL with friendly descriptions --}}
         @php
@@ -14,7 +14,7 @@
         @endphp
 
         @unless ($step === 'error')
-            <ol class="flex items-center mb-10">
+            <ol class="flex items-center mb-8 sm:mb-10">
                 @foreach ($steps as $key => $info)
                     @php
                         $isDone = array_search($key, $stepKeys) < $currentIndex;
@@ -23,14 +23,14 @@
                     <li class="flex items-center {{ !$loop->last ? 'flex-1' : '' }}">
                         <div class="flex flex-col items-center gap-1 shrink-0">
                             <span @class([
-                                'flex items-center justify-center w-9 h-9 rounded-full text-sm font-semibold border-2 shrink-0 transition-colors',
+                                'flex items-center justify-center w-7 h-7 sm:w-9 sm:h-9 rounded-full text-xs sm:text-sm font-semibold border-2 shrink-0 transition-colors',
                                 'bg-emerald-600 border-emerald-600 text-white' => $isDone,
                                 'bg-white border-slate-900 text-slate-900' => $isCurrent,
                                 'bg-white border-slate-300 text-slate-400' => !$isDone && !$isCurrent,
                             ])>
                                 @if ($isDone)
-                                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"
-                                        stroke-width="3">
+                                    <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" viewBox="0 0 24 24"
+                                        stroke="currentColor" stroke-width="3">
                                         <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                                     </svg>
                                 @else
@@ -38,7 +38,7 @@
                                 @endif
                             </span>
                             <span @class([
-                                'text-xs font-semibold whitespace-nowrap',
+                                'text-[10px] sm:text-xs font-semibold whitespace-nowrap',
                                 'text-slate-900' => $isCurrent || $isDone,
                                 'text-slate-400' => !$isCurrent && !$isDone,
                             ])>{{ $info['label'] }}</span>
@@ -50,7 +50,7 @@
                         </div>
                         @if (!$loop->last)
                             <div @class([
-                                'flex-1 h-0.5 mx-3 -mt-7 sm:-mt-9',
+                                'flex-1 h-0.5 mx-1.5 sm:mx-3 -mt-6 sm:-mt-9',
                                 'bg-emerald-500' => $isDone,
                                 'bg-slate-200' => !$isDone,
                             ])></div>
@@ -64,15 +64,15 @@
         {{-- STEP 1: Upload                                                --}}
         {{-- ============================================================ --}}
         @if ($step === 'upload')
-            <div class="p-8 bg-white border rounded-xl border-slate-200">
-                <h2 class="text-xl font-semibold text-slate-900">Upload your product catalog</h2>
+            <div class="p-4 bg-white border rounded-xl sm:p-8 border-slate-200">
+                <h2 class="text-lg font-semibold sm:text-xl text-slate-900">Upload your product catalog</h2>
                 <p class="mt-1 text-sm text-slate-500">
                     Upload your file exactly as it is. We'll help you match the columns in the next step.
                 </p>
 
                 {{-- Drop zone --}}
                 <label for="catalog-file" @class([
-                    'relative flex flex-col items-center justify-center gap-2 px-6 py-12 mt-4 text-center transition border-2 border-dashed rounded-lg cursor-pointer',
+                    'relative flex flex-col items-center justify-center gap-2 px-4 py-8 mt-4 text-center transition border-2 border-dashed rounded-lg cursor-pointer sm:px-6 sm:py-12',
                     'border-emerald-400 bg-emerald-50/40' => $file,
                     'border-slate-300 hover:border-slate-400 hover:bg-slate-50' => !$file,
                 ])>
@@ -83,7 +83,8 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                             </svg>
                         </div>
-                        <span class="text-sm font-semibold text-slate-900">{{ $file->getClientOriginalName() }}</span>
+                        <span
+                            class="px-2 text-sm font-semibold break-all text-slate-900">{{ $file->getClientOriginalName() }}</span>
                         <span class="text-xs text-slate-500">Click to choose a different file</span>
                     @else
                         <svg class="w-8 h-8 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"
@@ -91,7 +92,8 @@
                             <path stroke-linecap="round" stroke-linejoin="round"
                                 d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 7.5 12 3m0 0L7.5 7.5M12 3v13.5" />
                         </svg>
-                        <span class="text-sm font-medium text-slate-900">Click to browse, or drag a file here</span>
+                        <span class="text-sm font-medium text-center text-slate-900">Click to browse, or drag a file
+                            here</span>
                         <span class="text-xs text-slate-500">CSV, XLS, or XLSX &middot; up to 50MB</span>
                     @endif
 
@@ -115,7 +117,7 @@
 
                 <button wire:click="uploadFile" wire:loading.attr="disabled" wire:target="uploadFile"
                     @disabled(!$file)
-                    class="inline-flex items-center gap-2 px-5 py-2.5 mt-4 text-sm font-semibold text-white rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition
+                    class="inline-flex items-center justify-center w-full gap-2 px-5 py-2.5 mt-4 text-sm font-semibold text-white rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition sm:w-auto
                            {{ $file ? 'bg-slate-900 hover:bg-slate-800' : 'bg-slate-400' }}">
                     <span wire:loading.remove wire:target="uploadFile">Continue to mapping &rarr;</span>
                     <span wire:loading wire:target="uploadFile">Processing file&hellip;</span>
@@ -127,10 +129,10 @@
         {{-- STEP 2: Column mapping                                        --}}
         {{-- ============================================================ --}}
         @if ($step === 'mapping')
-            <div class="p-8 bg-white border rounded-xl border-slate-200">
-                <div class="flex items-start justify-between gap-4">
+            <div class="p-4 bg-white border rounded-xl sm:p-8 border-slate-200">
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                     <div class="min-w-0">
-                        <h2 class="text-xl font-semibold text-slate-900">Match your columns</h2>
+                        <h2 class="text-lg font-semibold sm:text-xl text-slate-900">Match your columns</h2>
                         <p class="py-2 mt-1 text-sm text-slate-500">
                             <span class="block">Map the columns from your file to the VIT fields below. Only map the
                                 columns that exist in your file — anything missing can be completed later from the
@@ -142,7 +144,7 @@
                         </p>
                     </div>
                     <button wire:click="$set('mapping', @js($this->catalogFields->pluck('field_key')->mapWithKeys(fn($k) => [$k => null])->toArray()))" wire:loading.attr="disabled"
-                        class="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-500 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 shrink-0 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                        class="flex items-center self-start gap-1 px-3 py-1.5 text-xs font-medium text-slate-500 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 shrink-0 transition disabled:opacity-50 disabled:cursor-not-allowed"
                         title="Clear all column mappings and start over">
                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"
                             stroke-width="2">
@@ -170,8 +172,9 @@
                     </span>
                 </div>
 
-                <div class="mt-4 overflow-hidden border rounded-lg border-slate-200">
-                    <table class="w-full text-sm border-collapse">
+                {{-- Scrolls horizontally on narrow screens instead of squeezing columns unreadably --}}
+                <div class="mt-4 overflow-x-auto border rounded-lg border-slate-200">
+                    <table class="w-full min-w-[640px] text-sm border-collapse">
                         <thead>
                             <tr class="text-xs font-semibold tracking-wide uppercase bg-slate-50 text-slate-500">
                                 <th class="p-3 text-left border-b border-slate-200">VIT Field</th>
@@ -279,9 +282,9 @@
                     <p class="mt-4 text-sm text-rose-600">{{ $message }}</p>
                 @enderror
 
-                <div class="flex items-center justify-between mt-6">
+                <div class="flex flex-col-reverse gap-3 mt-6 sm:flex-row sm:items-center sm:justify-between">
                     <button wire:click="startOver" wire:loading.attr="disabled"
-                        class="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                        class="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition disabled:opacity-50 disabled:cursor-not-allowed">
                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"
                             stroke-width="2">
                             <path stroke-linecap="round" stroke-linejoin="round"
@@ -291,7 +294,7 @@
                     </button>
 
                     <button wire:click="confirmMapping" wire:loading.attr="disabled"
-                        class="inline-flex items-center gap-2 px-6 py-2.5 text-sm font-semibold text-white rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition bg-slate-900 hover:bg-slate-800">
+                        class="inline-flex items-center justify-center gap-2 px-6 py-2.5 text-sm font-semibold text-white rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition bg-slate-900 hover:bg-slate-800">
                         <span wire:loading.remove wire:target="confirmMapping">
                             Process file &rarr;
                         </span>
@@ -305,7 +308,8 @@
         {{-- STEP 3: Processing                                            --}}
         {{-- ============================================================ --}}
         @if ($step === 'processing')
-            <div wire:poll.2s="refreshStatus" class="p-10 text-center bg-white border rounded-xl border-slate-200">
+            <div wire:poll.2s="refreshStatus"
+                class="p-6 text-center bg-white border rounded-xl sm:p-10 border-slate-200">
                 <div class="flex items-center justify-center mx-auto rounded-full w-14 h-14 bg-slate-100">
                     <svg class="w-6 h-6 animate-spin text-slate-900" fill="none" viewBox="0 0 24 24">
                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"
@@ -314,14 +318,14 @@
                         </path>
                     </svg>
                 </div>
-                <h2 class="mt-4 text-xl font-semibold text-slate-900">Processing your file&hellip;</h2>
+                <h2 class="mt-4 text-lg font-semibold sm:text-xl text-slate-900">Processing your file&hellip;</h2>
                 <p class="max-w-sm mx-auto mt-1 text-sm text-slate-500">
                     This may take a few minutes for larger files. You can leave this page &mdash; we'll keep working
                     in the background.
                 </p>
 
                 {{-- Live counts — update as the poll refreshes --}}
-                <div class="flex items-center justify-center gap-6 mt-6">
+                <div class="flex flex-wrap items-center justify-center gap-4 mt-6 sm:gap-6">
                     @if ($progress['total_rows'] > 0)
                         <div class="text-center">
                             <div class="text-xs font-medium uppercase text-slate-400">Total</div>
@@ -362,48 +366,56 @@
         {{-- STEP 4: Summary                                               --}}
         {{-- ============================================================ --}}
         @if ($step === 'summary')
-            <div class="p-8 bg-white border rounded-xl border-slate-200">
+            <div class="p-4 bg-white border rounded-xl sm:p-8 border-slate-200">
                 <div class="flex items-center justify-center w-12 h-12 mx-auto rounded-full bg-emerald-100">
                     <svg class="w-6 h-6 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"
                         stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                     </svg>
                 </div>
-                <h2 class="mt-4 text-xl font-semibold text-center text-slate-900">Upload complete</h2>
+                <h2 class="mt-4 text-lg font-semibold text-center sm:text-xl text-slate-900">Upload complete</h2>
 
                 {{-- Visual summary cards — only show a card when its value > 0 --}}
                 <dl class="flex flex-wrap gap-3 mt-6">
-                    <div class="p-4 text-center border rounded-lg border-slate-200 bg-slate-50 min-w-[120px] flex-1">
+                    <div
+                        class="p-4 text-center border rounded-lg border-slate-200 bg-slate-50 min-w-[100px] sm:min-w-[120px] flex-1">
                         <dt class="text-xs font-medium tracking-wide uppercase text-slate-500">Total Rows</dt>
-                        <dd class="mt-1 text-2xl font-semibold text-slate-900">{{ $progress['total_rows'] }}</dd>
+                        <dd class="mt-1 text-xl font-semibold sm:text-2xl text-slate-900">
+                            {{ $progress['total_rows'] }}</dd>
                     </div>
                     @if ($progress['created_rows'] > 0)
                         <div
-                            class="p-4 text-center border rounded-lg border-emerald-200 bg-emerald-50 min-w-[120px] flex-1">
+                            class="p-4 text-center border rounded-lg border-emerald-200 bg-emerald-50 min-w-[100px] sm:min-w-[120px] flex-1">
                             <dt class="text-xs font-medium tracking-wide uppercase text-emerald-700">Created</dt>
-                            <dd class="mt-1 text-2xl font-semibold text-emerald-700">{{ $progress['created_rows'] }}
+                            <dd class="mt-1 text-xl font-semibold sm:text-2xl text-emerald-700">
+                                {{ $progress['created_rows'] }}
                             </dd>
                         </div>
                     @endif
                     @if ($progress['updated_rows'] > 0)
                         <div
-                            class="p-4 text-center border rounded-lg border-amber-200 bg-amber-50 min-w-[120px] flex-1">
+                            class="p-4 text-center border rounded-lg border-amber-200 bg-amber-50 min-w-[100px] sm:min-w-[120px] flex-1">
                             <dt class="text-xs font-medium tracking-wide uppercase text-amber-700">Updated</dt>
-                            <dd class="mt-1 text-2xl font-semibold text-amber-700">{{ $progress['updated_rows'] }}
+                            <dd class="mt-1 text-xl font-semibold sm:text-2xl text-amber-700">
+                                {{ $progress['updated_rows'] }}
                             </dd>
                         </div>
                     @endif
                     @if ($progress['unchanged_rows'] > 0)
-                        <div class="p-4 text-center border rounded-lg border-sky-200 bg-sky-50 min-w-[120px] flex-1">
+                        <div
+                            class="p-4 text-center border rounded-lg border-sky-200 bg-sky-50 min-w-[100px] sm:min-w-[120px] flex-1">
                             <dt class="text-xs font-medium tracking-wide uppercase text-sky-700">Unchanged</dt>
-                            <dd class="mt-1 text-2xl font-semibold text-sky-700">{{ $progress['unchanged_rows'] }}
+                            <dd class="mt-1 text-xl font-semibold sm:text-2xl text-sky-700">
+                                {{ $progress['unchanged_rows'] }}
                             </dd>
                         </div>
                     @endif
                     @if ($progress['invalid_rows'] > 0)
-                        <div class="p-4 text-center border rounded-lg border-rose-200 bg-rose-50 min-w-[120px] flex-1">
+                        <div
+                            class="p-4 text-center border rounded-lg border-rose-200 bg-rose-50 min-w-[100px] sm:min-w-[120px] flex-1">
                             <dt class="text-xs font-medium tracking-wide uppercase text-rose-700">Invalid</dt>
-                            <dd class="mt-1 text-2xl font-semibold text-rose-700">{{ $progress['invalid_rows'] }}</dd>
+                            <dd class="mt-1 text-xl font-semibold sm:text-2xl text-rose-700">
+                                {{ $progress['invalid_rows'] }}</dd>
                         </div>
                     @endif
                 </dl>
@@ -426,8 +438,8 @@
                                 </span>
                                 <span class="text-xs text-rose-500">{{ $totalMessages }} row(s)</span>
                             </div>
-                            <div class="overflow-y-auto max-h-48">
-                                <table class="w-full text-sm border-collapse">
+                            <div class="overflow-x-auto overflow-y-auto max-h-48">
+                                <table class="w-full min-w-[420px] text-sm border-collapse">
                                     <thead class="sticky top-0 bg-slate-50">
                                         <tr class="text-xs font-semibold tracking-wide uppercase text-slate-500">
                                             <th class="p-2.5 pl-4 text-left border-b border-slate-200">Row</th>
@@ -505,8 +517,8 @@
                                 </span>
                                 <span class="text-xs text-rose-500">{{ $totalMessages }} total row(s)</span>
                             </div>
-                            <div class="overflow-y-auto max-h-48">
-                                <table class="w-full text-sm border-collapse">
+                            <div class="overflow-x-auto overflow-y-auto max-h-48">
+                                <table class="w-full min-w-[420px] text-sm border-collapse">
                                     <thead class="sticky top-0 bg-slate-50">
                                         <tr class="text-xs font-semibold tracking-wide uppercase text-slate-500">
                                             <th class="p-2.5 pl-4 text-left border-b border-slate-200">Row</th>
@@ -537,9 +549,10 @@
                     @endif
                 @endif
 
-                <div class="flex flex-wrap items-center justify-center gap-3 mt-6">
+                <div
+                    class="flex flex-col-reverse gap-3 mt-6 sm:flex-row sm:flex-wrap sm:items-center sm:justify-center">
                     <a href="{{ route('vendor.catalog.index') }}"
-                        class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-slate-900 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition">
+                        class="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-semibold text-slate-900 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition">
                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"
                             stroke-width="2">
                             <path stroke-linecap="round" stroke-linejoin="round"
@@ -549,7 +562,7 @@
                     </a>
 
                     <button wire:click="startOver" wire:loading.attr="disabled"
-                        class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-slate-900 rounded-lg hover:bg-slate-800 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                        class="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-slate-900 rounded-lg hover:bg-slate-800 transition disabled:opacity-50 disabled:cursor-not-allowed">
                         Upload another file
                     </button>
                 </div>
@@ -560,19 +573,19 @@
         {{-- ERROR STATE                                                   --}}
         {{-- ============================================================ --}}
         @if ($step === 'error')
-            <div class="p-8 text-center bg-white border rounded-xl border-rose-200">
+            <div class="p-6 text-center bg-white border rounded-xl sm:p-8 border-rose-200">
                 <div class="flex items-center justify-center w-12 h-12 mx-auto rounded-full bg-rose-100">
                     <svg class="w-6 h-6 text-rose-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"
                         stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
                     </svg>
                 </div>
-                <h2 class="mt-4 text-xl font-semibold text-rose-600">Something went wrong</h2>
+                <h2 class="mt-4 text-lg font-semibold sm:text-xl text-rose-600">Something went wrong</h2>
                 <p class="max-w-sm mx-auto mt-1 text-sm text-slate-600">
                     {{ $progress['failure_reason'] ?? 'Please try again or contact support.' }}
                 </p>
                 <button wire:click="startOver" wire:loading.attr="disabled"
-                    class="inline-flex items-center gap-2 px-5 py-2.5 mt-6 text-sm font-semibold text-slate-900 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                    class="inline-flex items-center justify-center w-full gap-2 px-5 py-2.5 mt-6 text-sm font-semibold text-slate-900 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition disabled:opacity-50 disabled:cursor-not-allowed sm:w-auto">
                     Try again
                 </button>
             </div>
