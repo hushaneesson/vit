@@ -49,38 +49,6 @@ class CatalogSubmissionsTable
                         'failed' => 'danger',
                         default => 'gray',
                     }),
-                TextColumn::make('download')
-                    ->label('File')
-                    ->state(fn(CatalogSubmission $record) => $record->file_path ? 'Download' : '—')
-                    ->icon(fn(CatalogSubmission $record) => $record->file_path ? 'heroicon-o-arrow-down-on-square' : null)
-                    ->color('info')
-                    ->toggleable()
-                    ->action(
-                        Action::make('downloadExcel')
-                            ->action(function (CatalogSubmission $record) {
-                                if (!$record->file_path) {
-                                    Notification::make()
-                                        ->title('File not available')
-                                        ->body('The Excel file has not been generated yet')
-                                        ->warning()
-                                        ->send();
-                                    return;
-                                }
-
-                                if (!Storage::disk($record->disk ?? 'local')->exists($record->file_path)) {
-                                    Notification::make()
-                                        ->title('File not found')
-                                        ->body('The generated file is missing from storage')
-                                        ->danger()
-                                        ->send();
-                                    return;
-                                }
-
-                                $filename = 'catalog-submission-' . $record->id . '-' . now()->format('Y-m-d') . '.xlsx';
-
-                                return Storage::disk($record->disk ?? 'local')->download($record->file_path, $filename);
-                            })
-                    ),
                 TextColumn::make('generated_at')
                     ->dateTime()
                     ->toggleable(isToggledHiddenByDefault: true),
@@ -103,7 +71,7 @@ class CatalogSubmissionsTable
             ->defaultSort('requested_at', 'desc')
             ->recordActions([
                 Action::make('approve')
-                    ->label('Sync to VIT Server')
+                    ->label('Approve & Upload to VIT')
                     ->icon('heroicon-o-check-circle')
                     ->color('success')
                     ->visible(fn(CatalogSubmission $record) => $record->status === CatalogSubmissionStatus::ReadyForReview)
@@ -111,6 +79,7 @@ class CatalogSubmissionsTable
                     ->modalHeading('Approve catalog submission')
                     ->modalDescription('This will approve the submission and upload the already-generated Excel file to the VIT FTP server. The file will NOT be regenerated.')
                     ->action(function (CatalogSubmission $record) {
+                        // Guard: must be in ready_for_review status
                         if ($record->status !== CatalogSubmissionStatus::ReadyForReview) {
                             Notification::make()
                                 ->title('Cannot approve')
@@ -120,6 +89,7 @@ class CatalogSubmissionsTable
                             return;
                         }
 
+                        // Guard: processing_status must be completed
                         if ($record->processing_status !== 'completed') {
                             Notification::make()
                                 ->title('Cannot approve')
@@ -129,6 +99,7 @@ class CatalogSubmissionsTable
                             return;
                         }
 
+                        // Guard: file_path must exist
                         if (!$record->file_path) {
                             Notification::make()
                                 ->title('Cannot approve')
@@ -138,6 +109,7 @@ class CatalogSubmissionsTable
                             return;
                         }
 
+                        // Guard: file must exist on storage
                         if (!Storage::disk($record->disk ?? 'local')->exists($record->file_path)) {
                             Notification::make()
                                 ->title('Cannot approve')
@@ -162,6 +134,7 @@ class CatalogSubmissionsTable
 
                             $record->update($updateData);
 
+                            // Dispatch the FTP upload job (uploads existing file, does NOT regenerate)
                             UploadCatalogSubmissionToVit::dispatch($record->id);
 
                             Notification::make()
@@ -215,6 +188,7 @@ class CatalogSubmissionsTable
                                 'rejection_reason' => $data['rejection_reason'],
                             ]);
 
+                            // Notify the requesting client
                             $client = $record->requestedByClient;
                             if ($client && $client->email) {
                                 \Illuminate\Support\Facades\Notification::route('mail', $client->email)
@@ -237,6 +211,33 @@ class CatalogSubmissionsTable
                                 ->danger()
                                 ->send();
                         }
+                    }),
+                Action::make('downloadExcel')
+                    ->label('Download File')
+                    ->icon('heroicon-o-arrow-down-on-square')
+                    ->color('info')
+                    ->action(function (CatalogSubmission $record) {
+                        if (!$record->file_path) {
+                            Notification::make()
+                                ->title('File not available')
+                                ->body('The Excel file has not been generated yet')
+                                ->warning()
+                                ->send();
+                            return;
+                        }
+
+                        if (!Storage::disk($record->disk ?? 'local')->exists($record->file_path)) {
+                            Notification::make()
+                                ->title('File not found')
+                                ->body('The generated file is missing from storage')
+                                ->danger()
+                                ->send();
+                            return;
+                        }
+
+                        $filename = 'catalog-submission-' . $record->id . '-' . now()->format('Y-m-d') . '.xlsx';
+
+                        return Storage::disk($record->disk ?? 'local')->download($record->file_path, $filename);
                     }),
             ])
             ->toolbarActions([
