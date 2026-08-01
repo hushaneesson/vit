@@ -40,22 +40,22 @@ class CatalogSubmissionReviewedNotification extends Notification implements Shou
     {
         if ($this->status === 'approved') {
             return (new MailMessage)
-                ->subject("Catalog approved: {$this->vendorName}")
-                ->greeting('Catalog Approved')
-                ->line("Your catalog has been approved by the admin.")
+                ->subject("Catalog processing: {$this->vendorName}")
+                ->greeting('Catalog Processing')
+                ->line("Your catalog is being processed.")
                 ->line('The Excel export is now being generated. You will be notified when it is ready.')
                 ->salutation('— VIT System');
         }
 
         return (new MailMessage)
-            ->subject("Catalog review update: {$this->vendorName}")
-            ->greeting('Catalog Review Update')
-            ->line("Your catalog has been reviewed and was not approved at this time.")
+            ->subject("Catalog processing update: {$this->vendorName}")
+            ->greeting('Catalog Processing Update')
+            ->line("Your catalog submission could not be processed at this time.")
             ->line('')
             ->line('**Reason:**')
             ->line($this->rejectionReason ?? 'No specific reason provided.')
             ->line('')
-            ->line('Please review the feedback above, make the necessary corrections, and re-upload your catalog for another review.')
+            ->line('Please review the information above, make the necessary corrections, and submit your catalog again.')
             ->salutation('— VIT System');
     }
 }

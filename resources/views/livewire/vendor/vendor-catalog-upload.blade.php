@@ -101,27 +101,32 @@
                         class="sr-only" />
                 </label>
 
-                <div wire:loading wire:target="file" class="flex items-center gap-2 mt-3 text-sm text-slate-500">
-                    <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"
-                            stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z">
-                        </path>
-                    </svg>
-                    Reading file&hellip;
+                <div class="flex flex-wrap items-center gap-4 mt-4">
+                    <button wire:click="uploadFile" wire:loading.attr="disabled" wire:target="uploadFile"
+                        @disabled(!$file)
+                        class="inline-flex items-center justify-center w-full gap-2 px-5 py-2.5 text-sm font-semibold text-white rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition sm:w-auto
+                               {{ $file ? 'bg-slate-900 hover:bg-slate-800' : 'bg-slate-400' }}">
+                        <span wire:loading.remove wire:target="uploadFile">Continue to mapping &rarr;</span>
+                        <span wire:loading wire:target="uploadFile">Processing file&hellip;</span>
+                    </button>
+
+                    <div wire:loading wire:target="file" class="flex items-center gap-2 text-sm text-slate-500">
+                        <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"
+                                stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor"
+                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z">
+                            </path>
+                        </svg>
+                        Reading file &hellip;
+                    </div>
                 </div>
 
                 @error('file')
                     <p class="mt-3 text-sm text-rose-600">{{ $message }}</p>
                 @enderror
 
-                <button wire:click="uploadFile" wire:loading.attr="disabled" wire:target="uploadFile"
-                    @disabled(!$file)
-                    class="inline-flex items-center justify-center w-full gap-2 px-5 py-2.5 mt-4 text-sm font-semibold text-white rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition sm:w-auto
-                           {{ $file ? 'bg-slate-900 hover:bg-slate-800' : 'bg-slate-400' }}">
-                    <span wire:loading.remove wire:target="uploadFile">Continue to mapping &rarr;</span>
-                    <span wire:loading wire:target="uploadFile">Processing file&hellip;</span>
-                </button>
+
             </div>
         @endif
 

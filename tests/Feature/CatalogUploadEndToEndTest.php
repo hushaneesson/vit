@@ -381,4 +381,172 @@ class CatalogUploadEndToEndTest extends TestCase
         $this->assertNull($item->unspsc_code);
         $this->assertSame('incomplete', $item->status);
     }
+
+    public function test_empty_csv_values_do_not_erase_existing_values(): void
+    {
+        // Create an existing item with all fields populated
+        $existingItem = CatalogItem::create([
+            'vendor_id' => $this->vendor->id,
+            'seller_sku' => 'SKU-PRESERVE',
+            'name' => 'Original Name',
+            'description' => 'Original description',
+            'unit_of_measure' => 'EA',
+            'item_weight' => 1.0,
+            'list_price' => 10.00,
+            'selling_price_per_unit' => 8.00,
+            'unspsc_code' => '14111507',
+            'manufacturer' => 'Original Manufacturer',
+            'brand_name' => 'Original Brand',
+            'categorization_or_hierarchy' => 'Original/Category/Path',
+            'image_file_name' => 'original.jpg',
+            'brand_logo' => 'https://example.com/original-logo.png',
+        ]);
+
+        // Upload a new CSV that only updates the name, leaving other fields blank
+        $upload = $this->createUpload(['status' => CatalogUploadStatus::Processing]);
+        $this->createValidRow($upload, 'SKU-PRESERVE', 'Updated Name', [
+            'description' => '',
+            'manufacturer' => '',
+            'brand_name' => '',
+            'categorization_or_hierarchy' => '',
+            'image_file_name' => '',
+            'brand_logo' => '',
+        ]);
+
+        $job = new ProcessValidatedRowsJob($upload->id);
+        $job->handle();
+        $upload->refresh();
+
+        $this->assertEquals(CatalogUploadStatus::Completed, $upload->status);
+        $this->assertEquals(0, $upload->created_rows);
+        $this->assertEquals(1, $upload->updated_rows);
+
+        $existingItem->refresh();
+        $this->assertSame('Updated Name', $existingItem->name);
+        $this->assertSame('Original description', $existingItem->description);
+        $this->assertSame('Original Manufacturer', $existingItem->manufacturer);
+        $this->assertSame('Original Brand', $existingItem->brand_name);
+        $this->assertSame('Original/Category/Path', $existingItem->categorization_or_hierarchy);
+        $this->assertSame('original.jpg', $existingItem->image_file_name);
+        $this->assertSame('https://example.com/original-logo.png', $existingItem->brand_logo);
+    }
+
+    public function test_item_imports_without_all_vit_required_fields_gets_lower_completeness(): void
+    {
+        // A "complete" item with EVERY scoring field filled
+        // (all $requiredFields + all $excellentFields)
+        $complete = CatalogItem::create([
+            'vendor_id' => $this->vendor->id,
+            'seller_sku' => 'SKU-COMPLETE',
+            'name' => 'Complete Item',
+            'description' => 'Full description',
+            'unit_of_measure' => 'EA',
+            'manufacturer_sku' => 'MFG-COMPLETE',
+            'manufacturer' => 'Complete Manufacturer',
+            'brand_name' => 'Complete Brand',
+            'brand_logo' => 'https://example.com/complete-logo.png',
+            'image_file_name' => 'complete.jpg',
+            'categorization_or_hierarchy' => 'Office/Paper/Printer Paper',
+            'unspsc_code' => '14111507',
+            'product_type_or_family' => 'Printer Paper',
+            'search_terms' => ['paper', 'office'],
+            'specifications' => ['Color=White', 'Size=Letter'],
+            'selling_points' => ['Recycled', 'Acid-free'],
+            'classifications' => ['Recyclable', 'EPP'],
+            'msds_link' => 'https://example.com/msds.pdf',
+            'quantity_per_unit' => 500,
+            'item_weight' => 5.0,
+            'min_qty_per_order' => 1,
+            'max_qty_per_order' => 50,
+            'multiples' => 1,
+            'list_price' => 10.00,
+            'selling_price_per_unit' => 8.00,
+        ]);
+
+        $this->assertEquals(100, $complete->completeness_score);
+        $this->assertSame('excellent', $complete->status);
+
+        // An imported item missing several VIT-required fields (list_price,
+        // selling_price_per_unit, unspsc_code, item_weight,
+        // categorization_or_hierarchy) — but has all minimum import fields.
+        $upload = $this->createUpload(['status' => CatalogUploadStatus::Processing]);
+        $this->createValidRow($upload, 'SKU-PARTIAL', 'Partial Item');
+
+        $job = new ProcessValidatedRowsJob($upload->id);
+        $job->handle();
+        $upload->refresh();
+
+        $this->assertEquals(CatalogUploadStatus::Completed, $upload->status);
+        $this->assertEquals(1, $upload->created_rows);
+
+        $partial = CatalogItem::where('vendor_id', $this->vendor->id)
+            ->where('seller_sku', 'SKU-PARTIAL')
+            ->first();
+
+        $this->assertNotNull($partial);
+        // Imports successfully
+        $this->assertSame('Partial Item', $partial->name);
+        // But completeness score is lower because VIT-required fields are missing
+        $this->assertLessThan(100, $partial->completeness_score);
+        $this->assertNotSame('excellent', $partial->status);
+    }
+
+    public function test_all_vit_fields_persist_to_catalog_item(): void
+    {
+        $upload = $this->createUpload(['status' => CatalogUploadStatus::Processing]);
+
+        $this->createValidRow($upload, 'SKU-ALL-FIELDS', 'All Fields Item', [
+            'manufacturer_sku' => 'MFG-SKU-1',
+            'manufacturer' => 'Test Manufacturer',
+            'brand_name' => 'Test Brand',
+            'brand_logo' => 'https://example.com/logo.png',
+            'image_file_name' => 'item-image.jpg',
+            'categorization_or_hierarchy' => 'Cleaning/Paper Products/Toilet paper',
+            'product_type_or_family' => 'Gel Pens',
+            'search_terms' => ['pen', 'writing'],
+            'specifications' => ['Color=Red', 'Material=Aluminum'],
+            'classifications' => ['EPP', 'Recyclable'],
+            'selling_points' => ['Durable', 'Eco-friendly'],
+            'msds_link' => 'https://example.com/msds.pdf',
+            'quantity_per_unit' => 4,
+            'min_qty_per_order' => 10,
+            'max_qty_per_order' => 100,
+            'multiples' => 2,
+            'item_weight' => 1.5,
+        ]);
+
+        $job = new ProcessValidatedRowsJob($upload->id);
+        $job->handle();
+        $upload->refresh();
+
+        $this->assertEquals(CatalogUploadStatus::Completed, $upload->status);
+        $this->assertEquals(1, $upload->created_rows);
+
+        $item = CatalogItem::where('vendor_id', $this->vendor->id)
+            ->where('seller_sku', 'SKU-ALL-FIELDS')
+            ->first();
+
+        $this->assertNotNull($item);
+        $this->assertSame('MFG-SKU-1', $item->manufacturer_sku);
+        $this->assertSame('Test Manufacturer', $item->manufacturer);
+        $this->assertSame('Test Brand', $item->brand_name);
+        $this->assertSame('https://example.com/logo.png', $item->brand_logo);
+        $this->assertSame('item-image.jpg', $item->image_file_name);
+        $this->assertSame('Cleaning/Paper Products/Toilet paper', $item->categorization_or_hierarchy);
+        $this->assertSame('Gel Pens', $item->product_type_or_family);
+        $this->assertSame(['pen', 'writing'], $item->search_terms);
+        $this->assertSame(['Color=Red', 'Material=Aluminum'], $item->specifications);
+        $this->assertSame(['EPP', 'Recyclable'], $item->classifications);
+        $this->assertSame(['Durable', 'Eco-friendly'], $item->selling_points);
+        $this->assertSame('https://example.com/msds.pdf', $item->msds_link);
+        $this->assertEquals(4, (float) $item->quantity_per_unit);
+        $this->assertEquals(10, (float) $item->min_qty_per_order);
+        $this->assertEquals(100, (float) $item->max_qty_per_order);
+        $this->assertEquals(2, (float) $item->multiples);
+        $this->assertEquals(1.5, (float) $item->item_weight);
+        $this->assertEquals(10.00, (float) $item->list_price);
+        $this->assertEquals(8.00, (float) $item->selling_price_per_unit);
+        $this->assertSame('EA', $item->unit_of_measure);
+        $this->assertSame('14111507', $item->unspsc_code);
+    }
 }

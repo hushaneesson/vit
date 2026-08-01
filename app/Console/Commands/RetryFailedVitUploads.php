@@ -3,11 +3,11 @@
 namespace App\Console\Commands;
 
 use App\Jobs\UploadSubmissionToVit;
-use App\Models\Submission;
+use App\Models\CatalogSubmission;
 use Illuminate\Console\Command;
 
 /**
- * Phase 11: auto-retry failed VIT uploads at configurable intervals after
+ * Auto-retry failed VIT uploads at configurable intervals after
  * the failure (default 1h, 6h, 24h — see VIT_RETRY_AFTER_HOURS in .env).
  * Intended to run hourly via the scheduler (see routes/console.php).
  */
@@ -21,8 +21,8 @@ class RetryFailedVitUploads extends Command
     {
         $retryHours = config('vit.retry_after_hours', [1, 6, 24]);
 
-        $failedSubmissions = Submission::query()
-            ->where('status', 'failed')
+        $failedSubmissions = CatalogSubmission::query()
+            ->where('processing_status', 'failed')
             ->get();
 
         $dispatched = 0;
@@ -35,7 +35,7 @@ class RetryFailedVitUploads extends Command
             // tracks how many thresholds we've consumed).
             $shouldRetry = collect($retryHours)
                 ->slice($submission->upload_attempts - 1, 1)
-                ->contains(fn ($threshold) => $hoursSinceUpdate >= $threshold);
+                ->contains(fn($threshold) => $hoursSinceUpdate >= $threshold);
 
             if ($shouldRetry) {
                 UploadSubmissionToVit::dispatch($submission->id);

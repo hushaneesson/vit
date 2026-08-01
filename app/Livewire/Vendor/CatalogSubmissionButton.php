@@ -58,16 +58,23 @@ class CatalogSubmissionButton extends Component
      * "Review Requested" panel and the "Withdraw Review Request" button
      * instead of the "Request Review" button.
      */
-    #[Computed]
-    public function existingPendingSubmission(): ?CatalogSubmission
+    public ?CatalogSubmission $existingPendingSubmission = null;
+
+    public function mount(): void
+    {
+        $this->loadPendingSubmission();
+    }
+
+    private function loadPendingSubmission(): void
     {
         $client = Auth::guard('client')->user();
 
         if (! $client) {
-            return null;
+            $this->existingPendingSubmission = null;
+            return;
         }
 
-        return CatalogSubmission::where('vendor_id', $client->vendor_id)
+        $this->existingPendingSubmission = CatalogSubmission::where('vendor_id', $client->vendor_id)
             ->whereIn('status', [
                 CatalogSubmissionStatus::ReviewRequested,
                 CatalogSubmissionStatus::ReadyForReview,
@@ -127,7 +134,6 @@ class CatalogSubmissionButton extends Component
             DB::transaction(function () use ($client, $vendorId, $totalItems, $completeItems, $incompleteItems, &$submission) {
                 $submission = CatalogSubmission::create([
                     'vendor_id'              => $vendorId,
-                    'catalog_upload_id'      => null,
                     'requested_by_client_id' => $client->id,
                     'status'                 => CatalogSubmissionStatus::ReviewRequested,
                     'total_items'            => $totalItems,
@@ -164,7 +170,7 @@ class CatalogSubmissionButton extends Component
                 }
             }
 
-            unset($this->existingPendingSubmission);
+            $this->loadPendingSubmission();
 
             $this->dispatch('notify', type: 'success', message: 'Your catalog has been submitted.');
             // $this->dispatch('review-requested');
@@ -203,7 +209,7 @@ class CatalogSubmissionButton extends Component
                 'status' => CatalogSubmissionStatus::Withdrawn,
             ]);
 
-            unset($this->existingPendingSubmission);
+            $this->loadPendingSubmission();
 
             $this->dispatch('notify', type: 'success', message: 'Submission withdrawn.');
             // $this->dispatch('review-withdrawn');

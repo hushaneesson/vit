@@ -3,7 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Models\CatalogItem;
-use App\Models\Submission;
+use App\Models\CatalogSubmission;
 use App\Models\Vendor;
 use BackedEnum;
 use Filament\Forms\Components\Checkbox;
@@ -43,7 +43,7 @@ class PurgeVendorData extends Page
             ->components([
                 Select::make('vendor_id')
                     ->label('Vendor')
-                    ->options(fn () => Vendor::query()->pluck('name', 'id'))
+                    ->options(fn() => Vendor::query()->pluck('name', 'id'))
                     ->searchable()
                     ->required(),
                 Checkbox::make('delete_submissions')
@@ -65,18 +65,20 @@ class PurgeVendorData extends Page
         $submissionCount = 0;
 
         if ($state['delete_submissions'] ?? false) {
-            $submissions = Submission::where('vendor_id', $vendor->id)->get();
+            $submissions = CatalogSubmission::where('vendor_id', $vendor->id)->get();
             $submissionCount = $submissions->count();
 
             foreach ($submissions as $submission) {
-                Storage::disk('local')->delete($submission->file_path);
+                if ($submission->file_path) {
+                    Storage::disk($submission->disk ?? 'local')->delete($submission->file_path);
+                }
                 $submission->delete();
             }
         }
 
         Notification::make()
             ->title('Vendor data purged')
-            ->body("Removed {$itemCount} catalog item(s) for {$vendor->name}".
+            ->body("Removed {$itemCount} catalog item(s) for {$vendor->name}" .
                 ($submissionCount > 0 ? ", and deleted {$submissionCount} submission record(s)/file(s)." : '.'))
             ->success()
             ->send();

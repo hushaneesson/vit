@@ -37,8 +37,8 @@ Route::prefix('vendor')->name('vendor.')->group(function () {
     Route::middleware('client.active')->group(function () {
         Route::get('dashboard', DashboardController::class)->name('dashboard');
 
-        Route::get('submissions/{submission}/download', SubmissionDownloadController::class)
-            ->name('submissions.download');
+        Route::get('catalog-submissions/{catalogSubmission}/download', SubmissionDownloadController::class)
+            ->name('catalog-submissions.download');
 
         Route::get('appointments', [AppointmentController::class, 'index'])->name('appointments.index');
         Route::get('appointments/create', [AppointmentController::class, 'create'])->name('appointments.create');
@@ -46,12 +46,12 @@ Route::prefix('vendor')->name('vendor.')->group(function () {
         Route::get('catalog', [CatalogItemController::class, 'index'])->name('catalog.index');
         Route::get('catalog/create', [CatalogItemController::class, 'create'])->name('catalog.create');
 
-        Route::get('/catalog-upload',[CatalogItemController::class, 'renderUpload'])->name('catalog-upload');
-            Route::post('/', [CatalogUploadController::class, 'store']);
-    Route::post('/{catalogUpload}/mapping', [CatalogUploadController::class, 'saveMapping']);
-    Route::post('/{catalogUpload}/process', [CatalogUploadController::class, 'process']);
-    Route::get('/{catalogUpload}/status', [CatalogUploadController::class, 'status']);
-    Route::get('/{catalogUpload}/error-rows', [CatalogUploadController::class, 'errorRows']);
+        Route::get('/catalog-upload', [CatalogItemController::class, 'renderUpload'])->name('catalog-upload');
+        Route::post('/', [CatalogUploadController::class, 'store']);
+        Route::post('/{catalogUpload}/mapping', [CatalogUploadController::class, 'saveMapping']);
+        Route::post('/{catalogUpload}/process', [CatalogUploadController::class, 'process']);
+        Route::get('/{catalogUpload}/status', [CatalogUploadController::class, 'status']);
+        Route::get('/{catalogUpload}/error-rows', [CatalogUploadController::class, 'errorRows']);
 
         Route::get('catalog/{catalogItem}/edit', [CatalogItemController::class, 'edit'])->name('catalog.edit');
         Route::delete('catalog/{catalogItem}', [CatalogItemController::class, 'destroy'])->name('catalog.destroy');
@@ -59,7 +59,4 @@ Route::prefix('vendor')->name('vendor.')->group(function () {
         Route::get('catalog-images/{catalogItemImage}', CatalogItemImageController::class)
             ->name('catalog-images.show');
     });
-
-
-
 });

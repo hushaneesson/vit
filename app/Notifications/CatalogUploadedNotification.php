@@ -2,7 +2,7 @@
 
 namespace App\Notifications;
 
-use App\Models\Submission;
+use App\Models\CatalogSubmission;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
@@ -10,13 +10,13 @@ use Illuminate\Notifications\Notification;
 
 /**
  * Sent to the vendor (and cc'd to admin via a separate route) when a
- * submission has been successfully delivered to VIT's API (Phase 11/15).
+ * submission has been successfully delivered to VIT's API.
  */
 class CatalogUploadedNotification extends Notification implements ShouldQueue
 {
     use Queueable;
 
-    public function __construct(protected Submission $submission) {}
+    public function __construct(protected CatalogSubmission $submission) {}
 
     public function via(object $notifiable): array
     {

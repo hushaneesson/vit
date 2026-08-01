@@ -46,7 +46,7 @@
                         d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
                 </svg>
                 <p class="text-sm text-sky-700">
-                    <span class="font-semibold">Catalog submitted</span>
+                    <span class="font-semibold">Catalog submitted for processing</span>
                 </p>
             </div>
             <button wire:click="withdrawSubmission({{ $pendingSubmission->id }})" wire:loading.attr="disabled"
@@ -56,9 +56,9 @@
                         <path stroke-linecap="round" stroke-linejoin="round"
                             d="M9 15 9.75 15M9 18.75 9.75 18.75M15 15 15.75 15M15 18.75 15.75 18.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
                     </svg>
-                    Withdraw Submission
+                    Cancel Submission
                 </span>
-                <span wire:loading wire:target="withdrawSubmission">Withdrawing&hellip;</span>
+                <span wire:loading wire:target="withdrawSubmission">Canceling&hellip;</span>
             </button>
         </div>
     @elseif ($stats && $stats['complete'] > 0)

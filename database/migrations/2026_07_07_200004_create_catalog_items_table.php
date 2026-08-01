@@ -19,8 +19,12 @@ return new class extends Migration
             $table->string('manufacturer_sku')->nullable();
             $table->string('manufacturer')->nullable();
             $table->string('brand_name')->nullable();
+            $table->string('brand_logo')->nullable();
 
             $table->string('seller_sku');
+
+            $table->string('image_file_name')->nullable();
+            $table->string('categorization_or_hierarchy')->nullable();
 
             $table->string('unspsc_code')->nullable();
             $table->string('product_type_or_family')->nullable();

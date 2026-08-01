@@ -85,8 +85,6 @@ class ProcessValidatedRowsJob implements ShouldQueue
             $createdCount = 0;
             $updatedCount = 0;
             $unchangedCount = 0;
-            $updatedNames = [];
-            $unchangedNames = [];
 
             DB::beginTransaction();
 
@@ -154,16 +152,8 @@ class ProcessValidatedRowsJob implements ShouldQueue
                             $updateAttrs['updated_at'] = now();
                             $existing->update($updateAttrs);
                             $updatedCount++;
-                            $itemName = $attrs['name'] ?? $sellerSku;
-                            if ($itemName) {
-                                $updatedNames[] = $itemName;
-                            }
                         } else {
                             $unchangedCount++;
-                            $itemName = $attrs['name'] ?? $sellerSku;
-                            if ($itemName) {
-                                $unchangedNames[] = $itemName;
-                            }
                         }
 
                         continue;
@@ -190,10 +180,6 @@ class ProcessValidatedRowsJob implements ShouldQueue
                             $updateAttrs['updated_at'] = now();
                             $existing->update($updateAttrs);
                             $updatedCount++;
-                            $itemName = $attrs['name'] ?? $sellerSku;
-                            if ($itemName) {
-                                $updatedNames[] = $itemName;
-                            }
                         } else {
                             throw $e;
                         }

@@ -30,7 +30,6 @@ class CatalogSubmission extends Model
 
     protected $fillable = [
         'vendor_id',
-        'catalog_upload_id',
         'requested_by_client_id',
         'status',
         'total_items',
@@ -46,8 +45,14 @@ class CatalogSubmission extends Model
         'file_path',
         'disk',
         'file_size',
+        'product_count',
+        'submission_date',
+        // VIT upload tracking
         'processing_status',
         'failure_reason',
+        'upload_attempts',
+        'last_upload_error',
+        'vit_api_response',
         'generating_started_at',
         'generated_at',
         'uploaded_at',

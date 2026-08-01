@@ -18,7 +18,10 @@ class CatalogItem extends Model
         'manufacturer_sku',
         'manufacturer',
         'brand_name',
+        'brand_logo',
         'seller_sku',
+        'image_file_name',
+        'categorization_or_hierarchy',
         'unspsc_code',
         'product_type_or_family',
         'unit_of_measure',
@@ -34,10 +37,6 @@ class CatalogItem extends Model
         'msds_link',
         'list_price',
         'selling_price_per_unit',
-
-        // needed for the duplicate detection and completeness scoring, but not VIT-required:
-        // 'image_file_name',
-        // 'categorization_or_hierarchy',
 
         // not VIT, but useful for completeness scoring
         'status',
@@ -61,10 +60,26 @@ class CatalogItem extends Model
         return $this->hasMany(CatalogItemImage::class)->orderBy('sort_order');
     }
 
-    // Fields that are considered "required" for a complete item.
-    // These are VIT-required fields — items missing them will have
-    // a lower completeness score and 'incomplete' status, but they
-    // can still be created/imported and completed later.
+    /**
+     * Minimum fields required for an item to be importable/displayable.
+     *
+     * IMPORTANT: This is NOT the full VIT-required field list.
+     *
+     * There are three distinct concepts:
+     *   1. Database-required fields  – enforced by the schema (e.g.
+     *      vendor_id, seller_sku, name). An item cannot exist without these.
+     *   2. VIT-required fields       – fields VIT submission requires
+     *      (see VitFieldDefinition). Some are NOT in this list because
+     *      the system intentionally allows importing partial data.
+     *   3. Completeness scoring      – requiredFields (below) gate whether
+     *      an item is 'incomplete' vs 'acceptable'. excellentFields (below)
+     *      push the score toward 100%.
+     *
+     * Every missing field (required OR excellent) lowers the completeness
+     * score. Items missing any field in $requiredFields get 'incomplete'
+     * status but are still importable and can be completed later from the
+     * Catalog Item List.
+     */
     protected static array $requiredFields = [
         'name',
         'description',
@@ -72,11 +87,22 @@ class CatalogItem extends Model
         'unit_of_measure',
     ];
 
-    // Fields that push an item from "acceptable" to "excellent"
+    /**
+     * Additional fields that increase completeness toward VIT readiness.
+     *
+     * Includes the VIT-required fields NOT in $requiredFields
+     * (categorization_or_hierarchy, list_price, selling_price_per_unit,
+     * unspsc_code, item_weight) plus optional VIT fields. An item with all
+     * of $requiredFields + $excellentFields filled scores 100 and is
+     * marked 'excellent'.
+     */
     protected static array $excellentFields = [
         'manufacturer_sku',
         'manufacturer',
         'brand_name',
+        'brand_logo',
+        'image_file_name',
+        'categorization_or_hierarchy',
         'unspsc_code',
         'product_type_or_family',
         'search_terms',
@@ -102,6 +128,19 @@ class CatalogItem extends Model
         });
     }
 
+    /**
+     * Calculate completeness score and status.
+     *
+     * - Score: percentage of all scoring fields (required + excellent)
+     *   that have a non-blank value.
+     * - Status: 'incomplete' if ANY $requiredField is missing;
+     *   'excellent' if score is 100; otherwise 'acceptable'.
+     *
+     * An item can be 'acceptable' even when missing VIT-required fields
+     * (e.g. list_price, unspsc_code) — those live in $excellentFields and
+     * only reduce the score. 'incomplete' is reserved for missing minimum
+     * import fields.
+     */
     public static function calculateCompleteness(array $data): array
     {
         $allFields = array_merge(self::$requiredFields, self::$excellentFields);

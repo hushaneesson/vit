@@ -6,6 +6,7 @@ use App\Models\CatalogItem;
 use App\Models\CatalogSubmission;
 use App\Models\Vendor;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
@@ -200,16 +201,6 @@ class CatalogExportService
         // System-derived: seller name comes from the vendor record
         if ($fieldKey === 'seller') {
             return $vendor->name ?? '';
-        }
-
-        // Categorization/hierarchy is not yet stored on CatalogItem
-        if ($fieldKey === 'categorization_or_hierarchy') {
-            return '';
-        }
-
-        // image_file_name and brand_logo are not stored directly on CatalogItem
-        if (in_array($fieldKey, ['image_file_name', 'brand_logo'], true)) {
-            return '';
         }
 
         // Direct read — CatalogItem column matches VIT field key
