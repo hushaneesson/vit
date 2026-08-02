@@ -26,6 +26,13 @@ class AppointmentResource extends Resource
 
     protected static string|UnitEnum|null $navigationGroup = 'Appointments';
 
+    public static function getNavigationBadge(): ?string
+    {
+        return (string) Appointment::whereDate('start_date', '>=', now('America/New_York'))
+            ->where('is_active', true)
+            ->count();
+    }
+
     public static function table(Table $table): Table
     {
         return AppointmentsTable::configure($table);

@@ -173,6 +173,17 @@
                 @endif
             </p>
 
+            <div class="mb-4">
+                <label for="appointment_reason" class="block mb-1 text-sm font-medium text-gray-700">Reason for
+                    appointment</label>
+                <textarea id="appointment_reason" wire:model.defer="appointmentReason" rows="3" maxlength="1000"
+                    class="w-full px-3 py-2 text-sm bg-white border rounded-md border-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-200 focus:border-sky-400"
+                    placeholder="Briefly describe what this appointment is for"></textarea>
+                @error('appointmentReason')
+                    <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
+                @enderror
+            </div>
+
             <div class="flex gap-2">
                 <button type="button" wire:click="closeConfirmModal"
                     class="flex-1 px-4 py-2 text-sm font-semibold text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">
