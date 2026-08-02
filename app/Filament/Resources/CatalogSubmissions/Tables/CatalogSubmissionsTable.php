@@ -21,14 +21,14 @@ class CatalogSubmissionsTable
     {
         return $table
             ->columns([
-                TextColumn::make('vendor.name')
+                TextColumn::make('requestedByClient.name')
+                    ->description(fn($record) => $record->vendor->name)
                     ->searchable()
                     ->sortable(),
-                TextColumn::make('requestedByClient.name')
+                TextColumn::make('requested_at')
+                    ->dateTime('F d, Y', 'America/New_York')
+                    ->description(fn($record) => $record->total_items . ' items')
                     ->searchable()
-                    ->description(fn($record) => $record->requested_at->format('Y-m-d')),
-                TextColumn::make('total_items')
-                    ->numeric()
                     ->sortable(),
                 TextColumn::make('status')
                     ->badge()
@@ -40,17 +40,6 @@ class CatalogSubmissionsTable
                         CatalogSubmissionStatus::Approved => 'success',
                         CatalogSubmissionStatus::Uploaded => 'success',
                         CatalogSubmissionStatus::Rejected => 'danger',
-                        default => 'gray',
-                    }),
-                TextColumn::make('processing_status')
-                    ->badge()
-                    ->formatStateUsing(fn($state) => Str::headline($state ?? ''))
-                    ->color(fn($state): string => match ($state) {
-                        'pending' => 'gray',
-                        'generating' => 'warning',
-                        'completed' => 'success',
-                        'uploading' => 'info',
-                        'failed' => 'danger',
                         default => 'gray',
                     }),
                 TextColumn::make('generated_at')
@@ -78,7 +67,7 @@ class CatalogSubmissionsTable
             ->defaultSort('requested_at', 'desc')
             ->recordActions([
                 Action::make('approve')
-                    ->label('Approve & Upload to VIT')
+                    ->label('Upload to VIT')
                     ->icon('heroicon-o-check-circle')
                     ->color('success')
                     ->visible(fn(CatalogSubmission $record) => $record->status === CatalogSubmissionStatus::ReadyForReview)
@@ -220,7 +209,7 @@ class CatalogSubmissionsTable
                         }
                     }),
                 Action::make('downloadExcel')
-                    ->label('Download Excel File')
+                    ->label('Download File')
                     ->icon('heroicon-o-arrow-down-on-square')
                     ->color('info')
                     ->visible(fn(CatalogSubmission $record) => in_array($record->status, [

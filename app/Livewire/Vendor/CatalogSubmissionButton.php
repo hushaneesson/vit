@@ -119,12 +119,6 @@ class CatalogSubmissionButton extends Component
                 return;
             }
 
-            // Count stats based on ALL items (no filtering)
-            $completeItems = CatalogItem::where('vendor_id', $vendorId)
-                ->whereIn('status', ['acceptable', 'excellent'])
-                ->count();
-            $incompleteItems = $totalItems - $completeItems;
-
             $submission = null;
 
             DB::transaction(function () use ($client, $vendorId, $totalItems, $completeItems, $incompleteItems, &$submission) {
@@ -134,8 +128,6 @@ class CatalogSubmissionButton extends Component
                     'requested_by_client_id' => $client->id,
                     'status'                 => CatalogSubmissionStatus::ReviewRequested,
                     'total_items'            => $totalItems,
-                    'complete_items'         => $completeItems,
-                    'incomplete_items'       => $incompleteItems,
                     'requested_at'           => now(),
                 ]);
             });
