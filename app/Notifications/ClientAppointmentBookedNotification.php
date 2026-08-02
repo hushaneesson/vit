@@ -17,6 +17,7 @@ class ClientAppointmentBookedNotification extends Notification implements Should
         protected string $date,
         protected string $startsAt,
         protected string $endsAt,
+        protected string $appointmentReason,
     ) {}
 
     public function via(object $notifiable): array
@@ -35,7 +36,7 @@ class ClientAppointmentBookedNotification extends Notification implements Should
             ->line('Your appointment has been booked successfully.')
             ->line('Booked with: ' . $this->bookedWithName)
             ->line('Date: ' . $start->format('l, F j, Y'))
-            ->line('Time: ' . $start->format('h:i A') . ' - ' . $end->format('h:i A'))
-            ->line('If you need to make changes, please contact your vendor representative.');
+            ->line('Time: ' . $start->format('h:i A') . ' - ' . $end->format('h:i A') . ' EST')
+            ->line('Reason for appointment: ' . $this->appointmentReason);
     }
 }

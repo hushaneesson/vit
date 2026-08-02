@@ -18,6 +18,7 @@ class ClientAppointmentCancelledNotification extends Notification implements Sho
         protected string $startsAt,
         protected string $endsAt,
         protected string $cancelledByName,
+        protected string $cancellationReason,
     ) {}
 
     public function via(object $notifiable): array
@@ -37,6 +38,7 @@ class ClientAppointmentCancelledNotification extends Notification implements Sho
             ->line('Booked with: ' . $this->bookedWithName)
             ->line('Date: ' . $start->format('l, F j, Y'))
             ->line('Time: ' . $start->format('h:i A') . ' - ' . $end->format('h:i A'))
-            ->line('Cancelled by: ' . $this->cancelledByName);
+            ->line('Cancelled by: ' . $this->cancelledByName)
+            ->line('Reason: ' . $this->cancellationReason);
     }
 }

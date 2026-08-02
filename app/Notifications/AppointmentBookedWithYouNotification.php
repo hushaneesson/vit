@@ -14,9 +14,11 @@ class AppointmentBookedWithYouNotification extends Notification implements Shoul
 
     public function __construct(
         protected string $clientName,
+        protected string $vendorName,
         protected string $date,
         protected string $startsAt,
         protected string $endsAt,
+        protected string $appointmentReason,
     ) {}
 
     public function via(object $notifiable): array
@@ -34,7 +36,9 @@ class AppointmentBookedWithYouNotification extends Notification implements Shoul
             ->greeting('Hello ' . $notifiable->name . ',')
             ->line('A new appointment has been booked with you.')
             ->line('Client: ' . $this->clientName)
+            ->line('Vendor: ' . $this->vendorName)
             ->line('Date: ' . $start->format('l, F j, Y'))
-            ->line('Time: ' . $start->format('h:i A') . ' - ' . $end->format('h:i A'));
+            ->line('Time: ' . $start->format('h:i A') . ' - ' . $end->format('h:i A'))
+            ->line('Reason for appointment: ' . $this->appointmentReason);
     }
 }

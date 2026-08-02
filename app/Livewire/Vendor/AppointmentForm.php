@@ -2,7 +2,7 @@
 
 namespace App\Livewire\Vendor;
 
-use App\Models\Appointment;
+use App\Models\Client;
 use App\Models\User;
 use App\Notifications\AppointmentBookedWithYouNotification;
 use App\Notifications\ClientAppointmentBookedNotification;
@@ -25,6 +25,7 @@ class AppointmentForm extends Component
     public bool $showConfirmModal = false;
     public ?string $pendingDate = null;
     public ?string $pendingSlotLabel = null; // e.g. "09:00 AM - 09:30 AM"
+    public string $appointmentReason = '';
 
     public bool $isSaving = false;
 
@@ -162,13 +163,21 @@ class AppointmentForm extends Component
         $this->showConfirmModal = false;
         $this->pendingDate = null;
         $this->pendingSlotLabel = null;
+        $this->appointmentReason = '';
     }
 
     public function confirmAppointment()
     {
+
         if (!$this->pendingDate || !$this->pendingSlotLabel) {
             return;
         }
+
+        $validated = $this->validate([
+            'appointmentReason' => ['required', 'string', 'min:5', 'max:1000'],
+        ]);
+
+        $reason = trim($validated['appointmentReason']);
 
 
         $this->isSaving = true;
@@ -178,43 +187,57 @@ class AppointmentForm extends Component
 
         $startsAt = Carbon::parse($this->pendingDate . ' ' . $startLabel)->format('H:i');
         $endsAt = Carbon::parse($this->pendingDate . ' ' . $endLabel)->format('H:i');
+        $dayKey = strtolower(Carbon::parse($this->pendingDate)->format('l'));
 
         // check again that the slot is available before saving.
-        if (!$this->user->isBookableAtTime($this->pendingDate, $startsAt, $endsAt)) {
+        if (!$this->user->isBookableAtTime($this->pendingDate, $startsAt, $endsAt, null, $this->schedules[$dayKey]['slot_duration_minutes'], $this->schedules[$dayKey]['buffer_minutes'])) {
             $this->isSaving = false;
             return;
         }
-        // dd($this->pendingDate, $startsAt, $endsAt);
+
+
         // create the appointment
         Zap::for($this->user)
             ->named("Appointment with " . auth('client')->user()->name)
+            ->description(auth('client')->user()->vendor->name)
             ->appointment()
             ->from($this->pendingDate)
             ->addPeriod($startsAt, $endsAt)
             ->noOverlap()
             ->withMetadata([
                 'client_id' => auth('client')->user()->id,
+                'appointment_reason' => $reason,
             ])
             ->save();
 
         $client = auth('client')->user();
 
-        $client?->notify(new ClientAppointmentBookedNotification(
-            bookedWithName: $this->user->name,
-            date: $this->pendingDate,
-            startsAt: $startsAt,
-            endsAt: $endsAt,
+        if (! $client instanceof Client) {
+            $this->isSaving = false;
+
+            return;
+        }
+
+        $client->notify(new ClientAppointmentBookedNotification(
+            $this->user->name,
+            $this->pendingDate,
+            $startsAt,
+            $endsAt,
+            $reason,
         ));
 
         $this->user->notify(new AppointmentBookedWithYouNotification(
-            clientName: $client?->name ?? 'A client',
-            date: $this->pendingDate,
-            startsAt: $startsAt,
-            endsAt: $endsAt,
+            $client->name,
+            $client->vendor->name,
+            $this->pendingDate,
+            $startsAt,
+            $endsAt,
+            $reason,
         ));
 
         $this->isSaving = false;
         $this->showConfirmModal = false;
+        $this->appointmentReason = '';
 
         return redirect()
             ->route('vendor.appointments.index')

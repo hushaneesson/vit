@@ -37,22 +37,36 @@ class AppointmentController extends Controller
         return view('vendor.appointments.create');
     }
 
-    public function cancel(Appointment $appointment)
+    public function cancel(Request $request, Appointment $appointment)
     {
         abort_unless(
             (int) data_get($appointment->metadata, 'client_id') === (int) auth('client')->id(),
             403
         );
 
+        $validated = $request->validate([
+            'cancellation_reason' => ['required', 'string', 'min:5', 'max:1000'],
+        ]);
+
+        $reason = trim($validated['cancellation_reason']);
+
         if (! $appointment->is_active) {
             return back()->with('status', 'This appointment is already cancelled.');
         }
 
+        $client = auth('client')->user();
+
+        $metadata = is_array($appointment->metadata) ? $appointment->metadata : [];
+
         $appointment->update([
             'is_active' => 0,
+            'metadata' => array_merge($metadata, [
+                'cancellation_reason' => $reason,
+                'cancelled_at' => now()->toDateTimeString(),
+                'cancelled_by' => $client instanceof Client ? $client->name : null,
+            ]),
         ]);
 
-        $client = auth('client')->user();
         $bookedWith = $appointment->schedulable;
         $firstPeriod = $appointment->periods->sortBy('start_time')->first();
 
@@ -63,6 +77,7 @@ class AppointmentController extends Controller
                 startsAt: (string) data_get($firstPeriod, 'start_time', ''),
                 endsAt: (string) data_get($firstPeriod, 'end_time', ''),
                 cancelledByName: $client->name,
+                cancellationReason: $reason,
             ));
         }
 
@@ -73,6 +88,7 @@ class AppointmentController extends Controller
                 startsAt: (string) data_get($firstPeriod, 'start_time', ''),
                 endsAt: (string) data_get($firstPeriod, 'end_time', ''),
                 cancelledByName: $client instanceof Client ? $client->name : 'Client',
+                cancellationReason: $reason,
             ));
         }
 

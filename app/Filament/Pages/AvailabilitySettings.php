@@ -96,19 +96,19 @@ class AvailabilitySettings extends Page implements HasForms
             'slot_duration_minutes' => (int) data_get(
                 $primary?->metadata,
                 'slot_duration_minutes',
-                30
+                45
             ),
 
             'buffer_minutes' => (int) data_get(
                 $primary?->metadata,
                 'buffer_minutes',
-                0
+                15
             ),
 
             'max_appointments_per_day' => (int) data_get(
                 $primary?->metadata,
                 'max_appointments_per_day',
-                10
+                5
             ),
         ]);
     }

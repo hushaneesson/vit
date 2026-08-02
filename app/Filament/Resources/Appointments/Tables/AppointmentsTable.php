@@ -7,6 +7,7 @@ use App\Models\Client;
 use App\Models\User;
 use App\Notifications\ClientAppointmentCancelledNotification;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Textarea;
 use Filament\Notifications\Notification;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
@@ -29,6 +30,7 @@ class AppointmentsTable
             ->columns([
                 TextColumn::make('name')
                     ->label('Appointment')
+                    ->description(fn($record): string => $record->description)
                     ->searchable()
                     ->wrap(),
                 TextColumn::make('start_date')
@@ -49,7 +51,7 @@ class AppointmentsTable
                 TextColumn::make('is_active')
                     ->label('Status')
                     ->badge()
-                    ->formatStateUsing(fn(bool $state): string => $state ? 'Active' : 'Inactive')
+                    ->formatStateUsing(fn(bool $state): string => $state ? 'Scheduled' : 'Cancelled')
                     ->color(fn(bool $state): string => $state ? 'success' : 'gray'),
                 TextColumn::make('created_at')
                     ->dateTime()
@@ -60,20 +62,38 @@ class AppointmentsTable
                 SelectFilter::make('is_active')
                     ->label('Status')
                     ->options([
-                        1 => 'Active',
-                        0 => 'Inactive',
-                    ]),
+                        1 => 'Scheduled',
+                        0 => 'Cancelled',
+                    ])
+                    ->default(1),
             ])
             ->recordActions([
                 Action::make('cancelAppointment')
-                    ->label('Cancel')
+                    ->label('Cancel Appointment')
                     ->icon('heroicon-o-x-circle')
                     ->color('danger')
                     ->visible(fn(Appointment $record): bool => (bool) $record->is_active)
                     ->requiresConfirmation()
-                    ->action(function (Appointment $record): void {
+                    ->form([
+                        Textarea::make('cancellation_reason')
+                            ->label('Cancellation reason')
+                            ->required()
+                            ->minLength(5)
+                            ->maxLength(1000)
+                            ->rows(4),
+                    ])
+                    ->action(function (Appointment $record, array $data): void {
+                        $reason = trim((string) ($data['cancellation_reason'] ?? ''));
+
+                        $metadata = is_array($record->metadata) ? $record->metadata : [];
+
                         $record->update([
                             'is_active' => 0,
+                            'metadata' => array_merge($metadata, [
+                                'cancellation_reason' => $reason,
+                                'cancelled_at' => now()->toDateTimeString(),
+                                'cancelled_by' => Auth::user()?->name,
+                            ]),
                         ]);
 
                         $clientId = (int) data_get($record->metadata, 'client_id');
@@ -89,6 +109,7 @@ class AppointmentsTable
                                 startsAt: (string) data_get($firstPeriod, 'start_time', ''),
                                 endsAt: (string) data_get($firstPeriod, 'end_time', ''),
                                 cancelledByName: $cancelledByName,
+                                cancellationReason: $reason,
                             ));
                         }
 
