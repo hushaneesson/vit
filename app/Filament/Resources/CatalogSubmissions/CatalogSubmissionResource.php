@@ -40,30 +40,6 @@ class CatalogSubmissionResource extends Resource
                         ->default(fn($record) => $record->requested_at?->format('M j, Y g:i A') ?? '—'),
                 ])->columns(2),
 
-            \Filament\Schemas\Components\Section::make('Submission Statistics')
-                ->description('Item counts and completeness metrics')
-                ->icon('heroicon-o-chart-bar')
-                ->schema([
-                    \Filament\Schemas\Components\View::make('total_items')
-                        ->view('filament.forms.components.text-input')
-                        ->default(fn($record) => $record->total_items),
-                    \Filament\Schemas\Components\View::make('complete_items')
-                        ->view('filament.forms.components.text-input')
-                        ->default(fn($record) => $record->complete_items),
-                    \Filament\Schemas\Components\View::make('incomplete_items')
-                        ->view('filament.forms.components.text-input')
-                        ->default(fn($record) => $record->incomplete_items),
-                    \Filament\Schemas\Components\View::make('completeness_percent')
-                        ->view('filament.forms.components.text-input')
-                        ->default(function ($record) {
-                            if (! $record || $record->total_items <= 0) {
-                                return '0%';
-                            }
-
-                            return round(($record->complete_items / $record->total_items) * 100) . '%';
-                        }),
-                ])->columns(2),
-
             \Filament\Schemas\Components\Section::make('Review Details')
                 ->description('Approval, rejection, and upload information')
                 ->icon('heroicon-o-information-circle')

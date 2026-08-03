@@ -33,8 +33,6 @@ class CatalogSubmission extends Model
         'requested_by_client_id',
         'status',
         'total_items',
-        'complete_items',
-        'incomplete_items',
         'requested_at',
         'approved_by',
         'approved_at',
@@ -61,8 +59,6 @@ class CatalogSubmission extends Model
     protected $casts = [
         'status' => CatalogSubmissionStatus::class,
         'total_items' => 'integer',
-        'complete_items' => 'integer',
-        'incomplete_items' => 'integer',
         'requested_at' => 'datetime',
         'approved_at' => 'datetime',
         'rejected_at' => 'datetime',

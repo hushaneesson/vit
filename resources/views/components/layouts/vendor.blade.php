@@ -1,22 +1,5 @@
 <x-layouts.app>
     <div x-data="{ open: false }" class="min-h-screen">
-
-        @if (session('status'))
-            <div class="px-4 py-3 mb-5 text-sm border shadow-sm rounded-xl border-sky-200 bg-sky-50 text-sky-900">
-                {{ session('status') }}
-            </div>
-        @endif
-
-        @if ($errors->any())
-            <div class="px-4 py-3 mb-5 text-sm text-red-800 border border-red-200 shadow-sm rounded-xl bg-red-50">
-                <ul class="list-disc list-inside">
-                    @foreach ($errors->all() as $error)
-                        <li>{{ $error }}</li>
-                    @endforeach
-                </ul>
-            </div>
-        @endif
-
         <!-- Navigation -->
         <nav class="sticky top-0 z-50 p-3 border-b shadow-sm bg-white/80 backdrop-blur-md border-slate-200 ">
             <div class="container px-4 mx-auto sm:px-6 lg:px-8">
@@ -57,8 +40,9 @@
                         <form method="POST" action="{{ route('vendor.logout') }}">
                             @csrf
                             <button type="submit"
-                                class="px-4 py-2.5 text-sm font-medium transition-all duration-200 rounded-lg bg-slate-100 hover:bg-red-50 hover:text-red-600 text-slate-500">Log
-                                out</button>
+                                class="py-2.5 text-sm font-medium btn bg-slate-100 hover:bg-slate-200 hover:font-bold text-slate-500">
+                                <i class="fas fa-arrow-right-from-bracket"></i> Log out
+                            </button>
                         </form>
                     </div>
 
@@ -113,8 +97,11 @@
 
                     <form class="pt-2" method="POST" action="{{ route('vendor.logout') }}">
                         @csrf
-                        <button type="submit" class="w-full btn btn-primary">Log
-                            out</button>
+
+                        <button type="submit"
+                            class="py-2.5 w-full font-medium btn bg-slate-100 hover:bg-slate-200 hover:font-bold text-slate-500">
+                            <i class="fas fa-arrow-right-from-bracket"></i> Log out
+                        </button>
                     </form>
                 </div>
 
@@ -122,8 +109,27 @@
 
         </nav>
 
+
         <!-- Main Content -->
         <main class="container px-4 py-8 mx-auto sm:px-6 lg:px-8">
+
+            @if (session('status'))
+                <div
+                    class="px-4 py-3 mb-5 text-sm border shadow-sm rounded-xl border-emerald-200 bg-emerald-50 text-emerald-700">
+                    {{ session('status') }}
+                </div>
+            @endif
+
+            @if ($errors->any())
+                <div class="px-4 py-3 mb-5 text-sm text-red-800 border border-red-200 shadow-sm rounded-xl bg-red-50">
+                    <ul class="list-disc list-inside">
+                        @foreach ($errors->all() as $error)
+                            <li>{{ $error }}</li>
+                        @endforeach
+                    </ul>
+                </div>
+            @endif
+
             {{ $slot }}
         </main>
 

@@ -137,8 +137,6 @@ class CatalogSubmissionButton extends Component
                     'requested_by_client_id' => $client->id,
                     'status'                 => CatalogSubmissionStatus::ReviewRequested,
                     'total_items'            => $totalItems,
-                    'complete_items'         => $completeItems,
-                    'incomplete_items'       => $incompleteItems,
                     'requested_at'           => now(),
                 ]);
             });

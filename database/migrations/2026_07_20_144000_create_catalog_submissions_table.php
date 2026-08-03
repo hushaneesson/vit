@@ -34,8 +34,6 @@ return new class extends Migration
 
             // Snapshot counts (computed at submission time for admin review context)
             $table->unsignedInteger('total_items')->default(0);
-            $table->unsignedInteger('complete_items')->default(0);
-            $table->unsignedInteger('incomplete_items')->default(0);
 
             // Review timestamps and actors (admin User model)
             $table->timestamp('requested_at')->nullable();
