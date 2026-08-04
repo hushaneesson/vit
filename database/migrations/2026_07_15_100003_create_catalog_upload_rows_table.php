@@ -8,7 +8,7 @@ return new class extends Migration
 {
     /**
      * One row per product line from the vendor's file, after mapping is
-     * applied. `data` is keyed by catalog_field_definitions.field_key (not
+     * applied. `data` is keyed by VitFieldDefinition field_key (not
      * the vendor's original column names), so downstream phases (CSV
      * generation, hierarchy engine, SFTP delivery) can read it the same
      * way regardless of how the vendor's source file was laid out.

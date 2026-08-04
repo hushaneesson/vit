@@ -17,7 +17,7 @@ use Illuminate\Support\Facades\Storage;
  * snapshot data and stores it on the configured disk.
  *
  * Flow:
- *   - Job receives catalogSubmissionId (dispatched from CatalogSubmissionButton::requestReview)
+ *   - Job receives catalogSubmissionId (dispatched from CatalogSubmissionButton::SubmitCatalog)
  *   - Loads CatalogSubmission and validates it has snapshot items
  *   - Updates processing_status to 'generating'
  *   - Calls CatalogExportService::generateFromSubmission() to build the Excel

@@ -39,11 +39,6 @@ class Vendor extends Model
         return $this->hasMany(FieldMapping::class);
     }
 
-    public function submissions(): HasMany
-    {
-        return $this->hasMany(Submission::class);
-    }
-
     public function catalogSubmissions(): HasMany
     {
         return $this->hasMany(CatalogSubmission::class);

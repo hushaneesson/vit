@@ -133,5 +133,8 @@
             {{ $slot }}
         </main>
 
+        <!-- Toast Notifications -->
+        <x-notifications.toast />
+
     </div>
 </x-layouts.app>

@@ -26,6 +26,7 @@
                             <th class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">
                                 Date</th>
                             <th class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">
+                                Status
                             </th>
                         </tr>
                     </thead>
@@ -41,15 +42,10 @@
                                 <td class="px-6 py-4 text-gray-500">{{ $submission->requested_at?->format('M j, Y') }}
                                 </td>
                                 <td class="px-6 py-4">
-                                    @if (
-                                        $submission->status === \App\Enums\CatalogSubmissionStatus::Approved ||
-                                            $submission->status === \App\Enums\CatalogSubmissionStatus::Uploaded)
-                                        <span class="text-sm text-gray-400">Delivered</span>
-                                    @elseif ($submission->status === \App\Enums\CatalogSubmissionStatus::Rejected)
-                                        <span class="text-sm text-red-600">Rejected</span>
-                                    @else
-                                        <span class="text-sm text-gray-400">Pending</span>
-                                    @endif
+                                    <span
+                                        class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full border {{ $submission->status->badgeClass() }}">
+                                        {{ $submission->status->label() }}
+                                    </span>
                                 </td>
                             </tr>
                         @endforeach

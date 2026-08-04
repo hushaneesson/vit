@@ -65,9 +65,9 @@ class Client extends Model implements AuthenticatableContract
         return $this->hasMany(CatalogItem::class);
     }
 
-    public function submissions(): HasMany
+    public function catalogSubmissions(): HasMany
     {
-        return $this->hasMany(Submission::class);
+        return $this->hasMany(CatalogSubmission::class);
     }
 
     public function generateInvitationToken(): string

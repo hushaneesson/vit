@@ -32,14 +32,21 @@ class CatalogSubmissionsTable
                     ->sortable(),
                 TextColumn::make('status')
                     ->badge()
-                    ->formatStateUsing(fn($state) => Str::headline($state->value ?? ''))
+                    ->formatStateUsing(fn($state) => $state?->label() ?? '')
+                    ->color(fn($state) => $state?->filamentColor() ?? 'gray'),
+
+                // file processing status (pending, generating, completed, uploading, failed)
+                // TODO: need to refactor this to be more clear to the user what it represents
+                //and ensure a descrition error is shown when the file is missing or failed to generate
+                TextColumn::make('processing_status')
+                    ->badge()
+                    ->formatStateUsing(fn($state) => Str::headline($state ?? ''))
                     ->color(fn($state): string => match ($state) {
-                        CatalogSubmissionStatus::Draft => 'gray',
-                        CatalogSubmissionStatus::ReviewRequested => 'warning',
-                        CatalogSubmissionStatus::ReadyForReview => 'info',
-                        CatalogSubmissionStatus::Approved => 'success',
-                        CatalogSubmissionStatus::Uploaded => 'success',
-                        CatalogSubmissionStatus::Rejected => 'danger',
+                        'pending' => 'gray',
+                        'generating' => 'warning',
+                        'completed' => 'success',
+                        'uploading' => 'info',
+                        'failed' => 'danger',
                         default => 'gray',
                     }),
                 TextColumn::make('generated_at')
@@ -52,14 +59,11 @@ class CatalogSubmissionsTable
             ])
             ->filters([
                 SelectFilter::make('status')
-                    ->options([
-                        'draft' => 'Draft',
-                        'review_requested' => 'Review Requested',
-                        'ready_for_review' => 'Ready for Review',
-                        'approved' => 'Approved',
-                        'rejected' => 'Rejected',
-                        'uploaded' => 'Uploaded',
-                    ]),
+                    ->options(
+                        collect(CatalogSubmissionStatus::cases())
+                            ->mapWithKeys(fn($case) => [$case->value => $case->label()])
+                            ->all()
+                    ),
                 SelectFilter::make('vendor_id')
                     ->label('Vendor')
                     ->options(fn() => \App\Models\Vendor::query()->pluck('name', 'id')),
@@ -212,11 +216,6 @@ class CatalogSubmissionsTable
                     ->label('Download File')
                     ->icon('heroicon-o-arrow-down-on-square')
                     ->color('info')
-                    ->visible(fn(CatalogSubmission $record) => in_array($record->status, [
-                        CatalogSubmissionStatus::ReadyForReview,
-                        CatalogSubmissionStatus::Approved,
-                        CatalogSubmissionStatus::Uploaded,
-                    ]))
                     ->action(function (CatalogSubmission $record) {
                         if (!$record->file_path) {
                             Notification::make()

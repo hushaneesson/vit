@@ -26,12 +26,7 @@ return new class extends Migration
 
             $table->foreignId('vendor_id')->constrained('vendors')->cascadeOnDelete();
 
-            // The upload that triggered this submission (nullable — submissions
-            // may be created without a new upload in the future).
-            $table->foreignId('catalog_upload_id')->nullable()
-                ->constrained('catalog_uploads')->nullOnDelete();
-
-            // Who asked for the review
+            // Client who requested the submission
             $table->foreignId('requested_by_client_id')->constrained('clients')->cascadeOnDelete();
 
             // Business status — see CatalogSubmissionStatus enum
@@ -52,8 +47,16 @@ return new class extends Migration
             $table->string('file_path')->nullable();
             $table->string('disk')->default('local');
             $table->unsignedBigInteger('file_size')->nullable();
+            $table->unsignedInteger('product_count')->default(0);
+            $table->timestamp('submission_date')->nullable();
+
+            // VIT upload tracking
             $table->string('processing_status', 20)->default('pending');
             $table->text('failure_reason')->nullable();
+            $table->unsignedInteger('upload_attempts')->default(0);
+            $table->text('last_upload_error')->nullable();
+            $table->json('vit_api_response')->nullable();
+
             $table->timestamp('generating_started_at')->nullable();
             $table->timestamp('generated_at')->nullable();
             $table->timestamp('uploaded_at')->nullable();
