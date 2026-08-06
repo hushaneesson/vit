@@ -19,11 +19,8 @@ class ClientsTable
     {
         return $table
             ->columns([
-                TextColumn::make('vendor.name')
-                    ->label('Vendor')
-                    ->searchable()
-                    ->sortable(),
                 TextColumn::make('name')
+                    ->description(fn(Client $record): string => $record->vendor?->name)
                     ->searchable(),
                 TextColumn::make('email')
                     ->label('Email address')
@@ -32,7 +29,7 @@ class ClientsTable
                     ->searchable(),
                 TextColumn::make('status')
                     ->badge()
-                    ->color(fn (string $state): string => match ($state) {
+                    ->color(fn(string $state): string => match ($state) {
                         'active' => 'success',
                         'invited' => 'warning',
                         'disabled' => 'danger',
@@ -63,13 +60,13 @@ class ClientsTable
                 Action::make('resendInvitation')
                     ->label('Resend Invite')
                     ->icon('heroicon-o-envelope')
-                    ->visible(fn (Client $record) => $record->status !== 'active')
+                    ->visible(fn(Client $record) => $record->status !== 'active')
                     ->action(function (Client $record) {
                         $token = $record->generateInvitationToken();
                         $record->notify(new ClientInvitationNotification($token));
 
                         Notification::make()
-                            ->title('Invitation resent to '.$record->email)
+                            ->title('Invitation resent to ' . $record->email)
                             ->success()
                             ->send();
                     }),

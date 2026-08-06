@@ -16,12 +16,6 @@ class UnitOfMeasureForm
                     ->required(),
                 TextInput::make('description')
                     ->required(),
-                Toggle::make('active')
-                    ->required(),
-                TextInput::make('sort_order')
-                    ->required()
-                    ->numeric()
-                    ->default(0),
             ]);
     }
 }

@@ -16,24 +16,18 @@ class ClassificationTypesTable
         return $table
             ->columns([
                 TextColumn::make('key')
+                    ->sortable()
                     ->searchable(),
                 TextColumn::make('label')
+                    ->sortable()
                     ->searchable(),
                 IconColumn::make('is_always_required')
-                    ->boolean(),
-                IconColumn::make('active')
+                    ->sortable()
+                    ->label('Required')
                     ->boolean(),
                 TextColumn::make('sort_order')
                     ->numeric()
                     ->sortable(),
-                TextColumn::make('created_at')
-                    ->dateTime()
-                    ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
-                TextColumn::make('updated_at')
-                    ->dateTime()
-                    ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
                 //

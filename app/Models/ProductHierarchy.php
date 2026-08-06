@@ -19,7 +19,6 @@ class ProductHierarchy extends Model
         'parent_id',
         'level',
         'name',
-        'path',
         'hierarchy_number',
         'active',
     ];
@@ -33,21 +32,19 @@ class ProductHierarchy extends Model
 
     public function parent(): BelongsTo
     {
-        return $this->belongsTo(self::class, 'parent_id');
+        return $this->belongsTo(self::class, 'parent_id', 'hierarchy_number');
     }
 
-    public function children(): HasMany
+    public function getPathAttribute()
     {
-        return $this->hasMany(self::class, 'parent_id');
-    }
+        $path = [];
+        $category = $this;
 
-    public function scopeLevel($query, int $level)
-    {
-        return $query->where('level', $level);
-    }
+        while ($category) {
+            array_unshift($path, $category->name);
+            $category = $category->parent;
+        }
 
-    public function scopeActive($query)
-    {
-        return $query->where('active', true);
+        return  implode('! ', $path);
     }
 }

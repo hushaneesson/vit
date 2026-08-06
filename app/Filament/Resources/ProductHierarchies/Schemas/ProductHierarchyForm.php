@@ -44,12 +44,6 @@ class ProductHierarchyForm
                 TextInput::make('hierarchy_number')
                     ->helperText('Required for Level 3 (leaf) entries — the code VIT expects on the "hierarchy" column.')
                     ->maxLength(255),
-                TextInput::make('path')
-                    ->helperText('Auto-derived "!"-joined path — leave blank to have it computed automatically.')
-                    ->maxLength(255),
-                Toggle::make('active')
-                    ->default(true)
-                    ->required(),
             ]);
     }
 }

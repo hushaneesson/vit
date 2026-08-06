@@ -7,6 +7,7 @@ use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 
 class ProductHierarchiesTable
@@ -15,30 +16,25 @@ class ProductHierarchiesTable
     {
         return $table
             ->columns([
-                TextColumn::make('parent.name')
-                    ->searchable(),
                 TextColumn::make('level')
                     ->numeric()
                     ->sortable(),
-                TextColumn::make('name')
-                    ->searchable(),
-                TextColumn::make('path')
-                    ->searchable(),
                 TextColumn::make('hierarchy_number')
+                    ->sortable()
                     ->searchable(),
-                IconColumn::make('active')
-                    ->boolean(),
-                TextColumn::make('created_at')
-                    ->dateTime()
+                TextColumn::make('name')
                     ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
-                TextColumn::make('updated_at')
-                    ->dateTime()
-                    ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
+                    ->searchable(),
+                TextColumn::make('path'),
+
             ])
             ->filters([
-                //
+                SelectFilter::make('level')
+                    ->options([
+                        1 => 'Level 1',
+                        2 => 'Level 2',
+                        3 => 'Level 3',
+                    ]),
             ])
             ->recordActions([
                 EditAction::make(),
