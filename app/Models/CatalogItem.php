@@ -18,15 +18,17 @@ class CatalogItem extends Model
         'manufacturer_sku',
         'manufacturer',
         'brand_name',
-        'brand_logo',
-        'seller_sku',
-        'image_file_name',
-        'categorization_or_hierarchy',
+        'dealer_sku',
+        'replacement_sku',
+        'images',
+        'hierarchy',
         'unspsc_code',
-        'product_type_or_family',
+        'category',
         'unit_of_measure',
         'quantity_per_unit',
         'item_weight',
+        'lead_time',
+        'availability',
         'min_qty_per_order',
         'max_qty_per_order',
         'multiples',
@@ -36,7 +38,9 @@ class CatalogItem extends Model
         'selling_points',
         'msds_link',
         'list_price',
-        'selling_price_per_unit',
+        'selling_price',
+        'is_discontinued',
+        'discontinue_date',
 
         // not VIT, but useful for completeness scoring
         'status',
@@ -60,63 +64,35 @@ class CatalogItem extends Model
         return $this->hasMany(CatalogItemImage::class)->orderBy('sort_order');
     }
 
-    /**
-     * Minimum fields required for an item to be importable/displayable.
-     *
-     * IMPORTANT: This is NOT the full VIT-required field list.
-     *
-     * There are three distinct concepts:
-     *   1. Database-required fields  – enforced by the schema (e.g.
-     *      vendor_id, seller_sku, name). An item cannot exist without these.
-     *   2. VIT-required fields       – fields VIT submission requires
-     *      (see VitFieldDefinition). Some are NOT in this list because
-     *      the system intentionally allows importing partial data.
-     *   3. Completeness scoring      – requiredFields (below) gate whether
-     *      an item is 'incomplete' vs 'acceptable'. excellentFields (below)
-     *      push the score toward 100%.
-     *
-     * Every missing field (required OR excellent) lowers the completeness
-     * score. Items missing any field in $requiredFields get 'incomplete'
-     * status but are still importable and can be completed later from the
-     * Catalog Item List.
-     */
     protected static array $requiredFields = [
         'name',
         'description',
-        'seller_sku',
+        'dealer_sku',
         'unit_of_measure',
-    ];
-
-    /**
-     * Additional fields that increase completeness toward VIT readiness.
-     *
-     * Includes the VIT-required fields NOT in $requiredFields
-     * (categorization_or_hierarchy, list_price, selling_price_per_unit,
-     * unspsc_code, item_weight) plus optional VIT fields. An item with all
-     * of $requiredFields + $excellentFields filled scores 100 and is
-     * marked 'excellent'.
-     */
-    protected static array $excellentFields = [
         'manufacturer_sku',
         'manufacturer',
-        'brand_name',
-        'brand_logo',
-        'image_file_name',
-        'categorization_or_hierarchy',
+        'hierarchy',
         'unspsc_code',
-        'product_type_or_family',
-        'search_terms',
+        'category',
         'specifications',
         'selling_points',
-        'classifications',
-        'msds_link',
         'quantity_per_unit',
         'item_weight',
+        'selling_price',
+    ];
+
+    protected static array $excellentFields = [
+        'brand_name',
+        'images',
+        'search_terms',
+        'classifications',
+        'msds_link',
         'min_qty_per_order',
         'max_qty_per_order',
         'multiples',
         'list_price',
-        'selling_price_per_unit',
+        'availability',
+        'lead_time',
     ];
 
     protected static function booted()

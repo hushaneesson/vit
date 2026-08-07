@@ -132,7 +132,7 @@
                                         <td class="px-6 py-4">
                                             <div class="font-medium">{{ $item->name }}</div>
                                         </td>
-                                        <td class="px-6 py-4 text-gray-500">{{ $item->seller_sku }}</td>
+                                        <td class="px-6 py-4 text-gray-500">{{ $item->dealer_sku }}</td>
                                         <td class="px-6 py-4">
                                             @php $status = $item->status ?? 'incomplete'; @endphp
                                             <span @class([

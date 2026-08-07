@@ -93,11 +93,11 @@ class CatalogItemForm extends Component
         $this->catalogItemId = $catalogItem->id;
 
         $this->name = $catalogItem->name;
-        $this->sellerSku = $catalogItem->seller_sku;
+        $this->sellerSku = $catalogItem->dealer_sku;
         $this->manufacturerSku = $catalogItem->manufacturer_sku ?? '';
         $this->manufacturer = $catalogItem->manufacturer ?? '';
         $this->brandName = $catalogItem->brand_name ?? '';
-        $this->productTypeOrFamily = $catalogItem->product_type_or_family ?? '';
+        $this->productTypeOrFamily = $catalogItem->category ?? '';
         $this->description = $catalogItem->description ?? '';
         $this->unitOfMeasure = $catalogItem->unit_of_measure ?? '';
         $this->quantityPerUnit = $catalogItem->quantity_per_unit;
@@ -106,7 +106,7 @@ class CatalogItemForm extends Component
         $this->maxQtyPerOrder = $catalogItem->max_qty_per_order;
         $this->multiples = $catalogItem->multiples;
         $this->listPrice = $catalogItem->list_price;
-        $this->sellingPricePerUnit = $catalogItem->selling_price_per_unit;
+        $this->sellingPricePerUnit = $catalogItem->selling_price;
         $this->unspscCode = $catalogItem->unspsc_code ?? '';
         $this->msdsLink = $catalogItem->msds_link ?? '';
 
@@ -199,7 +199,7 @@ class CatalogItemForm extends Component
                 'required',
                 'string',
                 'max:255',
-                Rule::unique('catalog_items', 'seller_sku')
+                Rule::unique('catalog_items', 'dealer_sku')
                     ->where('vendor_id', $client->vendor_id)
                     ->ignore($this->catalogItemId),
             ],
@@ -266,11 +266,11 @@ class CatalogItemForm extends Component
         $catalogItem = DB::transaction(function () use ($vendor, $searchTermsClean, $sellingPointsClean, $specPairs, $classificationsClean) {
             $attrs = [
                 'name' => $this->name,
-                'seller_sku' => $this->sellerSku,
+                'dealer_sku' => $this->sellerSku,
                 'manufacturer_sku' => $this->manufacturerSku,
                 'manufacturer' => $this->manufacturer,
                 'brand_name' => $this->brandName,
-                'product_type_or_family' => $this->productTypeOrFamily,
+                'category' => $this->productTypeOrFamily,
                 'description' => $this->description,
                 'unit_of_measure' => $this->unitOfMeasure,
                 'quantity_per_unit' => $this->quantityPerUnit,
@@ -285,7 +285,7 @@ class CatalogItemForm extends Component
                 'msds_link' => $this->msdsLink,
                 'classifications' => $classificationsClean,
                 'list_price' => number_format((float) $this->listPrice, 2, '.', ''),
-                'selling_price_per_unit' => number_format((float) $this->sellingPricePerUnit, 2, '.', ''),
+                'selling_price' => number_format((float) $this->sellingPricePerUnit, 2, '.', ''),
             ];
 
             // Explicit update/create branch instead of updateOrCreate() — when

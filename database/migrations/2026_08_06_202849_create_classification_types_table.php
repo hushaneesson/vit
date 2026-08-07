@@ -70,7 +70,7 @@ return new class extends Migration
             ['id' => 39, 'required' => false, 'key' => 'UPC_RTL', 'label' => 'Retail UPC'],
             ['id' => 40, 'required' => false, 'key' => 'VETERAN_OWNED', 'label' => 'Veteran Owned'],
             ['id' => 41, 'required' => false, 'key' => 'WARRANTY', 'label' => 'Warranty'],
-            ['id' => 42, 'required' => false, 'key' => 'WARRANTY_INFORMATION', 'label' => 'Warranty Information'],
+            ['id' => 42, 'required' => true, 'key' => 'WARRANTY_INFORMATION', 'label' => 'Warranty Information'],
             ['id' => 43, 'required' => false, 'key' => 'WBE_INDICATOR', 'label' => 'Women Business Enterprise Indicator'],
             ['id' => 44, 'required' => false, 'key' => 'WOMEN_OWNED', 'label' => 'Women Owned'],
         ];

@@ -46,7 +46,7 @@ class CatalogUploadReliabilityTest extends TestCase
 
         CatalogItem::create([
             'vendor_id' => $this->vendor->id,
-            'seller_sku' => 'SKU-DUP',
+            'dealer_sku' => 'SKU-DUP',
             'name' => 'Existing Item',
             'description' => 'Description',
             'unit_of_measure' => 'EA',
@@ -124,7 +124,7 @@ class CatalogUploadReliabilityTest extends TestCase
 
         CatalogItem::create([
             'vendor_id' => $this->vendor->id,
-            'seller_sku' => 'SKU-FAIL',
+            'dealer_sku' => 'SKU-FAIL',
             'name' => 'Item',
             'description' => 'Desc',
             'unit_of_measure' => 'EA',

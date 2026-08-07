@@ -14,10 +14,12 @@ return new class extends Migration
     {
         Schema::create('vendors', function (Blueprint $table) {
             $table->id();
-            $table->string('name');
+            $table->string('name', 255);
             $table->string('primary_contact_name')->nullable();
             $table->string('primary_contact_email')->nullable();
             $table->string('primary_contact_phone')->nullable();
+            $table->string('tier', 30)->nullable();
+            $table->string('notes')->nullable();
             $table->string('status', 20)->default('pending');
             $table->timestamps();
         });

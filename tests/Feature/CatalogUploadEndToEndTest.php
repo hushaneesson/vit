@@ -37,12 +37,12 @@ class CatalogUploadEndToEndTest extends TestCase
             'catalog_upload_id' => $upload->id,
             'row_number' => $upload->rows()->max('row_number') + 1,
             'data' => array_merge([
-                'seller_sku' => $sku,
+                'dealer_sku' => $sku,
                 'name' => $name,
                 'description' => 'Test description',
                 'unit_of_measure' => 'EA',
                 'list_price' => 10.00,
-                'selling_price_per_unit' => 8.00,
+                'selling_price' => 8.00,
                 'unspsc_code' => '14111507',
             ], $overrides),
             'raw_data' => json_encode([]),
@@ -140,7 +140,7 @@ class CatalogUploadEndToEndTest extends TestCase
         CatalogUploadRow::create([
             'catalog_upload_id' => $upload->id,
             'row_number' => 2,
-            'data' => ['seller_sku' => 'SKU-INVALID', 'list_price' => 'not-a-number'],
+            'data' => ['dealer_sku' => 'SKU-INVALID', 'list_price' => 'not-a-number'],
             'raw_data' => json_encode([]),
             'status' => 'invalid',
             'errors' => [['field_key' => 'list_price', 'message' => 'List Price must be a decimal number.']],
@@ -163,13 +163,13 @@ class CatalogUploadEndToEndTest extends TestCase
         $upload = $this->createUpload(['status' => CatalogUploadStatus::Processing]);
         $existingItem = CatalogItem::create([
             'vendor_id' => $this->vendor->id,
-            'seller_sku' => 'SKU-UPDATE',
+            'dealer_sku' => 'SKU-UPDATE',
             'name' => 'Original Name',
             'description' => 'Original description',
             'unit_of_measure' => 'EA',
             'item_weight' => 1.0,
             'list_price' => 10.00,
-            'selling_price_per_unit' => 8.00,
+            'selling_price' => 8.00,
             'unspsc_code' => '14111507',
         ]);
         $this->createValidRow($upload, 'SKU-UPDATE', 'Updated Name', ['list_price' => 15.99]);
@@ -191,13 +191,13 @@ class CatalogUploadEndToEndTest extends TestCase
         $upload = $this->createUpload(['status' => CatalogUploadStatus::Processing]);
         CatalogItem::create([
             'vendor_id' => $this->vendor->id,
-            'seller_sku' => 'SKU-DUP',
+            'dealer_sku' => 'SKU-DUP',
             'name' => 'Duplicate Widget',
             'description' => 'Test description',
             'unit_of_measure' => 'EA',
             'item_weight' => 1.0,
             'list_price' => 10.00,
-            'selling_price_per_unit' => 8.00,
+            'selling_price' => 8.00,
             'unspsc_code' => '14111507',
         ]);
         $this->createValidRow($upload, 'SKU-DUP', 'Duplicate Widget', ['item_weight' => 1.0]);
@@ -219,13 +219,13 @@ class CatalogUploadEndToEndTest extends TestCase
         $upload = $this->createUpload(['status' => CatalogUploadStatus::Processing]);
         CatalogItem::create([
             'vendor_id' => $this->vendor->id,
-            'seller_sku' => 'SKU-RACE',
+            'dealer_sku' => 'SKU-RACE',
             'name' => 'Original Race Item',
             'description' => 'Completely different data',
             'unit_of_measure' => 'BX',
             'item_weight' => 5.0,
             'list_price' => 100.00,
-            'selling_price_per_unit' => 90.00,
+            'selling_price' => 90.00,
             'unspsc_code' => '99999999',
         ]);
         $this->createValidRow($upload, 'SKU-RACE', 'Race Test Item');
@@ -247,7 +247,7 @@ class CatalogUploadEndToEndTest extends TestCase
         CatalogUploadRow::create([
             'catalog_upload_id' => $upload->id,
             'row_number' => 1,
-            'data' => ['seller_sku' => 'SKU-BAD', 'list_price' => 'not-a-number'],
+            'data' => ['dealer_sku' => 'SKU-BAD', 'list_price' => 'not-a-number'],
             'raw_data' => json_encode([]),
             'status' => 'invalid',
             'errors' => [['field_key' => 'list_price', 'message' => 'List Price must be a decimal number.']],
@@ -335,7 +335,7 @@ class CatalogUploadEndToEndTest extends TestCase
         );
 
         $itemC = CatalogItem::where('vendor_id', $this->vendor->id)
-            ->where('seller_sku', 'SKU-C')
+            ->where('dealer_sku', 'SKU-C')
             ->first();
         $this->assertNotNull($itemC);
         $this->assertEquals(35.00, (float) $itemC->list_price);
@@ -349,7 +349,7 @@ class CatalogUploadEndToEndTest extends TestCase
             'catalog_upload_id' => $upload->id,
             'row_number' => 1,
             'data' => [
-                'seller_sku' => 'SKU-INCOMPLETE',
+                'dealer_sku' => 'SKU-INCOMPLETE',
                 'name' => 'Incomplete Item',
                 'list_price' => 10.00,
             ],
@@ -369,12 +369,12 @@ class CatalogUploadEndToEndTest extends TestCase
         $this->assertEquals(0, $upload->invalid_rows);
 
         $item = CatalogItem::where('vendor_id', $this->vendor->id)
-            ->where('seller_sku', 'SKU-INCOMPLETE')
+            ->where('dealer_sku', 'SKU-INCOMPLETE')
             ->first();
 
         $this->assertNotNull($item);
         $this->assertSame('Incomplete Item', $item->name);
-        $this->assertSame('SKU-INCOMPLETE', $item->seller_sku);
+        $this->assertSame('SKU-INCOMPLETE', $item->dealer_sku);
         $this->assertNull($item->description);
         $this->assertNull($item->manufacturer);
         $this->assertNull($item->brand_name);
@@ -387,19 +387,17 @@ class CatalogUploadEndToEndTest extends TestCase
         // Create an existing item with all fields populated
         $existingItem = CatalogItem::create([
             'vendor_id' => $this->vendor->id,
-            'seller_sku' => 'SKU-PRESERVE',
+            'dealer_sku' => 'SKU-PRESERVE',
             'name' => 'Original Name',
             'description' => 'Original description',
             'unit_of_measure' => 'EA',
             'item_weight' => 1.0,
             'list_price' => 10.00,
-            'selling_price_per_unit' => 8.00,
+            'selling_price' => 8.00,
             'unspsc_code' => '14111507',
             'manufacturer' => 'Original Manufacturer',
             'brand_name' => 'Original Brand',
-            'categorization_or_hierarchy' => 'Original/Category/Path',
-            'image_file_name' => 'original.jpg',
-            'brand_logo' => 'https://example.com/original-logo.png',
+            'hierarchy' => 'Original/Category/Path',
         ]);
 
         // Upload a new CSV that only updates the name, leaving other fields blank
@@ -408,9 +406,7 @@ class CatalogUploadEndToEndTest extends TestCase
             'description' => '',
             'manufacturer' => '',
             'brand_name' => '',
-            'categorization_or_hierarchy' => '',
-            'image_file_name' => '',
-            'brand_logo' => '',
+            'hierarchy' => '',
         ]);
 
         $job = new ProcessValidatedRowsJob($upload->id);
@@ -426,9 +422,7 @@ class CatalogUploadEndToEndTest extends TestCase
         $this->assertSame('Original description', $existingItem->description);
         $this->assertSame('Original Manufacturer', $existingItem->manufacturer);
         $this->assertSame('Original Brand', $existingItem->brand_name);
-        $this->assertSame('Original/Category/Path', $existingItem->categorization_or_hierarchy);
-        $this->assertSame('original.jpg', $existingItem->image_file_name);
-        $this->assertSame('https://example.com/original-logo.png', $existingItem->brand_logo);
+        $this->assertSame('Original/Category/Path', $existingItem->hierarchy);
     }
 
     public function test_item_imports_without_all_vit_required_fields_gets_lower_completeness(): void
@@ -437,18 +431,16 @@ class CatalogUploadEndToEndTest extends TestCase
         // (all $requiredFields + all $excellentFields)
         $complete = CatalogItem::create([
             'vendor_id' => $this->vendor->id,
-            'seller_sku' => 'SKU-COMPLETE',
+            'dealer_sku' => 'SKU-COMPLETE',
             'name' => 'Complete Item',
             'description' => 'Full description',
             'unit_of_measure' => 'EA',
             'manufacturer_sku' => 'MFG-COMPLETE',
             'manufacturer' => 'Complete Manufacturer',
             'brand_name' => 'Complete Brand',
-            'brand_logo' => 'https://example.com/complete-logo.png',
-            'image_file_name' => 'complete.jpg',
-            'categorization_or_hierarchy' => 'Office/Paper/Printer Paper',
+            'hierarchy' => 'Office/Paper/Printer Paper',
             'unspsc_code' => '14111507',
-            'product_type_or_family' => 'Printer Paper',
+            'category' => 'Printer Paper',
             'search_terms' => ['paper', 'office'],
             'specifications' => ['Color=White', 'Size=Letter'],
             'selling_points' => ['Recycled', 'Acid-free'],
@@ -460,15 +452,15 @@ class CatalogUploadEndToEndTest extends TestCase
             'max_qty_per_order' => 50,
             'multiples' => 1,
             'list_price' => 10.00,
-            'selling_price_per_unit' => 8.00,
+            'selling_price' => 8.00,
         ]);
 
         $this->assertEquals(100, $complete->completeness_score);
         $this->assertSame('excellent', $complete->status);
 
         // An imported item missing several VIT-required fields (list_price,
-        // selling_price_per_unit, unspsc_code, item_weight,
-        // categorization_or_hierarchy) — but has all minimum import fields.
+        // selling_price, unspsc_code, item_weight,
+        // hierarchy) — but has all minimum import fields.
         $upload = $this->createUpload(['status' => CatalogUploadStatus::Processing]);
         $this->createValidRow($upload, 'SKU-PARTIAL', 'Partial Item');
 
@@ -480,7 +472,7 @@ class CatalogUploadEndToEndTest extends TestCase
         $this->assertEquals(1, $upload->created_rows);
 
         $partial = CatalogItem::where('vendor_id', $this->vendor->id)
-            ->where('seller_sku', 'SKU-PARTIAL')
+            ->where('dealer_sku', 'SKU-PARTIAL')
             ->first();
 
         $this->assertNotNull($partial);
@@ -499,10 +491,8 @@ class CatalogUploadEndToEndTest extends TestCase
             'manufacturer_sku' => 'MFG-SKU-1',
             'manufacturer' => 'Test Manufacturer',
             'brand_name' => 'Test Brand',
-            'brand_logo' => 'https://example.com/logo.png',
-            'image_file_name' => 'item-image.jpg',
-            'categorization_or_hierarchy' => 'Cleaning/Paper Products/Toilet paper',
-            'product_type_or_family' => 'Gel Pens',
+            'hierarchy' => 'Cleaning/Paper Products/Toilet paper',
+            'category' => 'Gel Pens',
             'search_terms' => ['pen', 'writing'],
             'specifications' => ['Color=Red', 'Material=Aluminum'],
             'classifications' => ['EPP', 'Recyclable'],
@@ -523,17 +513,15 @@ class CatalogUploadEndToEndTest extends TestCase
         $this->assertEquals(1, $upload->created_rows);
 
         $item = CatalogItem::where('vendor_id', $this->vendor->id)
-            ->where('seller_sku', 'SKU-ALL-FIELDS')
+            ->where('dealer_sku', 'SKU-ALL-FIELDS')
             ->first();
 
         $this->assertNotNull($item);
         $this->assertSame('MFG-SKU-1', $item->manufacturer_sku);
         $this->assertSame('Test Manufacturer', $item->manufacturer);
         $this->assertSame('Test Brand', $item->brand_name);
-        $this->assertSame('https://example.com/logo.png', $item->brand_logo);
-        $this->assertSame('item-image.jpg', $item->image_file_name);
-        $this->assertSame('Cleaning/Paper Products/Toilet paper', $item->categorization_or_hierarchy);
-        $this->assertSame('Gel Pens', $item->product_type_or_family);
+        $this->assertSame('Cleaning/Paper Products/Toilet paper', $item->hierarchy);
+        $this->assertSame('Gel Pens', $item->category);
         $this->assertSame(['pen', 'writing'], $item->search_terms);
         $this->assertSame(['Color=Red', 'Material=Aluminum'], $item->specifications);
         $this->assertSame(['EPP', 'Recyclable'], $item->classifications);
@@ -545,7 +533,7 @@ class CatalogUploadEndToEndTest extends TestCase
         $this->assertEquals(2, (float) $item->multiples);
         $this->assertEquals(1.5, (float) $item->item_weight);
         $this->assertEquals(10.00, (float) $item->list_price);
-        $this->assertEquals(8.00, (float) $item->selling_price_per_unit);
+        $this->assertEquals(8.00, (float) $item->selling_price);
         $this->assertSame('EA', $item->unit_of_measure);
         $this->assertSame('14111507', $item->unspsc_code);
     }

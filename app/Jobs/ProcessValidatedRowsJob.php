@@ -24,11 +24,11 @@ use Throwable;
  * the vendor's catalog.
  *
  * Matching strategy:
- *   1. seller_sku (primary key for matching existing items)
+ *   1. dealer_sku (primary key for matching existing items)
  *
- * seller_sku is the unique identifier for catalog items. The schema
- * enforces a unique constraint on (vendor_id, seller_sku), so every
- * CatalogItem has exactly one seller_sku per vendor.
+ * dealer_sku is the unique identifier for catalog items. The schema
+ * enforces a unique constraint on (vendor_id, dealer_sku), so every
+ * CatalogItem has exactly one dealer_sku per vendor.
  *
  * When updating an existing CatalogItem, blank CSV values are NOT
  * written back to the database — only non-blank values from the CSV
@@ -80,7 +80,7 @@ class ProcessValidatedRowsJob implements ShouldQueue
                 ->where('status', 'valid')
                 ->cursor();
 
-            $nonComparableColumns = ['seller_sku', 'vendor_id'];
+            $nonComparableColumns = ['dealer_sku', 'vendor_id'];
 
             $createdCount = 0;
             $updatedCount = 0;
@@ -115,7 +115,7 @@ class ProcessValidatedRowsJob implements ShouldQueue
                         $attrs[$fieldKey] = is_array($rawValue) ? $rawValue : [$rawValue];
                     } elseif ($fieldKey === 'item_weight') {
                         $attrs[$fieldKey] = is_numeric($rawValue) ? (float) $rawValue : 0.01;
-                    } elseif (in_array($fieldKey, ['quantity_per_unit', 'min_qty_per_order', 'max_qty_per_order', 'multiples', 'list_price', 'selling_price_per_unit'], true)) {
+                    } elseif (in_array($fieldKey, ['quantity_per_unit', 'min_qty_per_order', 'max_qty_per_order', 'multiples', 'list_price', 'selling_price'], true)) {
                         $attrs[$fieldKey] = is_numeric($rawValue) ? (float) $rawValue : null;
                     } else {
                         $attrs[$fieldKey] = (string) $rawValue;
@@ -134,13 +134,13 @@ class ProcessValidatedRowsJob implements ShouldQueue
                 unset($updateAttrs['vendor_id']);
 
                 // ----------------------------------------------------------
-                // Match by seller_sku (the unique identifier for catalog items)
+                // Match by dealer_sku (the unique identifier for catalog items)
                 // ----------------------------------------------------------
-                $sellerSku = $attrs['seller_sku'] ?? null;
+                $sellerSku = $attrs['dealer_sku'] ?? null;
 
                 if ($sellerSku) {
                     $existing = CatalogItem::where('vendor_id', $vendor->id)
-                        ->where('seller_sku', $sellerSku)
+                        ->where('dealer_sku', $sellerSku)
                         ->first();
 
                     if ($existing) {
@@ -171,9 +171,9 @@ class ProcessValidatedRowsJob implements ShouldQueue
                     CatalogItem::create($attrs);
                     $createdCount++;
                 } catch (\Illuminate\Database\QueryException $e) {
-                    if ($e->getCode() === '23000' && str_contains($e->getMessage(), 'catalog_items_seller_sku_unique')) {
+                    if ($e->getCode() === '23000' && str_contains($e->getMessage(), 'catalog_items_dealer_sku_unique')) {
                         $existing = CatalogItem::where('vendor_id', $vendor->id)
-                            ->where('seller_sku', $sellerSku)
+                            ->where('dealer_sku', $sellerSku)
                             ->first();
 
                         if ($existing) {

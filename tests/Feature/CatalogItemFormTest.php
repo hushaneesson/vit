@@ -102,7 +102,7 @@ class CatalogItemFormTest extends TestCase
 
         $item = CatalogItem::first();
         $this->assertSame($vendor->id, $item->vendor_id);
-        $this->assertSame('SKU-001', $item->seller_sku);
+        $this->assertSame('SKU-001', $item->dealer_sku);
 
         // Standard fields
         $this->assertSame('Premium Copy Paper', $item->name);
@@ -159,10 +159,10 @@ class CatalogItemFormTest extends TestCase
             ->call('save')
             ->assertHasNoErrors();
 
-        // The item should be created successfully with the seller_sku
+        // The item should be created successfully with the dealer_sku
         $this->assertDatabaseCount('catalog_items', 1);
         $item = CatalogItem::first();
-        $this->assertSame('SKU-100', $item->seller_sku);
+        $this->assertSame('SKU-100', $item->dealer_sku);
     }
 
     public function test_client_cannot_edit_another_vendors_catalog_item(): void
@@ -176,7 +176,7 @@ class CatalogItemFormTest extends TestCase
             'vendor_id' => $vendorB->id,
             'name' => 'Test Item B',
             'description' => 'Desc',
-            'seller_sku' => 'B-SKU-1',
+            'dealer_sku' => 'B-SKU-1',
             'unit_of_measure' => 'EA',
             'status' => 'ready',
         ]);
@@ -197,7 +197,7 @@ class CatalogItemFormTest extends TestCase
             'vendor_id' => $vendor->id,
             'name' => 'Shared Item',
             'description' => 'Desc',
-            'seller_sku' => 'SKU-SHARED-1',
+            'dealer_sku' => 'SKU-SHARED-1',
             'unit_of_measure' => 'EA',
             'status' => 'ready',
         ]);

@@ -6,15 +6,11 @@ use Illuminate\Database\Eloquent\Model;
 
 class CountryCode extends Model
 {
-    protected $fillable = ['code', 'name', 'active'];
+    protected $fillable = ['code', 'name', 'id'];
 
-    protected function casts(): array
-    {
-        return ['active' => 'boolean'];
-    }
+    protected $keyType = 'string';
 
-    public function scopeActive($query)
-    {
-        return $query->where('active', true);
-    }
+    protected $casts = [
+        'id' => 'string',
+    ];
 }

@@ -25,7 +25,7 @@ return new class extends Migration
 
             $table->unsignedInteger('row_number'); // 1-based, matches source file line (excluding header)
 
-            $table->json('data'); // { "seller_sku": "ABC-123", "name": "...", ... } keyed by field_key
+            $table->json('data'); // { "dealer_sku": "ABC-123", "name": "...", ... } keyed by field_key
             $table->json('raw_data')->nullable(); // original unmapped row values, kept for debugging/support
 
             $table->enum('status', ['valid', 'invalid'])->default('valid');
