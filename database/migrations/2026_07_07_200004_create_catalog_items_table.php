@@ -59,13 +59,6 @@ return new class extends Migration
             $table->index('dealer_sku');
             $table->unique(['vendor_id', 'dealer_sku'], 'catalog_items_dealer_sku_unique');
         });
-
-        Schema::table('catalog_items', function (Blueprint $table) {
-            $table->foreign('replacement_sku')
-                ->references('dealer_sku')
-                ->on('catalog_items')
-                ->onDelete('cascade');
-        });
     }
 
     public function down(): void
