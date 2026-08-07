@@ -64,6 +64,21 @@ class CatalogItem extends Model
         return $this->hasMany(CatalogItemImage::class)->orderBy('sort_order');
     }
 
+    public function hierarchyInfo()
+    {
+        return $this->belongsTo(ProductHierarchy::class, 'hierarchy', 'hierarchy_number');
+    }
+
+    public function commodityType()
+    {
+        return $this->belongsTo(CommodityType::class, 'category', 'name');
+    }
+
+    public function unitOfMeasure()
+    {
+        return $this->belongsTo(UnitOfMeasure::class, 'unit_of_measure', 'code');
+    }
+
     protected static array $requiredFields = [
         'name',
         'description',

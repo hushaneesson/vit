@@ -105,9 +105,6 @@
                                 <tr>
                                     <th
                                         class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">
-                                        Image</th>
-                                    <th
-                                        class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">
                                         Product</th>
                                     <th
                                         class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">
@@ -123,12 +120,6 @@
                             <tbody class="bg-white divide-y divide-gray-200">
                                 @foreach ($items as $item)
                                     <tr class="text-sm hover:bg-gray-50 whitespace-nowrap">
-                                        <td class="px-6 py-4">
-                                            @if ($item->images->isNotEmpty())
-                                                <img src="{{ route('vendor.catalog-images.show', $item->images->first()) }}"
-                                                    class="object-cover w-12 h-12 border rounded">
-                                            @endif
-                                        </td>
                                         <td class="px-6 py-4">
                                             <div class="font-medium">{{ $item->name }}</div>
                                         </td>
