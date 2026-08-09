@@ -20,7 +20,7 @@ use Illuminate\Support\Str;
 use Throwable;
 
 /**
- * Phase 8B: consumes the validated CatalogUploadRow records from
+ * consumes the validated CatalogUploadRow records from
  * ProcessCatalogUploadJob and creates/updates CatalogItem rows in
  * the vendor's catalog.
  *

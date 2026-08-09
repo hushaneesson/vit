@@ -26,6 +26,8 @@ class ProcessCatalogUploadJob implements ShouldQueue
 
     public int $timeout = 1800; // 30 min ceiling for very large vendor files
 
+    private const BATCH_SIZE = 200;
+
     public function __construct(public int $catalogUploadId) {}
 
     public function handle(CatalogRowValidator $validator): void
@@ -61,40 +63,20 @@ class ProcessCatalogUploadJob implements ShouldQueue
             $successCount = 0;
             $errorCount = 0;
             $batch = [];
-            $batchSize = 200;
+            $batchSize = self::BATCH_SIZE;
 
             // Row 1 is the header - data starts at row 2.
             for ($rowIndex = 2; $rowIndex <= $highestRow; $rowIndex++) {
-                $rawValues = [];
+                $rowCells = [];
                 foreach ($sheet->getRowIterator($rowIndex, $rowIndex)->current()->getCellIterator() as $cell) {
-                    $rawValues[] = $cell->getValue();
+                    $rowCells[] = $cell->getValue();
                 }
 
-                if ($this->rowIsBlank($rawValues)) {
+                if ($this->rowIsBlank($rowCells)) {
                     continue;
                 }
 
-                $mappedData = [];
-                $rawData = [];
-
-                foreach ($rawValues as $colIndex => $rawValue) {
-                    $fieldKey = $columnToFieldKey->get($colIndex);
-                    $rawData["col_{$colIndex}"] = $rawValue;
-
-                    if (! $fieldKey) {
-                        continue; // vendor's column wasn't mapped to anything - ignore
-                    }
-
-                    $field = $activeFields->get($fieldKey);
-                    $mapping = $upload->columnMappings->firstWhere('column_index', $colIndex);
-
-                    if ($field && $field->is_multi_value) {
-                        $vendorSeparator = $this->getVendorSourceSeparator($mapping, $field);
-                        $mappedData[$fieldKey] = $this->splitMultiValue((string) $rawValue, $vendorSeparator);
-                    } else {
-                        $mappedData[$fieldKey] = $this->normalizeScalar($rawValue);
-                    }
-                }
+                [$mappedData, $rawData] = $this->mapRow($rowCells, $columnToFieldKey, $activeFields, $upload->columnMappings);
 
                 $result = $validator->validate($activeFields, $mappedData);
                 $blockingErrors = $result['errors'] ?? [];
@@ -122,17 +104,12 @@ class ProcessCatalogUploadJob implements ShouldQueue
                 ];
 
                 if (count($batch) >= $batchSize) {
-                    DB::transaction(function () use ($batch) {
-                        CatalogUploadRow::insert($batch);
-                    });
-                    $batch = [];
+                    $this->flushBatch($batch);
                 }
             }
 
             if (! empty($batch)) {
-                DB::transaction(function () use ($batch) {
-                    CatalogUploadRow::insert($batch);
-                });
+                $this->flushBatch($batch);
             }
 
             // Persist the final counts so tests and the progress screen can read them.
@@ -142,7 +119,7 @@ class ProcessCatalogUploadJob implements ShouldQueue
                 'invalid_rows' => $errorCount,
             ]);
 
-            // Phase 8B: convert validated rows into CatalogItem records.
+            // convert validated rows into CatalogItem records.
             // ProcessValidatedRowsJob will claim ownership and finalize the upload.
             if ($successCount > 0) {
                 // Set status to Processing so ProcessValidatedRowsJob can claim it
@@ -182,6 +159,59 @@ class ProcessCatalogUploadJob implements ShouldQueue
         }
 
         return true;
+    }
+
+    /**
+     * Map one row's raw cell values into the normalized mapped data and the
+     * raw per-column data, using the upload's column mappings and the active
+     * VIT field definitions.
+     *
+     * @param  array<int, mixed>  $rowCells
+     * @param  \Illuminate\Support\Collection<int, string|null>  $columnToFieldKey
+     * @param  \Illuminate\Support\Collection<string, object>  $activeFields
+     * @param  \Illuminate\Support\Collection<int, object>  $columnMappings
+     * @return array{0: array<string, mixed>, 1: array<string, mixed>} [mappedData, rawData]
+     */
+    private function mapRow(array $rowCells, $columnToFieldKey, $activeFields, $columnMappings): array
+    {
+        $mappedData = [];
+        $rawData = [];
+
+        foreach ($rowCells as $colIndex => $rawValue) {
+            $fieldKey = $columnToFieldKey->get($colIndex);
+            $rawData["col_{$colIndex}"] = $rawValue;
+
+            if (! $fieldKey) {
+                continue; // vendor's column wasn't mapped to anything - ignore
+            }
+
+            $field = $activeFields->get($fieldKey);
+            $mapping = $columnMappings->firstWhere('column_index', $colIndex);
+
+            if ($field && $field->is_multi_value) {
+                $vendorSeparator = $this->getVendorSourceSeparator($mapping, $field);
+                $mappedData[$fieldKey] = $this->splitMultiValue((string) $rawValue, $vendorSeparator);
+            } else {
+                $mappedData[$fieldKey] = $this->normalizeScalar($rawValue);
+            }
+        }
+
+        return [$mappedData, $rawData];
+    }
+
+    /**
+     * Insert the accumulated batch of CatalogUploadRow records in a single
+     * transaction, then reset the batch to an empty array.
+     *
+     * @param  array<int, array<string, mixed>>  $batch
+     */
+    private function flushBatch(array &$batch): void
+    {
+        DB::transaction(function () use ($batch) {
+            CatalogUploadRow::insert($batch);
+        });
+
+        $batch = [];
     }
 
     private function normalizeScalar(mixed $value): mixed

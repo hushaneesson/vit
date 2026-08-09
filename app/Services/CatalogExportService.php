@@ -406,11 +406,15 @@ class CatalogExportService
      */
     private function flattenValueForDisplay(array $value): string
     {
-        // Associative array like ['name' => 'Color', 'value' => 'Red'] -> "Color: Red"
-        if (array_key_exists('name', $value) && array_key_exists('value', $value)) {
-            return "{$value['name']}: {$value['value']}";
+        // Legacy CatalogItem form object format: ['key' => 'Size', 'value' => 'Large']
+        // -> "Size=Large" (the canonical "Key=Value" representation).
+        if (array_key_exists('key', $value) && array_key_exists('value', $value)) {
+            return (string) $value['key'] . '=' . (string) $value['value'];
         }
 
+        // Any other array shape is not a recognized specification format. Fall
+        // back to JSON so it is visibly not a valid "Key=Value" cell value
+        // rather than silently emitting a spec-incorrect string.
         return json_encode($value);
     }
 

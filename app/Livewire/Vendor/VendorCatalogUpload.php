@@ -32,7 +32,9 @@ class VendorCatalogUpload extends Component
     public array $sampleRows = [];
     public array $mapping = [];
     public array $suggestedIndexes = [];
-    public array $separators = []; // field_key => separator for multi-value fields
+
+    // field_key => separator for multi-value fields
+    public array $separators = [];
 
     public bool $suggestionsFinalized = false;
 
