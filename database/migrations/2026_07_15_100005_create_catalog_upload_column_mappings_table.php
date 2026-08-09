@@ -20,6 +20,7 @@ return new class extends Migration
 
             $table->unsignedInteger('column_index'); // 0-based position in the source file
             $table->string('source_column_name'); // header text as it appeared in the vendor's file
+            $table->string('source_separator', 10)->nullable();
 
             $table->timestamps();
 

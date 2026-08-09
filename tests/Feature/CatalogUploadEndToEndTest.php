@@ -50,6 +50,28 @@ class CatalogUploadEndToEndTest extends TestCase
         ]);
     }
 
+    private function createUploadWithSeparator(string $separator, array $fieldKeys = []): CatalogUpload
+    {
+        $upload = $this->createUpload(['status' => CatalogUploadStatus::Processing]);
+
+        // Create column mappings with source_separator for multi-value fields
+        $mappings = [];
+        foreach ($fieldKeys as $colIndex => $fieldKey) {
+            $field = \App\Services\VitFieldDefinition::find($fieldKey);
+            $mappings[] = [
+                'catalog_upload_id' => $upload->id,
+                'field_key' => $fieldKey,
+                'column_index' => $colIndex,
+                'source_column_name' => "Column $colIndex",
+                'source_separator' => ($field && $field->is_multi_value) ? $separator : null,
+            ];
+        }
+
+        \App\Models\CatalogUploadColumnMapping::insert($mappings);
+
+        return $upload;
+    }
+
     private function createUpload(array $attributes = []): CatalogUpload
     {
         return CatalogUpload::create(array_merge([
@@ -453,6 +475,9 @@ class CatalogUploadEndToEndTest extends TestCase
             'multiples' => 1,
             'list_price' => 10.00,
             'selling_price' => 8.00,
+            'images' => ['image1.jpg', 'image2.jpg'],
+            'availability' => 100,
+            'lead_time' => '5 days',
         ]);
 
         $this->assertEquals(100, $complete->completeness_score);
@@ -536,5 +561,120 @@ class CatalogUploadEndToEndTest extends TestCase
         $this->assertEquals(8.00, (float) $item->selling_price);
         $this->assertSame('EA', $item->unit_of_measure);
         $this->assertSame('14111507', $item->unspsc_code);
+    }
+
+    public function test_vendor_separator_semicolon_splits_correctly(): void
+    {
+        $upload = $this->createUploadWithSeparator(';', [
+            12 => 'search_terms',
+        ]);
+
+        // Create a valid row with semicolon-separated search terms
+        CatalogUploadRow::create([
+            'catalog_upload_id' => $upload->id,
+            'row_number' => 1,
+            'data' => [
+                'dealer_sku' => 'SKU-SEP-1',
+                'name' => 'Test Item',
+                'description' => 'Test description',
+                'unit_of_measure' => 'EA',
+                'list_price' => 10.00,
+                'selling_price' => 8.00,
+                'unspsc_code' => '14111507',
+                'search_terms' => ['paper', 'copy paper', 'office paper', 'laser paper', 'inkjet paper'],
+            ],
+            'raw_data' => json_encode([]),
+            'status' => 'valid',
+        ]);
+
+        $job = new ProcessValidatedRowsJob($upload->id);
+        $job->handle();
+        $upload->refresh();
+
+        $this->assertEquals(CatalogUploadStatus::Completed, $upload->status);
+        $this->assertEquals(1, $upload->created_rows);
+
+        $item = CatalogItem::where('vendor_id', $this->vendor->id)
+            ->where('dealer_sku', 'SKU-SEP-1')
+            ->first();
+
+        $this->assertNotNull($item);
+        $this->assertSame(['paper', 'copy paper', 'office paper', 'laser paper', 'inkjet paper'], $item->search_terms);
+    }
+
+    public function test_vendor_separator_pipe_splits_correctly(): void
+    {
+        $upload = $this->createUploadWithSeparator('|', [
+            12 => 'search_terms',
+        ]);
+
+        CatalogUploadRow::create([
+            'catalog_upload_id' => $upload->id,
+            'row_number' => 1,
+            'data' => [
+                'dealer_sku' => 'SKU-SEP-2',
+                'name' => 'Test Item 2',
+                'description' => 'Test description',
+                'unit_of_measure' => 'EA',
+                'list_price' => 10.00,
+                'selling_price' => 8.00,
+                'unspsc_code' => '14111507',
+                'search_terms' => ['paper', 'copy paper', 'office paper'],
+            ],
+            'raw_data' => json_encode([]),
+            'status' => 'valid',
+        ]);
+
+        $job = new ProcessValidatedRowsJob($upload->id);
+        $job->handle();
+        $upload->refresh();
+
+        $this->assertEquals(CatalogUploadStatus::Completed, $upload->status);
+        $this->assertEquals(1, $upload->created_rows);
+
+        $item = CatalogItem::where('vendor_id', $this->vendor->id)
+            ->where('dealer_sku', 'SKU-SEP-2')
+            ->first();
+
+        $this->assertNotNull($item);
+        $this->assertSame(['paper', 'copy paper', 'office paper'], $item->search_terms);
+    }
+
+    public function test_vendor_separator_comma_splits_correctly(): void
+    {
+        $upload = $this->createUploadWithSeparator(',', [
+            12 => 'search_terms',
+        ]);
+
+        CatalogUploadRow::create([
+            'catalog_upload_id' => $upload->id,
+            'row_number' => 1,
+            'data' => [
+                'dealer_sku' => 'SKU-SEP-3',
+                'name' => 'Test Item 3',
+                'description' => 'Test description',
+                'unit_of_measure' => 'EA',
+                'list_price' => 10.00,
+                'selling_price' => 8.00,
+                'unspsc_code' => '14111507',
+                'search_terms' => ['paper', 'copy paper', 'office paper'],
+            ],
+            'raw_data' => json_encode([]),
+            'status' => 'valid',
+        ]);
+
+        $job = new ProcessValidatedRowsJob($upload->id);
+        $job->handle();
+        $upload->refresh();
+
+        $this->assertEquals(CatalogUploadStatus::Completed, $upload->status);
+        $this->assertEquals(1, $upload->created_rows);
+
+        $item = CatalogItem::where('vendor_id', $this->vendor->id)
+            ->where('dealer_sku', 'SKU-SEP-3')
+            ->first();
+
+        $this->assertNotNull($item);
+        $this->assertSame(['paper', 'copy paper', 'office paper'], $item->search_terms);
     }
 }

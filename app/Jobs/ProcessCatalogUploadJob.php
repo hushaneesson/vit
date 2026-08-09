@@ -86,15 +86,27 @@ class ProcessCatalogUploadJob implements ShouldQueue
                     }
 
                     $field = $activeFields->get($fieldKey);
-                    $mappedData[$fieldKey] = $field && $field->is_multi_value
-                        ? $this->splitMultiValue((string) $rawValue, $field->join_separator ?? ',')
-                        : $this->normalizeScalar($rawValue);
+                    $mapping = $upload->columnMappings->firstWhere('column_index', $colIndex);
+
+                    if ($field && $field->is_multi_value) {
+                        $vendorSeparator = $this->getVendorSourceSeparator($mapping, $field);
+                        $mappedData[$fieldKey] = $this->splitMultiValue((string) $rawValue, $vendorSeparator);
+                    } else {
+                        $mappedData[$fieldKey] = $this->normalizeScalar($rawValue);
+                    }
                 }
 
                 $result = $validator->validate($activeFields, $mappedData);
-                $status = empty($result['errors']) ? 'valid' : 'invalid';
+                $blockingErrors = $result['errors'] ?? [];
+                $warnings = $result['warnings'] ?? [];
+                $status = empty($blockingErrors) ? 'valid' : 'invalid';
 
                 $status === 'valid' ? $successCount++ : $errorCount++;
+
+                $rowPayload = [
+                    'warnings' => $warnings,
+                    'errors' => $blockingErrors,
+                ];
 
                 $batch[] = [
                     'catalog_upload_id' => $upload->id,
@@ -102,7 +114,9 @@ class ProcessCatalogUploadJob implements ShouldQueue
                     'data' => json_encode($mappedData),
                     'raw_data' => json_encode($rawData),
                     'status' => $status,
-                    'errors' => empty($result['errors']) ? null : json_encode($result['errors']),
+                    'errors' => empty($rowPayload['warnings']) && empty($rowPayload['errors'])
+                        ? null
+                        : json_encode($rowPayload),
                     'created_at' => now(),
                     'updated_at' => now(),
                 ];
@@ -184,9 +198,30 @@ class ProcessCatalogUploadJob implements ShouldQueue
         return array_values(array_filter(array_map('trim', explode($separator, $rawValue)), fn($v) => $v !== ''));
     }
 
+    /**
+     * Get the vendor's source separator for a multi-value field.
+     *
+     * Returns the separator the vendor used in their uploaded file for this
+     * specific column mapping. If not set, falls back to a safe default.
+     *
+     * @return string The separator character (e.g. ',', '|', ';')
+     */
+    private function getVendorSourceSeparator(?object $mapping, object $field): string
+    {
+        if ($mapping && !empty($mapping->source_separator)) {
+            return $mapping->source_separator;
+        }
+
+        // Fallback: no separator configured. We cannot reliably guess the vendor's
+        // separator, so we use a single-character default that minimizes damage.
+        // This should be made explicit in the mapping UI instead of guessed here.
+        return ',';
+    }
+
     private function resolveLocalPath(string $disk, string $path): string
     {
-        if ((Storage::disk($disk)->getConfig()['driver'] ?? null) === 'local') {
+        $diskConfig = config('filesystems.disks.' . $disk, []);
+        if (($diskConfig['driver'] ?? null) === 'local') {
             return Storage::disk($disk)->path($path);
         }
 

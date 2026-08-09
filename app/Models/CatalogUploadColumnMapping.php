@@ -16,6 +16,7 @@ class CatalogUploadColumnMapping extends Model
         'field_key',
         'column_index',
         'source_column_name',
+        'source_separator',
     ];
 
     public function upload(): BelongsTo

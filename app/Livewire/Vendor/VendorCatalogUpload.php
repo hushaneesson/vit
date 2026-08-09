@@ -32,6 +32,7 @@ class VendorCatalogUpload extends Component
     public array $sampleRows = [];
     public array $mapping = [];
     public array $suggestedIndexes = [];
+    public array $separators = []; // field_key => separator for multi-value fields
 
     public bool $suggestionsFinalized = false;
 
@@ -64,7 +65,7 @@ class VendorCatalogUpload extends Component
     #[Computed]
     public function catalogFields()
     {
-        return VitFieldDefinition::visibleInWebApp();
+        return VitFieldDefinition::frontendVisible();
     }
 
     public function mappedFieldKeys()
@@ -158,6 +159,11 @@ class VendorCatalogUpload extends Component
         unset($this->suggestedIndexes[$key]);
     }
 
+    public function updatedSeparators($value, $key): void
+    {
+        $this->separators[$key] = $value;
+    }
+
     public function confirmMapping(): void
     {
         $upload = CatalogUpload::findOrFail($this->catalogUploadId);
@@ -177,11 +183,15 @@ class VendorCatalogUpload extends Component
                         continue;
                     }
 
+                    $field = VitFieldDefinition::find($fieldKey);
+                    $sourceSeparator = ($field && $field->is_multi_value) ? ($this->separators[$fieldKey] ?? null) : null;
+
                     CatalogUploadColumnMapping::create([
                         'catalog_upload_id' => $upload->id,
                         'field_key' => $fieldKey,
                         'column_index' => $columnIndex,
                         'source_column_name' => $columnName,
+                        'source_separator' => $sourceSeparator,
                     ]);
                 }
 
@@ -213,6 +223,25 @@ class VendorCatalogUpload extends Component
             ->whereNotNull('errors')
             ->orderBy('row_number')
             ->get(['row_number', 'errors']);
+    }
+
+    #[Computed]
+    public function warningRows()
+    {
+        if (! $this->catalogUploadId) {
+            return collect();
+        }
+
+        $rows = \App\Models\CatalogUploadRow::where('catalog_upload_id', $this->catalogUploadId)
+            ->where('status', 'valid')
+            ->whereNotNull('errors')
+            ->orderBy('row_number')
+            ->get(['row_number', 'errors']);
+
+        return $rows->filter(function ($row) {
+            $payload = is_string($row->errors) ? json_decode($row->errors, true) : $row->errors;
+            return is_array($payload) && !empty($payload['warnings'] ?? []);
+        });
     }
 
     public function refreshStatus(): void

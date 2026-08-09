@@ -7,6 +7,7 @@ use App\Models\CatalogItem;
 use App\Models\CatalogUpload;
 use App\Models\Vendor;
 use App\Notifications\CatalogUploadValidationReportNotification;
+use App\Services\VitFieldDefinition;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -94,31 +95,62 @@ class ProcessValidatedRowsJob implements ShouldQueue
                     $data = json_decode((string) ($data ?? ''), true) ?: [];
                 }
 
-                // Build the attribute map directly from VIT field keys.
-                // CatalogItem columns now match VIT field keys, so no translation needed.
+                // Build the attribute map using VitFieldDefinition as the source
+                // of truth. Resolve model_attribute, field_type, and is_multi_value
+                // dynamically so the mapper stays in sync with the export layer.
                 $attrs = [
                     'vendor_id' => $vendor->id,
                 ];
 
+                // Pre-fetch definitions for all keys present in this row to avoid
+                // repeated static lookups inside the loop.
+                $definitions = VitFieldDefinition::all()
+                    ->whereIn('field_key', array_keys($data))
+                    ->keyBy('field_key');
+
                 foreach ($data as $fieldKey => $rawValue) {
+                    $definition = $definitions->get($fieldKey);
+                    $modelAttribute = $definition ? ($definition->model_attribute ?? $fieldKey) : $fieldKey;
+
                     if (is_null($rawValue) || $rawValue === '' || $rawValue === []) {
                         if ($fieldKey === 'item_weight') {
-                            $attrs[$fieldKey] = 0.01;
+                            $attrs[$modelAttribute] = 0.01;
                             continue;
                         }
-                        $attrs[$fieldKey] = null;
+                        $attrs[$modelAttribute] = null;
                         continue;
                     }
 
-                    // Cast multi-value arrays for JSON columns
-                    if (in_array($fieldKey, ['search_terms', 'classifications', 'specifications', 'selling_points'], true)) {
-                        $attrs[$fieldKey] = is_array($rawValue) ? $rawValue : [$rawValue];
-                    } elseif ($fieldKey === 'item_weight') {
-                        $attrs[$fieldKey] = is_numeric($rawValue) ? (float) $rawValue : 0.01;
-                    } elseif (in_array($fieldKey, ['quantity_per_unit', 'min_qty_per_order', 'max_qty_per_order', 'multiples', 'list_price', 'selling_price'], true)) {
-                        $attrs[$fieldKey] = is_numeric($rawValue) ? (float) $rawValue : null;
+                    // Multi-value fields: the mapper/import layer (ProcessCatalogUploadJob) is responsible
+                    // for splitting vendor input using the vendor's separator. By the time values reach
+                    // this job, they should already be normalized arrays. We only need to ensure the
+                    // array is clean (trimmed, re-indexed) before storing.
+                    if ($definition && $definition->is_multi_value) {
+                        $parts = is_array($rawValue) ? $rawValue : json_decode((string) $rawValue, true);
+                        if (!is_array($parts)) {
+                            $parts = [];
+                        }
+                        $parts = array_filter(array_map('trim', $parts), fn($item) => $item !== '');
+                        $attrs[$modelAttribute] = array_values($parts);
+                        continue;
+                    }
+
+                    // Type-aware casting based on field_type
+                    if ($definition) {
+                        $cast = match ($definition->field_type) {
+                            'number', 'decimal' => is_numeric($rawValue) ? (float) $rawValue : null,
+                            'boolean' => is_bool($rawValue) ? $rawValue : (in_array(strtolower((string) $rawValue), ['true', 'false', '1', '0', 'yes', 'no'], true) ? (bool) $rawValue : (string) $rawValue),
+                            default => (string) $rawValue,
+                        };
+
+                        // Preserve special item_weight fallback
+                        if ($fieldKey === 'item_weight') {
+                            $cast = is_numeric($rawValue) ? (float) $rawValue : 0.01;
+                        }
+
+                        $attrs[$modelAttribute] = $cast;
                     } else {
-                        $attrs[$fieldKey] = (string) $rawValue;
+                        $attrs[$modelAttribute] = (string) $rawValue;
                     }
                 }
 
@@ -203,14 +235,25 @@ class ProcessValidatedRowsJob implements ShouldQueue
                             ->orderBy('row_number')
                             ->get(['row_number', 'errors']);
 
+                        $warningRows = $upload->rows()
+                            ->where('status', 'valid')
+                            ->whereNotNull('errors')
+                            ->orderBy('row_number')
+                            ->get(['row_number', 'errors']);
+
+                        $warningRows = $warningRows->filter(function ($row) {
+                            $payload = is_string($row->errors) ? json_decode($row->errors, true) : $row->errors;
+                            return is_array($payload) && !empty($payload['warnings'] ?? []);
+                        });
+
                         Notification::route('mail', $client->email)
                             ->notify(new CatalogUploadValidationReportNotification(
                                 catalogName: 'Upload #' . $upload->id,
                                 processedAt: $upload->processing_completed_at,
                                 totalErrors: $upload->invalid_rows,
-                                totalWarnings: 0,
+                                totalWarnings: $warningRows->count(),
                                 errors: $failedRows,
-                                warnings: collect(),
+                                warnings: $warningRows,
                             ));
 
                         $upload->update(['validation_report_emailed_at' => now()]);
@@ -317,8 +360,14 @@ class ProcessValidatedRowsJob implements ShouldQueue
                 continue;
             }
 
-            // JSON fields
-            if (in_array($column, ['search_terms', 'classifications', 'specifications', 'selling_points'], true)) {
+            // Dynamic multi-value JSON fields come from the spec metadata; this
+            // keeps the comparison logic aligned with the import/export contract.
+            $multiValueColumns = VitFieldDefinition::all()
+                ->where('is_multi_value', true)
+                ->pluck('field_key')
+                ->all();
+
+            if (in_array($column, $multiValueColumns, true)) {
                 $decodedOld = is_array($oldValue) ? $oldValue : json_decode((string) $oldValue, true);
                 $decodedNew = is_array($newValue) ? $newValue : json_decode((string) $newValue, true);
 

@@ -70,25 +70,21 @@ class CatalogUploadValidationReportNotification extends Notification implements 
 
             foreach ($this->errors as $row) {
                 $rowNumber = $row->row_number ?? '?';
-                $messages = is_array($row->errors)
-                    ? collect($row->errors)->pluck('message')->implode('; ')
-                    : (string) $row->errors;
+                $messages = $this->renderMessagesFromPayload($row->errors, 'errors');
                 $mail->line("- **Row {$rowNumber}:** {$messages}");
             }
 
             $mail->line('');
         }
 
-        // Warning details (reserved for future use)
+        // Warning details
         if ($this->warnings->isNotEmpty()) {
             $mail->line('## Warnings');
             $mail->line('');
 
             foreach ($this->warnings as $row) {
                 $rowNumber = $row->row_number ?? '?';
-                $messages = is_array($row->errors)
-                    ? collect($row->errors)->pluck('message')->implode('; ')
-                    : (string) $row->errors;
+                $messages = $this->renderMessagesFromPayload($row->errors, 'warnings');
                 $mail->line("- **Row {$rowNumber}:** {$messages}");
             }
 
@@ -99,5 +95,33 @@ class CatalogUploadValidationReportNotification extends Notification implements 
         $mail->salutation('— VIT System');
 
         return $mail;
+    }
+
+    private function renderMessagesFromPayload(mixed $payload, string $section): string
+    {
+        if (is_string($payload)) {
+            $decoded = json_decode($payload, true);
+            if (is_array($decoded) && !empty($decoded[$section] ?? [])) {
+                return collect($decoded[$section])
+                    ->pluck('message')
+                    ->filter()
+                    ->implode('; ');
+            }
+
+            return $payload;
+        }
+
+        if (is_array($payload) && !empty($payload[$section] ?? [])) {
+            return collect($payload[$section])
+                ->pluck('message')
+                ->filter()
+                ->implode('; ');
+        }
+
+        if (is_array($payload)) {
+            return collect($payload)->pluck('message')->filter()->implode('; ');
+        }
+
+        return (string) $payload;
     }
 }

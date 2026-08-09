@@ -260,6 +260,19 @@
                                                 Example: {{ $sampleValue[$currentSelection] ?? '—' }}
                                             </div>
                                         @endif
+                                        @if ($field->is_multi_value && $currentSelection !== null)
+                                            <div class="mt-1.5">
+                                                <label class="block text-xs font-medium text-slate-600">
+                                                    Separator in your file:
+                                                </label>
+                                                <select wire:model.live="separators.{{ $field->field_key }}"
+                                                    class="mt-0.5 px-2 py-1 text-sm border rounded border-slate-300 focus:border-slate-500 focus:ring-1 focus:ring-slate-500">
+                                                    <option value=",">Comma (,)</option>
+                                                    <option value=";">Semicolon (;)</option>
+                                                    <option value="|">Pipe (|)</option>
+                                                </select>
+                                            </div>
+                                        @endif
                                     </td>
                                 </tr>
                             @endforeach
@@ -424,6 +437,51 @@
                         </div>
                     @endif
                 </dl>
+
+                {{-- Warning-only rows: imported successfully but surfaced business-data warnings --}}
+                @if ($this->warningRows->isNotEmpty())
+                    <div class="mt-6 overflow-hidden border rounded-lg border-amber-200">
+                        <div class="flex items-center justify-between px-4 py-2.5 bg-amber-50">
+                            <span class="text-xs font-semibold tracking-wide uppercase text-amber-700">
+                                Imported with warnings &mdash; <span class="font-normal lowercase">CatalogItem
+                                    created/updated</span>
+                            </span>
+                            <span class="text-xs text-amber-600">{{ $this->warningRows->count() }} row(s)</span>
+                        </div>
+                        <div class="overflow-x-auto overflow-y-auto max-h-48">
+                            <table class="w-full min-w-[420px] text-sm border-collapse">
+                                <thead class="sticky top-0 bg-slate-50">
+                                    <tr class="text-xs font-semibold tracking-wide uppercase text-slate-500">
+                                        <th class="p-2.5 pl-4 text-left border-b border-slate-200">Row</th>
+                                        <th class="p-2.5 text-left border-b border-slate-200">Warnings</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-amber-100">
+                                    @foreach ($this->warningRows as $warningRow)
+                                        <tr class="hover:bg-amber-50/40">
+                                            <td class="p-2.5 pl-4 font-mono text-xs text-slate-900">
+                                                {{ $warningRow->row_number }}</td>
+                                            <td class="p-2.5 text-xs text-amber-700">
+                                                @php
+                                                    $payload = is_string($warningRow->errors)
+                                                        ? json_decode($warningRow->errors, true)
+                                                        : $warningRow->errors;
+                                                    $warningMessages =
+                                                        is_array($payload) && !empty($payload['warnings'])
+                                                            ? collect($payload['warnings'])
+                                                                ->pluck('message')
+                                                                ->implode('; ')
+                                                            : (string) $warningRow->errors;
+                                                @endphp
+                                                {{ $warningMessages }}
+                                            </td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                @endif
 
                 {{-- Failed rows --}}
                 @if ($progress['invalid_rows'] > 0 && $this->failedRows->isNotEmpty())
