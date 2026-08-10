@@ -121,17 +121,30 @@ class ProcessValidatedRowsJob implements ShouldQueue
                         continue;
                     }
 
-                    // Multi-value fields: the mapper/import layer (ProcessCatalogUploadJob) is responsible
-                    // for splitting vendor input using the vendor's separator. By the time values reach
-                    // this job, they should already be normalized arrays. We only need to ensure the
-                    // array is clean (trimmed, re-indexed) before storing.
+                    // Multi-value fields: normalize based on field type.
+                    // Specifications uses key/value objects, all others are simple arrays.
                     if ($definition && $definition->is_multi_value) {
                         $parts = is_array($rawValue) ? $rawValue : json_decode((string) $rawValue, true);
                         if (!is_array($parts)) {
                             $parts = [];
                         }
-                        $parts = array_filter(array_map('trim', $parts), fn($item) => $item !== '');
-                        $attrs[$modelAttribute] = array_values($parts);
+
+                        if ($definition->is_key_value) {
+                            // Specifications: normalize to key/value objects
+                            $attrs[$modelAttribute] = $this->normalizeKeyValueMultiValue($parts);
+                        } else {
+                            // Normal array fields: just clean and preserve as simple array
+                            $cleaned = [];
+                            foreach ($parts as $value) {
+                                if (is_string($value)) {
+                                    $value = trim($value);
+                                }
+                                if ($value !== '' && $value !== null) {
+                                    $cleaned[] = $value;
+                                }
+                            }
+                            $attrs[$modelAttribute] = $cleaned;
+                        }
                         continue;
                     }
 
@@ -293,6 +306,57 @@ class ProcessValidatedRowsJob implements ShouldQueue
     }
 
     /**
+     * Normalize multi-value data into the canonical key/value object format.
+     * Only used for specifications field.
+     *
+     * @param  array<int, mixed>  $parts
+     * @return array<int, array{key: string, value: string}>
+     */
+    private function normalizeKeyValueMultiValue(array $parts): array
+    {
+        $normalized = [];
+
+        foreach ($parts as $entry) {
+            // Already canonical
+            if (is_array($entry) && isset($entry['key']) && isset($entry['value'])) {
+                $key = trim((string) $entry['key']);
+                $value = trim((string) $entry['value']);
+
+                if ($key !== '' && $value !== '') {
+                    $normalized[] = ['key' => $key, 'value' => $value];
+                }
+                continue;
+            }
+
+            // Associative array: ['Color' => 'Silver']
+            if (is_array($entry) && array_keys($entry) !== range(0, count($entry) - 1)) {
+                foreach ($entry as $key => $value) {
+                    $key = trim((string) $key);
+                    $value = trim((string) $value);
+
+                    if ($key !== '' && $value !== '') {
+                        $normalized[] = ['key' => $key, 'value' => $value];
+                    }
+                }
+                continue;
+            }
+
+            // Indexed string: "Color=Silver"
+            if (is_string($entry) && str_contains($entry, '=')) {
+                $equalsPos = strpos($entry, '=');
+                $key = trim(substr($entry, 0, $equalsPos));
+                $value = trim(substr($entry, $equalsPos + 1));
+
+                if ($key !== '' && $value !== '') {
+                    $normalized[] = ['key' => $key, 'value' => $value];
+                }
+            }
+        }
+
+        return $normalized;
+    }
+
+    /**
      * Normalize incoming CSV values for comparison against database values.
      *
      * This ensures consistent comparison regardless of how the CSV data
@@ -371,11 +435,25 @@ class ProcessValidatedRowsJob implements ShouldQueue
                 $decodedOld = is_array($oldValue) ? $oldValue : json_decode((string) $oldValue, true);
                 $decodedNew = is_array($newValue) ? $newValue : json_decode((string) $newValue, true);
 
-                if (is_array($decodedOld)) {
-                    sort($decodedOld);
-                }
-                if (is_array($decodedNew)) {
-                    sort($decodedNew);
+                // Get field definition to determine comparison strategy
+                $fieldDef = VitFieldDefinition::find($column);
+
+                if ($fieldDef && $fieldDef->is_key_value) {
+                    // Specifications: normalize to canonical format and sort by key for comparison
+                    if (is_array($decodedOld)) {
+                        usort($decodedOld, fn($a, $b) => ($a['key'] ?? '') <=> ($b['key'] ?? ''));
+                    }
+                    if (is_array($decodedNew)) {
+                        usort($decodedNew, fn($a, $b) => ($a['key'] ?? '') <=> ($b['key'] ?? ''));
+                    }
+                } else {
+                    // Normal array fields: sort values for order-independent comparison
+                    if (is_array($decodedOld)) {
+                        sort($decodedOld);
+                    }
+                    if (is_array($decodedNew)) {
+                        sort($decodedNew);
+                    }
                 }
 
                 if ($decodedOld !== $decodedNew) {

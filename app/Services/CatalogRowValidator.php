@@ -94,16 +94,40 @@ class CatalogRowValidator
                 return "{$definition->web_app_label} must be a single value, not an array.";
             }
 
+            $isKeyValue = $definition->is_key_value ?? false;
+
             foreach ($value as $item) {
                 if (is_array($item)) {
-                    return "{$definition->web_app_label} contains a nested array value that is not supported.";
+                    if ($isKeyValue) {
+                        // Key/value fields: each item must have 'key' and 'value'
+                        if (!isset($item['key']) || !isset($item['value'])) {
+                            return "{$definition->web_app_label} contains an invalid key/value pair. Each entry must have 'key' and 'value'.";
+                        }
+                    } else {
+                        // Normal array fields: items must be scalar strings
+                        return "{$definition->web_app_label} contains a nested array value that is not supported.";
+                    }
+                } elseif ($isKeyValue) {
+                    // Key/value field but item is not an array - invalid
+                    return "{$definition->web_app_label} must contain key/value objects.";
                 }
             }
 
-            $joinedValue = implode($definition->join_separator ?? ',', array_map(
-                static fn(mixed $item) => is_scalar($item) || $item === null ? (string) $item : '',
-                $value,
-            ));
+            if ($isKeyValue) {
+                // For key/value fields, validate the joined representation length
+                $stringParts = [];
+                foreach ($value as $item) {
+                    if (is_array($item) && isset($item['key']) && isset($item['value'])) {
+                        $stringParts[] = (string) $item['key'] . '=' . (string) $item['value'];
+                    }
+                }
+                $joinedValue = implode($definition->join_separator ?? ',', $stringParts);
+            } else {
+                $joinedValue = implode($definition->join_separator ?? ',', array_map(
+                    static fn(mixed $item) => is_scalar($item) || $item === null ? (string) $item : '',
+                    $value,
+                ));
+            }
 
             return $definition->max_length && mb_strlen($joinedValue) > $definition->max_length
                 ? "{$definition->web_app_label} exceeds the maximum length of {$definition->max_length}."

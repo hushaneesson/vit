@@ -260,17 +260,63 @@
                                                 Example: {{ $sampleValue[$currentSelection] ?? '—' }}
                                             </div>
                                         @endif
-                                        @if ($field->is_multi_value && $currentSelection !== null)
+                                        @if ($field->is_multi_value)
+                                            @php
+                                                $rangeActive =
+                                                    !empty($this->rangeStarts[$field->field_key]) ||
+                                                    !empty($this->rangeEnds[$field->field_key]);
+                                            @endphp
                                             <div class="mt-1.5">
-                                                <label class="block text-xs font-medium text-slate-600">
-                                                    Separator in your file:
-                                                </label>
-                                                <select wire:model.live="separators.{{ $field->field_key }}"
-                                                    class="mt-0.5 px-2 py-1 text-sm border rounded border-slate-300 focus:border-slate-500 focus:ring-1 focus:ring-slate-500">
-                                                    <option value=",">Comma (,)</option>
-                                                    <option value=";">Semicolon (;)</option>
-                                                    <option value="|">Pipe (|)</option>
-                                                </select>
+                                                @if ($rangeActive)
+                                                    <div class="flex items-center gap-2">
+                                                        <label class="block text-xs font-medium text-slate-600">
+                                                            Attribute range:
+                                                        </label>
+                                                        <select wire:model.live="rangeStarts.{{ $field->field_key }}"
+                                                            class="px-2 py-1 text-sm border rounded border-slate-300 focus:border-slate-500 focus:ring-1 focus:ring-slate-500">
+                                                            <option value="">Start</option>
+                                                            @foreach ($this->columns as $index => $name)
+                                                                <option value="{{ $index }}">
+                                                                    {{ $name }}</option>
+                                                            @endforeach
+                                                        </select>
+                                                        <span class="text-xs text-slate-400">to</span>
+                                                        <select wire:model.live="rangeEnds.{{ $field->field_key }}"
+                                                            class="px-2 py-1 text-sm border rounded border-slate-300 focus:border-slate-500 focus:ring-1 focus:ring-slate-500">
+                                                            <option value="">End</option>
+                                                            @foreach ($this->columns as $index => $name)
+                                                                <option value="{{ $index }}">
+                                                                    {{ $name }}</option>
+                                                            @endforeach
+                                                        </select>
+                                                        <button type="button"
+                                                            wire:click="$set('rangeStarts.{{ $field->field_key }}', null); $set('rangeEnds.{{ $field->field_key }}', null)"
+                                                            class="text-xs text-slate-500 hover:text-slate-700 underline">
+                                                            Clear
+                                                        </button>
+                                                    </div>
+                                                    @if ($this->rangeColumnsFor($field->field_key))
+                                                        <p class="mt-1 text-xs text-slate-500">
+                                                            Columns:
+                                                            {{ collect($this->rangeColumnsFor($field->field_key))->map(fn($i) => $this->columns[$i] ?? $i)->implode(', ') }}
+                                                        </p>
+                                                    @endif
+                                                @elseif ($currentSelection !== null)
+                                                    <label class="block text-xs font-medium text-slate-600">
+                                                        Separator in your file:
+                                                    </label>
+                                                    <select wire:model.live="separators.{{ $field->field_key }}"
+                                                        class="mt-0.5 px-2 py-1 text-sm border rounded border-slate-300 focus:border-slate-500 focus:ring-1 focus:ring-slate-500">
+                                                        <option value=",">Comma (,)</option>
+                                                        <option value=";">Semicolon (;)</option>
+                                                        <option value="|">Pipe (|)</option>
+                                                    </select>
+                                                @endif
+                                                <button type="button"
+                                                    wire:click="$set('rangeStarts.{{ $field->field_key }}', {{ array_key_first($this->columns) ?? 0 }}); $set('rangeEnds.{{ $field->field_key }}', {{ array_key_last($this->columns) ?? 0 }})"
+                                                    class="mt-1.5 text-xs text-sky-600 hover:text-sky-700 underline">
+                                                    {{ $rangeActive ? 'Switch to single column' : 'Use a column range instead' }}
+                                                </button>
                                             </div>
                                         @endif
                                     </td>

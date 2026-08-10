@@ -36,6 +36,11 @@ class VendorCatalogUpload extends Component
     // field_key => separator for multi-value fields
     public array $separators = [];
 
+    // field_key => start/end column index for multi-value attribute ranges
+    public array $rangeStarts = [];
+
+    public array $rangeEnds = [];
+
     public bool $suggestionsFinalized = false;
 
     public array $progress = [
@@ -159,11 +164,55 @@ class VendorCatalogUpload extends Component
     {
         $this->mapping[$key] = $value !== null && $value !== '' ? (string) $value : null;
         unset($this->suggestedIndexes[$key]);
+        // Choosing a single source column clears any range selection for the field.
+        unset($this->rangeStarts[$key], $this->rangeEnds[$key]);
     }
 
     public function updatedSeparators($value, $key): void
     {
         $this->separators[$key] = $value;
+    }
+
+    public function updatedRangeStarts($value, $key): void
+    {
+        $this->rangeStarts[$key] = $value !== null && $value !== '' ? (string) $value : null;
+        // A range selection supersedes the single-column mapping for the field.
+        if ($this->rangeStarts[$key] !== null) {
+            $this->mapping[$key] = null;
+        }
+    }
+
+    public function updatedRangeEnds($value, $key): void
+    {
+        $this->rangeEnds[$key] = $value !== null && $value !== '' ? (string) $value : null;
+        if ($this->rangeEnds[$key] !== null) {
+            $this->mapping[$key] = null;
+        }
+    }
+
+    /**
+     * The ordered list of column indexes covered by a field's attribute range.
+     * Handles reverse selection by normalizing start/end order.
+     *
+     * @return array<int, int>
+     */
+    public function rangeColumnsFor(string $fieldKey): array
+    {
+        $start = $this->rangeStarts[$fieldKey] ?? null;
+        $end = $this->rangeEnds[$fieldKey] ?? null;
+
+        if ($start === null || $end === null) {
+            return [];
+        }
+
+        $start = (int) $start;
+        $end = (int) $end;
+
+        if ($start > $end) {
+            [$start, $end] = [$end, $start];
+        }
+
+        return range($start, $end);
     }
 
     public function confirmMapping(): void
@@ -195,6 +244,38 @@ class VendorCatalogUpload extends Component
                         'source_column_name' => $columnName,
                         'source_separator' => $sourceSeparator,
                     ]);
+                }
+
+                // Attribute-range mode: a multi-value field mapped to a contiguous
+                // range of source columns. Each column in the range becomes its own
+                // mapping row (same field_key) so the column header is preserved as
+                // the attribute key. The single-column mapping above is skipped for
+                // fields that have a range selected.
+                foreach ($this->rangeStarts as $fieldKey => $start) {
+                    $end = $this->rangeEnds[$fieldKey] ?? null;
+                    if ($start === null || $end === null) {
+                        continue;
+                    }
+
+                    $field = VitFieldDefinition::find($fieldKey);
+                    if (! $field || ! $field->is_multi_value) {
+                        continue;
+                    }
+
+                    foreach ($this->rangeColumnsFor($fieldKey) as $columnIndex) {
+                        $columnName = $this->columns[$columnIndex] ?? null;
+                        if ($columnName === null) {
+                            continue;
+                        }
+
+                        CatalogUploadColumnMapping::create([
+                            'catalog_upload_id' => $upload->id,
+                            'field_key' => $fieldKey,
+                            'column_index' => $columnIndex,
+                            'source_column_name' => $columnName,
+                            'source_separator' => null,
+                        ]);
+                    }
                 }
 
                 $this->persistMappingTemplate($upload);
@@ -276,7 +357,7 @@ class VendorCatalogUpload extends Component
 
     public function startOver(): void
     {
-        $this->reset(['file', 'catalogUploadId', 'columns', 'sampleRows', 'mapping', 'suggestedIndexes', 'suggestionsFinalized', 'currentFileSignature']);
+        $this->reset(['file', 'catalogUploadId', 'columns', 'sampleRows', 'mapping', 'suggestedIndexes', 'suggestionsFinalized', 'currentFileSignature', 'rangeStarts', 'rangeEnds']);
         $this->progress = ['status' => null, 'total_rows' => 0, 'success_rows' => 0, 'created_rows' => 0, 'updated_rows' => 0, 'unchanged_rows' => 0, 'invalid_rows' => 0, 'failure_reason' => null];
         $this->step = 'upload';
     }

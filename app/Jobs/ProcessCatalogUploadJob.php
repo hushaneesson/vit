@@ -50,6 +50,15 @@ class ProcessCatalogUploadJob implements ShouldQueue
             // from file columns — they're populated from the vendor record later.
             $activeFields = VitFieldDefinition::active()->keyBy('field_key');
 
+            // field_keys that use attribute-range mode (a field mapped to multiple
+            // source columns, e.g. one attribute per column). Detected by the field
+            // having more than one column mapping row.
+            $rangeFieldKeys = $upload->columnMappings
+                ->groupBy('field_key')
+                ->filter(fn($group) => $group->count() > 1)
+                ->keys()
+                ->all();
+
             $localPath = $this->resolveLocalPath($upload->disk, $upload->file_path);
             $reader = $upload->file_type === 'csv'
                 ? new CsvReader()
@@ -76,7 +85,7 @@ class ProcessCatalogUploadJob implements ShouldQueue
                     continue;
                 }
 
-                [$mappedData, $rawData] = $this->mapRow($rowCells, $columnToFieldKey, $activeFields, $upload->columnMappings);
+                [$mappedData, $rawData] = $this->mapRow($rowCells, $columnToFieldKey, $activeFields, $upload->columnMappings, $rangeFieldKeys);
 
                 $result = $validator->validate($activeFields, $mappedData);
                 $blockingErrors = $result['errors'] ?? [];
@@ -172,7 +181,7 @@ class ProcessCatalogUploadJob implements ShouldQueue
      * @param  \Illuminate\Support\Collection<int, object>  $columnMappings
      * @return array{0: array<string, mixed>, 1: array<string, mixed>} [mappedData, rawData]
      */
-    private function mapRow(array $rowCells, $columnToFieldKey, $activeFields, $columnMappings): array
+    private function mapRow(array $rowCells, $columnToFieldKey, $activeFields, $columnMappings, array $rangeFieldKeys): array
     {
         $mappedData = [];
         $rawData = [];
@@ -189,8 +198,32 @@ class ProcessCatalogUploadJob implements ShouldQueue
             $mapping = $columnMappings->firstWhere('column_index', $colIndex);
 
             if ($field && $field->is_multi_value) {
+                // Attribute-range mode: this field spans multiple source columns.
+                if (in_array($fieldKey, $rangeFieldKeys, true) && $mapping && !empty($mapping->source_column_name)) {
+                    $value = $this->sanitizeValue($rawValue);
+                    if ($value !== '') {
+                        if ($field->is_key_value) {
+                            // Specifications: column header -> key, cell value -> value
+                            $mappedData[$fieldKey][] = [
+                                'key' => trim($mapping->source_column_name),
+                                'value' => $value,
+                            ];
+                        } else {
+                            // Normal array field: just collect the value
+                            $mappedData[$fieldKey][] = $value;
+                        }
+                    }
+                    continue;
+                }
+
                 $vendorSeparator = $this->getVendorSourceSeparator($mapping, $field);
-                $mappedData[$fieldKey] = $this->splitMultiValue((string) $rawValue, $vendorSeparator);
+                if ($field->is_key_value) {
+                    // Specifications: parse "key=value" entries
+                    $mappedData[$fieldKey] = $this->parseMultiValueKeyValue((string) $rawValue, $vendorSeparator);
+                } else {
+                    // Normal array field: split by separator into simple array
+                    $mappedData[$fieldKey] = $this->splitMultiValue((string) $rawValue, $vendorSeparator);
+                }
             } else {
                 $mappedData[$fieldKey] = $this->normalizeScalar($rawValue);
             }
@@ -216,16 +249,86 @@ class ProcessCatalogUploadJob implements ShouldQueue
 
     private function normalizeScalar(mixed $value): mixed
     {
-        return is_string($value) ? trim($value) : $value;
+        return is_string($value) ? $this->sanitizeValue($value) : $value;
     }
 
+    /**
+     * Parse a vendor's multi-value string into canonical key/value objects.
+     *
+     * Each entry is split on the FIRST '=' only, so values containing '=' are
+     * preserved intact. Empty keys and empty values are ignored.
+     *
+     * @return array<int, array{key: string, value: string}>
+     */
+    private function parseMultiValueKeyValue(string $rawValue, string $separator): array
+    {
+        if (trim($rawValue) === '') {
+            return [];
+        }
+
+        $result = [];
+        $parts = explode($separator, $rawValue);
+
+        foreach ($parts as $part) {
+            $trimmed = trim($part);
+            if ($trimmed === '') {
+                continue;
+            }
+
+            // Split on the FIRST '=' only
+            $equalsPos = strpos($trimmed, '=');
+            if ($equalsPos === false) {
+                continue;
+            }
+
+            $key = trim(substr($trimmed, 0, $equalsPos));
+            $value = trim(substr($trimmed, $equalsPos + 1));
+
+            if ($key === '' || $value === '') {
+                continue;
+            }
+
+            $result[] = [
+                'key' => $key,
+                'value' => $value,
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Strip HTML markup from a mapped value before it is persisted, preserving
+     * the textual content. Applied at the mapper/import boundary so stored
+     * values are clean (e.g. "<strong>Red</strong>" -> "Red"). Null/empty and
+     * non-string values pass through unchanged.
+     */
+    /**
+     * Split a vendor's multi-value string into a simple array of strings.
+     *
+     * Used for normal array fields like search_terms, classifications, etc.
+     *
+     * @return array<int, string>
+     */
     private function splitMultiValue(string $rawValue, string $separator): array
     {
         if (trim($rawValue) === '') {
             return [];
         }
 
-        return array_values(array_filter(array_map('trim', explode($separator, $rawValue)), fn($v) => $v !== ''));
+        return array_values(array_filter(
+            array_map(fn($v) => $this->sanitizeValue($v), explode($separator, $rawValue)),
+            fn($v) => $v !== ''
+        ));
+    }
+
+    private function sanitizeValue(mixed $value): mixed
+    {
+        if (! is_string($value)) {
+            return $value;
+        }
+
+        return trim(strip_tags($value));
     }
 
     /**

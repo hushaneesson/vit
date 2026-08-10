@@ -376,21 +376,57 @@ class CatalogExportService
                 return '';
             }
 
-            $stringParts = array_map(function ($value) {
-                if (is_array($value)) {
-                    return $this->flattenValueForDisplay($value);
-                }
-
-                if (is_bool($value)) {
-                    return $value ? 'TRUE' : 'FALSE';
-                }
-
-                return (string) $value;
-            }, $decoded);
-
             $separator = $field->join_separator ?? ',';
 
-            return implode($separator, $stringParts);
+            // Check if this is a key/value field (specifications) or normal array
+            $isKeyValue = $field->is_key_value ?? false;
+
+            if ($isKeyValue) {
+                // Specifications: convert key/value objects to "key=value" strings
+                $stringParts = [];
+                foreach ($decoded as $entry) {
+                    if (is_array($entry) && isset($entry['key']) && isset($entry['value'])) {
+                        $key = (string) $entry['key'];
+                        $value = $entry['value'];
+
+                        if (is_array($value)) {
+                            $stringParts[] = $key . '=' . $this->flattenValueForDisplay($value);
+                        } elseif (is_bool($value)) {
+                            $stringParts[] = $key . '=' . ($value ? 'TRUE' : 'FALSE');
+                        } else {
+                            $stringParts[] = $key . '=' . (string) $value;
+                        }
+                    } elseif (is_array($entry) && array_keys($entry) !== range(0, count($entry) - 1)) {
+                        // Legacy associative format
+                        foreach ($entry as $key => $value) {
+                            if (is_array($value)) {
+                                $stringParts[] = (string) $key . '=' . $this->flattenValueForDisplay($value);
+                            } elseif (is_bool($value)) {
+                                $stringParts[] = (string) $key . '=' . ($value ? 'TRUE' : 'FALSE');
+                            } else {
+                                $stringParts[] = (string) $key . '=' . (string) $value;
+                            }
+                        }
+                    } elseif (is_string($entry) && str_contains($entry, '=')) {
+                        // Legacy indexed "key=value" string
+                        $stringParts[] = $entry;
+                    }
+                }
+
+                return implode($separator, $stringParts);
+            } else {
+                // Normal array fields: just join the values
+                $stringParts = [];
+                foreach ($decoded as $entry) {
+                    if (is_string($entry)) {
+                        $stringParts[] = $entry;
+                    } elseif (is_int($entry) || is_float($entry)) {
+                        $stringParts[] = (string) $entry;
+                    }
+                }
+
+                return implode($separator, $stringParts);
+            }
         }
 
         if (is_bool($rawValue)) {
