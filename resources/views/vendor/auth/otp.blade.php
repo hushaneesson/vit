@@ -19,8 +19,8 @@
 
                 <div>
                     <label for="code">Login code</label>
-                    <input type="text" name="code" id="code" required autofocus inputmode="numeric"
-                        maxlength="6" />
+                    <input class="tracking-[2rem] sm:tracking-[3rem]" type="text" name="code" id="code"
+                        required autofocus inputmode="numeric" maxlength="6" />
                 </div>
 
                 <button type="submit"
