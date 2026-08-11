@@ -95,6 +95,15 @@ class ProcessValidatedRowsJob implements ShouldQueue
                     $data = json_decode((string) ($data ?? ''), true) ?: [];
                 }
 
+                Log::info('ProcessValidatedRowsJob: processing row', [
+                    'upload_id' => $upload->id,
+                    'row_number' => $row->row_number,
+                    'row_status' => $row->status,
+                    'row_errors' => $row->errors,
+                    // 'row_data_keys' => array_keys($data),
+                    'dealer_sku' => $data['dealer_sku'] ?? null,
+                ]);
+
                 // Build the attribute map using VitFieldDefinition as the source
                 // of truth. Resolve model_attribute, field_type, and is_multi_value
                 // dynamically so the mapper stays in sync with the export layer.
@@ -115,6 +124,11 @@ class ProcessValidatedRowsJob implements ShouldQueue
                     if (is_null($rawValue) || $rawValue === '' || $rawValue === []) {
                         if ($fieldKey === 'item_weight') {
                             $attrs[$modelAttribute] = 0.01;
+                            continue;
+                        }
+                        // is_discontinued must never be NULL — default to false
+                        if ($fieldKey === 'discontinued') {
+                            $attrs[$modelAttribute] = false;
                             continue;
                         }
                         $attrs[$modelAttribute] = null;
@@ -152,7 +166,7 @@ class ProcessValidatedRowsJob implements ShouldQueue
                     if ($definition) {
                         $cast = match ($definition->field_type) {
                             'number', 'decimal' => is_numeric($rawValue) ? (float) $rawValue : null,
-                            'boolean' => is_bool($rawValue) ? $rawValue : (in_array(strtolower((string) $rawValue), ['true', 'false', '1', '0', 'yes', 'no'], true) ? (bool) $rawValue : (string) $rawValue),
+                            'boolean' => is_bool($rawValue) ? $rawValue : (in_array(strtolower((string) $rawValue), ['true', 'false', '1', '0', 'yes', 'no'], true) ? (bool) $rawValue : false),
                             default => (string) $rawValue,
                         };
 
@@ -212,11 +226,34 @@ class ProcessValidatedRowsJob implements ShouldQueue
                 $attrs['created_at'] = now();
                 $attrs['updated_at'] = now();
 
+                // TEMP DEBUG: diagnose catalog_items.name cannot be null.
+                // short_description is the VIT field whose model_attribute is 'name'.
+                $nameDef = VitFieldDefinition::find('short_description');
+                Log::info('ProcessValidatedRowsJob: about to create CatalogItem', [
+                    'upload_id' => $upload->id,
+                    'row_number' => $row->row_number,
+                    'dealer_sku' => $attrs['dealer_sku'] ?? null,
+                    'attrs_keys' => array_keys($attrs),
+                    'name_value' => $attrs['name'] ?? null,
+                    'name_field_key' => 'short_description',
+                    'name_model_attribute' => $nameDef->model_attribute ?? null,
+                ]);
+
                 try {
                     CatalogItem::create($attrs);
                     $createdCount++;
                 } catch (\Illuminate\Database\QueryException $e) {
-                    if ($e->getCode() === '23000' && str_contains($e->getMessage(), 'catalog_items_dealer_sku_unique')) {
+                    // A duplicate (vendor_id, dealer_sku) can occur when the same
+                    // dealer_sku appears more than once in the upload, or when a
+                    // concurrent job races the create. Treat it deterministically:
+                    // re-fetch the existing item and update it instead of failing
+                    // the whole upload. Match the unique constraint by the dealer_sku
+                    // column rather than relying on a specific index name.
+                    $isDuplicateSku = $e->getCode() === '23000'
+                        && str_contains($e->getMessage(), 'dealer_sku')
+                        && str_contains($e->getMessage(), 'Duplicate entry');
+
+                    if ($isDuplicateSku) {
                         $existing = CatalogItem::where('vendor_id', $vendor->id)
                             ->where('dealer_sku', $sellerSku)
                             ->first();
@@ -295,9 +332,15 @@ class ProcessValidatedRowsJob implements ShouldQueue
         } catch (Throwable $e) {
             DB::rollBack();
 
+            Log::error('ProcessValidatedRowsJob: processing failed', [
+                'upload_id' => $upload->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
             $upload->update([
                 'status' => CatalogUploadStatus::Failed,
-                'failure_reason' => 'Row processing failed: ' . $e->getMessage(),
+                'failure_reason' => Str::limit('Row processing failed: ' . $e->getMessage(), 5000),
                 'processing_completed_at' => now(),
             ]);
 
@@ -426,9 +469,12 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
             // Dynamic multi-value JSON fields come from the spec metadata; this
             // keeps the comparison logic aligned with the import/export contract.
+            // Use model_attribute (database column name) when available so the
+            // lookup matches the keys in $newAttrs / $existing->getRawOriginal().
             $multiValueColumns = VitFieldDefinition::all()
                 ->where('is_multi_value', true)
-                ->pluck('field_key')
+                ->map(fn($def) => $def->model_attribute ?? $def->field_key)
+                ->values()
                 ->all();
 
             if (in_array($column, $multiValueColumns, true)) {

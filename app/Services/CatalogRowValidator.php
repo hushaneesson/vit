@@ -42,6 +42,18 @@ class CatalogRowValidator
                     continue;
                 }
 
+                // The field that maps to catalog_items.name is structurally
+                // required: the DB column is NOT NULL, so a row without it
+                // cannot be inserted. Treat it as a blocking error so it is
+                // never passed to CatalogItem::create() with a null name.
+                if (($definition->model_attribute ?? null) === 'name') {
+                    $errors[] = [
+                        'field_key' => $definition->field_key,
+                        'message' => "Required field '{$definition->web_app_label}' is missing and is required to create a catalog item.",
+                    ];
+                    continue;
+                }
+
                 $warnings[] = [
                     'field_key' => $definition->field_key,
                     'message' => "Required field '{$definition->web_app_label}' is missing.",
@@ -99,17 +111,20 @@ class CatalogRowValidator
             foreach ($value as $item) {
                 if (is_array($item)) {
                     if ($isKeyValue) {
-                        // Key/value fields: each item must have 'key' and 'value'
+                        // Key/value fields: skip incomplete entries instead of erroring.
+                        // Incomplete entries (missing key or value) are filtered out
+                        // during import so they don't appear in stored data.
                         if (!isset($item['key']) || !isset($item['value'])) {
-                            return "{$definition->web_app_label} contains an invalid key/value pair. Each entry must have 'key' and 'value'.";
+                            continue;
                         }
                     } else {
                         // Normal array fields: items must be scalar strings
                         return "{$definition->web_app_label} contains a nested array value that is not supported.";
                     }
                 } elseif ($isKeyValue) {
-                    // Key/value field but item is not an array - invalid
-                    return "{$definition->web_app_label} must contain key/value objects.";
+                    // Key/value field but item is not an array - skip non-array entries
+                    // rather than erroring, so malformed data is simply ignored.
+                    continue;
                 }
             }
 

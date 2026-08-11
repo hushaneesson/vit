@@ -142,6 +142,7 @@ class CatalogExportService
         $disk = $submission->disk ?? 'local';
 
         $itemsQuery = CatalogItem::where('vendor_id', $vendor->id)
+            ->whereIn('status', ['acceptable', 'excellent'])
             ->orderBy('id');
 
         return $this->generateAndStoreFromQuery($vendor, $catalogName, $itemsQuery, $disk);

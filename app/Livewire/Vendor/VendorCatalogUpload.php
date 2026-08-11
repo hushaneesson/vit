@@ -41,7 +41,11 @@ class VendorCatalogUpload extends Component
 
     public array $rangeEnds = [];
 
+    public array $columnSearch = [];
+
     public bool $suggestionsFinalized = false;
+
+    public array $separatorValidationErrors = [];
 
     public array $progress = [
         'status' => null,
@@ -94,6 +98,31 @@ class VendorCatalogUpload extends Component
                 'index' => $indexStr,
                 'name' => $name,
                 'available' => $indexStr === $currentStr || !$takenIndexes->contains($indexStr),
+            ];
+        })->where('available', true)->values();
+    }
+
+    /**
+     * Columns that may be used as range Start/End for a multi-value field.
+     *
+     * A column is available if it is not mapped to another field, or if it
+     * belongs to this field's own existing range (so an active range stays
+     * editable). Columns mapped to other fields are excluded.
+     *
+     * @return \Illuminate\Support\Collection<int, object>
+     */
+    public function availableRangeColumnsFor(string $fieldKey)
+    {
+        $takenIndexes = $this->mappedColumnIndexes();
+        $ownRange = $this->rangeColumnsFor($fieldKey);
+        $ownRangeStr = array_map(fn($i) => (string) $i, $ownRange);
+
+        return collect($this->columns)->map(function ($name, $index) use ($takenIndexes, $ownRangeStr) {
+            $indexStr = (string) $index;
+            return (object) [
+                'index' => $indexStr,
+                'name' => $name,
+                'available' => in_array($indexStr, $ownRangeStr, true) || !$takenIndexes->contains($indexStr),
             ];
         })->where('available', true)->values();
     }
@@ -175,18 +204,61 @@ class VendorCatalogUpload extends Component
 
     public function updatedRangeStarts($value, $key): void
     {
+        if (is_array($value)) {
+            $this->rangeStarts = array_filter($value, fn($v) => $v !== null && $v !== '');
+
+            // Switching to range mode must clear the single-column mapping
+            // for every field that now has a range start.
+            foreach (array_keys($this->rangeStarts) as $fieldKey) {
+                $this->mapping[$fieldKey] = null;
+            }
+            return;
+        }
+
+        if (!is_string($key)) {
+            return;
+        }
+
+        $previous = $this->rangeStarts[$key] ?? null;
         $this->rangeStarts[$key] = $value !== null && $value !== '' ? (string) $value : null;
-        // A range selection supersedes the single-column mapping for the field.
+
         if ($this->rangeStarts[$key] !== null) {
             $this->mapping[$key] = null;
+        }
+
+        // Prevent a range that would cross a column mapped to another field.
+        if ($this->rangeCrossesMappedColumn($key)) {
+            $this->rangeStarts[$key] = $previous;
         }
     }
 
     public function updatedRangeEnds($value, $key): void
     {
+        if (is_array($value)) {
+            $this->rangeEnds = array_filter($value, fn($v) => $v !== null && $v !== '');
+
+            // Switching to range mode must clear the single-column mapping
+            // for every field that now has a range end.
+            foreach (array_keys($this->rangeEnds) as $fieldKey) {
+                $this->mapping[$fieldKey] = null;
+            }
+            return;
+        }
+
+        if (!is_string($key)) {
+            return;
+        }
+
+        $previous = $this->rangeEnds[$key] ?? null;
         $this->rangeEnds[$key] = $value !== null && $value !== '' ? (string) $value : null;
+
         if ($this->rangeEnds[$key] !== null) {
             $this->mapping[$key] = null;
+        }
+
+        // Prevent a range that would cross a column mapped to another field.
+        if ($this->rangeCrossesMappedColumn($key)) {
+            $this->rangeEnds[$key] = $previous;
         }
     }
 
@@ -215,16 +287,76 @@ class VendorCatalogUpload extends Component
         return range($start, $end);
     }
 
+    /**
+     * Whether the current range for a field crosses a column that is mapped
+     * to another field. Used to prevent a range from spanning columns that
+     * belong to other fields.
+     */
+    private function rangeCrossesMappedColumn(string $fieldKey): bool
+    {
+        $range = $this->rangeColumnsFor($fieldKey);
+        if (empty($range)) {
+            return false;
+        }
+
+        $taken = $this->mappedColumnIndexes();
+
+        foreach ($range as $colIndex) {
+            if ($taken->contains((string) $colIndex)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public function confirmMapping(): void
     {
+        $this->separatorValidationErrors = [];
+
+        foreach ($this->catalogFields as $field) {
+            if (! $field->is_multi_value) {
+                continue;
+            }
+
+            $mapping = $this->mapping[$field->field_key] ?? null;
+
+            if ($mapping === null || $mapping === '') {
+                continue;
+            }
+
+            $separator = $this->separators[$field->field_key] ?? null;
+
+            if ($separator === null || $separator === '') {
+                $this->separatorValidationErrors[$field->field_key] = "Please select a separator for {$field->web_app_label} before continuing.";
+            }
+        }
+
+        if (!empty($this->separatorValidationErrors)) {
+            return;
+        }
+
         $upload = CatalogUpload::findOrFail($this->catalogUploadId);
 
         try {
             DB::transaction(function () use ($upload) {
                 $upload->columnMappings()->delete();
 
+                // Fields with an active range selection must not also persist
+                // their single-column mapping, otherwise the first column of
+                // the range would be inserted twice and violate the unique
+                // constraint on (catalog_upload_id, column_index).
+                $rangeFieldKeys = collect($this->rangeStarts)
+                    ->filter(fn($start, $key) => $start !== null && $start !== '' && !empty($this->rangeEnds[$key]))
+                    ->keys()
+                    ->all();
+
                 foreach ($this->mapping as $fieldKey => $columnIndex) {
                     if ($columnIndex === null) {
+                        continue;
+                    }
+
+                    if (in_array($fieldKey, $rangeFieldKeys, true)) {
                         continue;
                     }
 
@@ -249,8 +381,7 @@ class VendorCatalogUpload extends Component
                 // Attribute-range mode: a multi-value field mapped to a contiguous
                 // range of source columns. Each column in the range becomes its own
                 // mapping row (same field_key) so the column header is preserved as
-                // the attribute key. The single-column mapping above is skipped for
-                // fields that have a range selected.
+                // the attribute key.
                 foreach ($this->rangeStarts as $fieldKey => $start) {
                     $end = $this->rangeEnds[$fieldKey] ?? null;
                     if ($start === null || $end === null) {
@@ -357,9 +488,22 @@ class VendorCatalogUpload extends Component
 
     public function startOver(): void
     {
-        $this->reset(['file', 'catalogUploadId', 'columns', 'sampleRows', 'mapping', 'suggestedIndexes', 'suggestionsFinalized', 'currentFileSignature', 'rangeStarts', 'rangeEnds']);
+        $this->reset(['file', 'catalogUploadId', 'columns', 'sampleRows', 'mapping', 'suggestedIndexes', 'suggestionsFinalized', 'currentFileSignature', 'rangeStarts', 'rangeEnds', 'columnSearch', 'separators']);
         $this->progress = ['status' => null, 'total_rows' => 0, 'success_rows' => 0, 'created_rows' => 0, 'updated_rows' => 0, 'unchanged_rows' => 0, 'invalid_rows' => 0, 'failure_reason' => null];
         $this->step = 'upload';
+    }
+
+    public function resetMapping(): void
+    {
+        $this->mapping = $this->catalogFields
+            ->pluck('field_key')
+            ->mapWithKeys(fn($key) => [$key => null])
+            ->toArray();
+        $this->rangeStarts = [];
+        $this->rangeEnds = [];
+        $this->separators = [];
+        $this->suggestedIndexes = [];
+        $this->columnSearch = [];
     }
 
     private function applySuggestedTemplate(int $vendorId): void
@@ -378,17 +522,47 @@ class VendorCatalogUpload extends Component
 
         $normalizedColumns = collect($this->columns)->map(fn($c) => Str::lower(trim((string) $c)));
 
-        foreach ($template->fields as $field) {
-            if (! $field->field_key) {
-                continue;
-            }
+        // Group template fields by field_key so a range mapping (multiple rows
+        // with the same field_key, e.g. specifications -> "Barrier Style" and
+        // "Barrier Type") is restored as a range instead of being collapsed to
+        // a single column by the last row overwriting the previous ones.
+        $template->fields
+            ->groupBy('field_key')
+            ->each(function ($fieldGroup) use ($normalizedColumns) {
+                $fieldKey = $fieldGroup->first()->field_key;
+                if (! $fieldKey) {
+                    return;
+                }
 
-            $index = $normalizedColumns->search(Str::lower(trim($field->source_column_name)));
+                $matchedIndexes = $fieldGroup
+                    ->map(fn($field) => $normalizedColumns->search(Str::lower(trim($field->source_column_name))))
+                    ->filter(fn($index) => $index !== false)
+                    ->map(fn($index) => (int) $index)
+                    ->values()
+                    ->all();
 
-            if ($index !== false) {
-                $this->mapping[$field->field_key] = $index;
-            }
-        }
+                if (empty($matchedIndexes)) {
+                    return;
+                }
+
+                if (count($matchedIndexes) === 1) {
+                    // Single-column mapping
+                    $this->mapping[$fieldKey] = (string) $matchedIndexes[0];
+
+                    // Restore separator if the template stored one
+                    $templateField = $fieldGroup->first();
+                    if ($templateField && $templateField->source_separator) {
+                        $this->separators[$fieldKey] = $templateField->source_separator;
+                    }
+                    return;
+                }
+
+                // Range mapping: restore start/end and clear the single-column
+                // mapping so the UI shows the range controls.
+                $this->rangeStarts[$fieldKey] = (string) min($matchedIndexes);
+                $this->rangeEnds[$fieldKey] = (string) max($matchedIndexes);
+                $this->mapping[$fieldKey] = null;
+            });
     }
 
     private function applyFuzzyMatchSuggestions(): void
@@ -412,7 +586,7 @@ class VendorCatalogUpload extends Component
             $bestScore = 0.0;
 
             foreach ($this->columns as $index => $columnName) {
-                if ($this->mappedColumnIndexes()->contains($index)) {
+                if ($this->mappedColumnIndexes()->contains((string) $index)) {
                     continue;
                 }
 
@@ -436,7 +610,7 @@ class VendorCatalogUpload extends Component
             }
 
             if ($bestIndex !== null) {
-                $this->mapping[$field->field_key] = $bestIndex;
+                $this->mapping[$field->field_key] = (string) $bestIndex;
                 $this->suggestedIndexes[$field->field_key] = true;
             }
         }
@@ -486,6 +660,7 @@ class VendorCatalogUpload extends Component
             $template->fields()->create([
                 'field_key' => $mapping->field_key,
                 'source_column_name' => $mapping->source_column_name,
+                'source_separator' => $mapping->source_separator,
             ]);
         }
     }

@@ -18,6 +18,13 @@ class CatalogFileInspectionService
      */
     public function inspect(string $disk, string $path, string $fileType, int $sampleRows = 5): array
     {
+        // Large vendor files (e.g. multi-MB XLSX) can take longer than the
+        // default 30s max_execution_time and 128M memory_limit to parse.
+        // Raise both for this request only — the rest of the app keeps its
+        // normal limits.
+        set_time_limit(300);
+        ini_set('memory_limit', '512M');
+
         $localPath = $this->resolveLocalPath($disk, $path);
 
         $reader = $this->makeReader($fileType, $localPath);

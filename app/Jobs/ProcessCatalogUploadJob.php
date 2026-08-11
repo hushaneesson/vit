@@ -14,6 +14,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Reader\Csv as CsvReader;
@@ -33,6 +34,16 @@ class ProcessCatalogUploadJob implements ShouldQueue
     public function handle(CatalogRowValidator $validator): void
     {
         $upload = CatalogUpload::with('columnMappings')->findOrFail($this->catalogUploadId);
+
+        Log::info('CATALOG DEBUG: loaded column mappings', [
+            'upload_id' => $upload->id,
+            'mappings' => $upload->columnMappings->map(fn($mapping) => [
+                'column_index' => $mapping->column_index,
+                'field_key' => $mapping->field_key,
+                'source_column_name' => $mapping->source_column_name,
+                'source_separator' => $mapping->source_separator,
+            ])->values()->all(),
+        ]);
 
         $upload->update([
             'status' => CatalogUploadStatus::Processing,
@@ -99,6 +110,17 @@ class ProcessCatalogUploadJob implements ShouldQueue
                     'errors' => $blockingErrors,
                 ];
 
+                if ($status === 'invalid') {
+                    Log::info('ProcessCatalogUploadJob: validation failed for row', [
+                        'upload_id' => $upload->id,
+                        'row_number' => $rowIndex - 1,
+                        // 'mapped_data' => $mappedData,
+                        // 'raw_data' => $rawData,
+                        'blocking_errors' => $blockingErrors,
+                        'warnings' => $warnings,
+                    ]);
+                }
+
                 $batch[] = [
                     'catalog_upload_id' => $upload->id,
                     'row_number' => $rowIndex - 1,
@@ -149,9 +171,15 @@ class ProcessCatalogUploadJob implements ShouldQueue
                 ]);
             }
         } catch (\Throwable $e) {
+            Log::error('ProcessCatalogUploadJob: upload failed', [
+                'upload_id' => $upload->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
             $upload->update([
                 'status' => CatalogUploadStatus::Failed,
-                'failure_reason' => $e->getMessage(),
+                'failure_reason' => \Illuminate\Support\Str::limit($e->getMessage(), 5000),
                 'processing_completed_at' => now(),
             ]);
 
@@ -201,11 +229,25 @@ class ProcessCatalogUploadJob implements ShouldQueue
                 // Attribute-range mode: this field spans multiple source columns.
                 if (in_array($fieldKey, $rangeFieldKeys, true) && $mapping && !empty($mapping->source_column_name)) {
                     $value = $this->sanitizeValue($rawValue);
-                    if ($value !== '') {
+                    // $key = $this->sanitizeValue(trim($mapping->source_column_name));
+                    $key = trim($mapping->source_column_name);
+
+                    Log::info('SPEC RANGE DEBUG', [
+                        // 'upload_id' => $upload->id,
+                        'column_index' => $colIndex,
+                        'field_key' => $fieldKey,
+                        'raw_value' => $rawValue,
+                        'mapping_source_column_name' => $mapping->source_column_name,
+                        'resolved_key' => $key,
+                        'resolved_value' => $value,
+                    ]);
+
+
+                    if ($value !== null && $value !== '' && $key !== '') {
                         if ($field->is_key_value) {
                             // Specifications: column header -> key, cell value -> value
                             $mappedData[$fieldKey][] = [
-                                'key' => trim($mapping->source_column_name),
+                                'key' => $key,
                                 'value' => $value,
                             ];
                         } else {
@@ -281,8 +323,8 @@ class ProcessCatalogUploadJob implements ShouldQueue
                 continue;
             }
 
-            $key = trim(substr($trimmed, 0, $equalsPos));
-            $value = trim(substr($trimmed, $equalsPos + 1));
+            $key = $this->sanitizeValue(trim(substr($trimmed, 0, $equalsPos)));
+            $value = $this->sanitizeValue(trim(substr($trimmed, $equalsPos + 1)));
 
             if ($key === '' || $value === '') {
                 continue;
@@ -297,12 +339,6 @@ class ProcessCatalogUploadJob implements ShouldQueue
         return $result;
     }
 
-    /**
-     * Strip HTML markup from a mapped value before it is persisted, preserving
-     * the textual content. Applied at the mapper/import boundary so stored
-     * values are clean (e.g. "<strong>Red</strong>" -> "Red"). Null/empty and
-     * non-string values pass through unchanged.
-     */
     /**
      * Split a vendor's multi-value string into a simple array of strings.
      *
@@ -328,7 +364,9 @@ class ProcessCatalogUploadJob implements ShouldQueue
             return $value;
         }
 
-        return trim(strip_tags($value));
+        // Preserve the vendor's content; only normalize surrounding whitespace.
+        // HTML is not stripped unless the VIT specification explicitly requires it.
+        return trim($value);
     }
 
     /**
