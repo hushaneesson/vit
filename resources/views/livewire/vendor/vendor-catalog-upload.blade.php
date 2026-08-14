@@ -1,5 +1,5 @@
 <div>
-    <div class="max-w-4xl px-4 py-6 mx-auto sm:py-10 catalog-upload-mapper">
+    <div class="px-4 py-6 mx-auto sm:py-10 catalog-upload-mapper">
 
         {{-- STEP RAIL with friendly descriptions --}}
         @php
