@@ -117,12 +117,20 @@ class VendorCatalogUpload extends Component
         $ownRange = $this->rangeColumnsFor($fieldKey);
         $ownRangeStr = array_map(fn($i) => (string) $i, $ownRange);
 
-        return collect($this->columns)->map(function ($name, $index) use ($takenIndexes, $ownRangeStr) {
+        // Columns occupied by OTHER fields' ranges must also be excluded so a
+        // range cannot overlap another field's range.
+        $otherRangeTaken = collect($this->rangeStarts)
+            ->reject(fn($start, $key) => $key === $fieldKey)
+            ->flatMap(fn($start, $key) => $this->rangeColumnsFor($key))
+            ->map(fn($i) => (string) $i)
+            ->values();
+
+        return collect($this->columns)->map(function ($name, $index) use ($takenIndexes, $ownRangeStr, $otherRangeTaken) {
             $indexStr = (string) $index;
             return (object) [
                 'index' => $indexStr,
                 'name' => $name,
-                'available' => in_array($indexStr, $ownRangeStr, true) || !$takenIndexes->contains($indexStr),
+                'available' => in_array($indexStr, $ownRangeStr, true) || (!$takenIndexes->contains($indexStr) && !$otherRangeTaken->contains($indexStr)),
             ];
         })->where('available', true)->values();
     }
@@ -301,8 +309,15 @@ class VendorCatalogUpload extends Component
 
         $taken = $this->mappedColumnIndexes();
 
+        // Columns occupied by OTHER fields' ranges are also taken, preventing
+        // overlapping ranges from one field's perspective.
+        $otherRangeTaken = collect($this->rangeStarts)
+            ->reject(fn($start, $key) => $key === $fieldKey)
+            ->flatMap(fn($start, $key) => $this->rangeColumnsFor($key))
+            ->map(fn($i) => (string) $i);
+
         foreach ($range as $colIndex) {
-            if ($taken->contains((string) $colIndex)) {
+            if ($taken->contains((string) $colIndex) || $otherRangeTaken->contains((string) $colIndex)) {
                 return true;
             }
         }
@@ -337,6 +352,80 @@ class VendorCatalogUpload extends Component
         }
 
         $upload = CatalogUpload::findOrFail($this->catalogUploadId);
+
+        // ---------- Server-side mapping availability validation ----------
+        // The UI prevents conflicts via availableColumnsFor()/availableRangeColumnsFor(),
+        // but the server must be authoritative: reject overlapping assignments even
+        // if a crafted Livewire request tries to bypass the frontend.
+
+        // 1. Active range mappings (field_key => list of column index strings).
+        $rangeMappings = [];
+        foreach ($this->rangeStarts as $fieldKey => $start) {
+            $end = $this->rangeEnds[$fieldKey] ?? null;
+            if ($start === null || $end === null || $start === '' || $end === '') {
+                continue;
+            }
+            $rangeMappings[$fieldKey] = array_map(
+                fn($i) => (string) $i,
+                $this->rangeColumnsFor($fieldKey)
+            );
+        }
+
+        $rangeFieldKeys = array_keys($rangeMappings);
+
+        // 2. Normal single-column mappings (field_key => column index string).
+        // Range fields' own single-column mapping entries are ignored at persist
+        // time, so exclude them here to avoid false duplicate/overlap reports.
+        $normalMappings = collect($this->mapping)
+            ->filter(fn($index) => $index !== null && $index !== '')
+            ->reject(fn($index, $key) => in_array($key, $rangeFieldKeys, true))
+            ->map(fn($index) => (string) $index)
+            ->all();
+
+        // 3. Reject two normal fields assigned the same column.
+        $duplicateIndexes = collect($normalMappings)
+            ->groupBy(fn($index) => $index)
+            ->filter(fn($group) => $group->count() > 1)
+            ->keys()
+            ->all();
+
+        if (!empty($duplicateIndexes)) {
+            $this->separatorValidationErrors = [];
+            $badIndex = $duplicateIndexes[0];
+            $badColumnName = $this->columns[$badIndex] ?? $badIndex;
+            $this->separatorValidationErrors['__duplicate'] = "Column '{$badColumnName}' is mapped to more than one field. Each source column can only be used once.";
+            return;
+        }
+
+        // 4. Reject a range that overlaps a normal mapping or another range.
+        foreach ($rangeMappings as $fieldKey => $rangeCols) {
+            $label = VitFieldDefinition::find($fieldKey)?->web_app_label ?? $fieldKey;
+
+            foreach ($rangeCols as $rangeColStr) {
+                // Overlap with a normal mapping?
+                if (in_array($rangeColStr, $normalMappings, true)) {
+                    $this->separatorValidationErrors = [];
+                    $badColumnName = $this->columns[$rangeColStr] ?? $rangeColStr;
+                    $this->separatorValidationErrors['__range_conflict'] = "Column '{$badColumnName}' is inside the range for '{$label}' and is also mapped to another field. Each source column can only be used once.";
+                    return;
+                }
+
+                // Overlap with another field's range?
+                foreach ($rangeMappings as $otherKey => $otherRangeCols) {
+                    if ($otherKey === $fieldKey) {
+                        continue;
+                    }
+                    if (in_array($rangeColStr, $otherRangeCols, true)) {
+                        $this->separatorValidationErrors = [];
+                        $badColumnName = $this->columns[$rangeColStr] ?? $rangeColStr;
+                        $otherLabel = VitFieldDefinition::find($otherKey)?->web_app_label ?? $otherKey;
+                        $this->separatorValidationErrors['__range_conflict'] = "Column '{$badColumnName}' is inside the ranges for both '{$label}' and '{$otherLabel}'. Ranges cannot overlap.";
+                        return;
+                    }
+                }
+            }
+        }
+        // ----------------------------------------------------------------
 
         try {
             DB::transaction(function () use ($upload) {

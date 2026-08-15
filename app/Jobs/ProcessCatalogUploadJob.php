@@ -229,8 +229,7 @@ class ProcessCatalogUploadJob implements ShouldQueue
                 // Attribute-range mode: this field spans multiple source columns.
                 if (in_array($fieldKey, $rangeFieldKeys, true) && $mapping && !empty($mapping->source_column_name)) {
                     $value = $this->sanitizeValue($rawValue);
-                    // $key = $this->sanitizeValue(trim($mapping->source_column_name));
-                    $key = trim($mapping->source_column_name);
+                    $key = $this->sanitizeValue(trim($mapping->source_column_name));
 
                     Log::info('SPEC RANGE DEBUG', [
                         // 'upload_id' => $upload->id,

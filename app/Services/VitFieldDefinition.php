@@ -72,6 +72,16 @@ namespace App\Services;
 class VitFieldDefinition
 {
     /**
+     * Process-wide cache of the built collection, populated on first call to
+     * all(). The DEFINITIONS constant is immutable, so this cache is safe
+     * and eliminates repeated collection construction in hot loops (e.g.
+     * per-row validation and per-field export resolution).
+     *
+     * @var \Illuminate\Support\Collection<int, object>|null
+     */
+    private static ?\Illuminate\Support\Collection $allCache = null;
+
+    /**
      * All VIT field definitions, ordered by sort_order.
      *
      * @var array<int, array<string, mixed>>
@@ -153,20 +163,20 @@ class VitFieldDefinition
         // STRUCTURAL: per spec this is NOT its own csv column — it's appended to the end of
         // "name" (shortdescription), e.g. "..., 10 Reams/CS". Kept as its own field for
         // vendor entry/validation; append_to_field tells the pipeline where it lands.
-        ['field_key' => 'quantity_per_unit', 'web_app_label' => 'Quantity per Unit', 'description' => 'Number of items in each unit. Example: 4 per pack', 'requirement_type' => 'required', 'field_type' => 'number', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => null, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => 'short_description', 'shown_on_frontend' => true, 'vit_csv_column' => null, 'model_attribute' => null, 'sort_order' => 210],
+        ['field_key' => 'quantity_per_unit', 'web_app_label' => 'Quantity per Unit', 'description' => 'Number of items in each unit. Example: 4 per pack', 'requirement_type' => 'required', 'field_type' => 'number', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => null, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => 'short_description', 'shown_on_frontend' => false, 'vit_csv_column' => null, 'model_attribute' => null, 'sort_order' => 210],
 
         // NEW: was missing entirely. Spec requires the vendor enter this alongside
         // quantity_per_unit — distinct from unit_of_measure's abbreviation (e.g. "CS").
         // Combines with quantity_per_unit + unit_of_measure to build the string appended
         // onto shortdescription, e.g. "10" + "Reams" + "/" + "CS" -> "10 Reams/CS".
         // Consumed by the quantity_per_unit append logic — doesn't get its own csv column.
-        ['field_key' => 'unit_word', 'web_app_label' => 'Quantity Unit Type', 'description' => 'Name of the unit being counted. Example: Reams, Sheets, Each', 'requirement_type' => 'required', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 255, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => true, 'vit_csv_column' => null, 'model_attribute' => null, 'sort_order' => 211],
+        ['field_key' => 'unit_word', 'web_app_label' => 'Quantity Unit Type', 'description' => 'Name of the unit being counted. Example: Reams, Sheets, Each', 'requirement_type' => 'required', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 255, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => null, 'model_attribute' => null, 'sort_order' => 211],
 
-        ['field_key' => 'min_qty_per_order', 'web_app_label' => 'Minimum Qty per Order', 'description' => 'Minimum quantity allowed per order', 'requirement_type' => 'optional', 'field_type' => 'number', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 11, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => true, 'vit_csv_column' => 'minimum', 'model_attribute' => null, 'sort_order' => 220],
+        ['field_key' => 'min_qty_per_order', 'web_app_label' => 'Minimum Qty per Order', 'description' => 'Minimum quantity allowed per order', 'requirement_type' => 'optional', 'field_type' => 'number', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 11, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'minimum', 'model_attribute' => null, 'sort_order' => 220],
 
-        ['field_key' => 'multiples', 'web_app_label' => 'Order Multiples', 'description' => 'Order quantity must be a multiple of this number. Example: 2', 'requirement_type' => 'optional', 'field_type' => 'number', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 11, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => true, 'vit_csv_column' => 'multiples', 'model_attribute' => null, 'sort_order' => 230],
+        ['field_key' => 'multiples', 'web_app_label' => 'Order Multiples', 'description' => 'Order quantity must be a multiple of this number. Example: 2', 'requirement_type' => 'optional', 'field_type' => 'number', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 11, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'multiples', 'model_attribute' => null, 'sort_order' => 230],
 
-        ['field_key' => 'max_qty_per_order', 'web_app_label' => 'Maximum Qty per Order', 'description' => 'Maximum quantity allowed per order', 'requirement_type' => 'optional', 'field_type' => 'number', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 11, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => true, 'vit_csv_column' => 'maximum', 'model_attribute' => null, 'sort_order' => 240],
+        ['field_key' => 'max_qty_per_order', 'web_app_label' => 'Maximum Qty per Order', 'description' => 'Maximum quantity allowed per order', 'requirement_type' => 'optional', 'field_type' => 'number', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 11, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'maximum', 'model_attribute' => null, 'sort_order' => 240],
 
         // STRUCTURAL: per spec, MSDS link is only required if the vendor selects Hazmat, and
         // is delivered as "MSDS URL=value" packed into "classifications", not its own column.
@@ -176,18 +186,18 @@ class VitFieldDefinition
         // supply hosted image/video URLs or filenames to be hosted in the marketplace — the
         // web app is responsible for turning filenames into the required URL format before
         // they land here.
-        ['field_key' => 'image_urls', 'web_app_label' => 'Image / Video URLs', 'description' => 'Image or video URLs, starting with the primary image', 'requirement_type' => 'required', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => true, 'join_separator' => '|', 'max_length' => null, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => true, 'vit_csv_column' => 'image URLs', 'model_attribute' => 'images', 'sort_order' => 255, 'is_key_value' => false],
+        ['field_key' => 'image_urls', 'web_app_label' => 'Image / Video URLs', 'description' => 'Image or video URLs, starting with the primary image', 'requirement_type' => 'required', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => true, 'join_separator' => '|', 'max_length' => null, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'image URLs', 'model_attribute' => 'images', 'sort_order' => 255, 'is_key_value' => false],
 
         // NEW: was missing entirely. "As applicable" per spec — treated as optional.
-        ['field_key' => 'discontinued', 'web_app_label' => 'Item Discontinued', 'description' => 'Enter TRUE if the item is discontinued, otherwise FALSE', 'requirement_type' => 'optional', 'field_type' => 'boolean', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 255, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => true, 'vit_csv_column' => 'discontinued', 'model_attribute' => 'is_discontinued', 'sort_order' => 260],
+        ['field_key' => 'discontinued', 'web_app_label' => 'Item Discontinued', 'description' => 'Enter TRUE if the item is discontinued, otherwise FALSE', 'requirement_type' => 'optional', 'field_type' => 'boolean', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 255, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'discontinued', 'model_attribute' => 'is_discontinued', 'sort_order' => 260],
 
         // NEW: was missing entirely. Conditional on discontinued = TRUE.
-        ['field_key' => 'discontinued_date', 'web_app_label' => 'Discontinued Date', 'description' => 'Date the item was discontinued. Format: YYYY-MM-DD', 'requirement_type' => 'conditional', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 255, 'conditional_on_field' => 'discontinued', 'conditional_on_value' => 'TRUE', 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => true, 'vit_csv_column' => 'discontinuedDate', 'model_attribute' => 'discontinue_date', 'sort_order' => 270],
+        ['field_key' => 'discontinued_date', 'web_app_label' => 'Discontinued Date', 'description' => 'Date the item was discontinued. Format: YYYY-MM-DD', 'requirement_type' => 'conditional', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 255, 'conditional_on_field' => 'discontinued', 'conditional_on_value' => 'TRUE', 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'discontinuedDate', 'model_attribute' => 'discontinue_date', 'sort_order' => 270],
 
         // NEW: was missing entirely. Single SKU value, "as applicable".
         ['field_key' => 'replacement_sku', 'web_app_label' => 'Replacement Part Number', 'description' => 'SKU of the replacement product, if available', 'requirement_type' => 'optional', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 255, 'conditional_on_field' => 'discontinued', 'conditional_on_value' => 'TRUE', 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'replacement Sku', 'model_attribute' => null, 'sort_order' => 280],
 
-        ['field_key' => 'lead_time', 'web_app_label' => 'Shipping Lead Time', 'description' => 'Number of days needed to fulfill and ship the order', 'requirement_type' => 'optional', 'field_type' => 'number', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => null, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => true, 'vit_csv_column' => 'lead_time', 'model_attribute' => 'lead_time', 'sort_order' => 290],
+        ['field_key' => 'lead_time', 'web_app_label' => 'Shipping Lead Time', 'description' => 'Number of days needed to fulfill and ship the order', 'requirement_type' => 'optional', 'field_type' => 'number', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => null, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'lead_time', 'model_attribute' => 'lead_time', 'sort_order' => 290],
 
         ['field_key' => 'availability', 'web_app_label' => 'Availability', 'description' => 'Current stock status, such as In Stock or Out of Stock', 'requirement_type' => 'optional', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 255, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => true, 'vit_csv_column' => 'availability', 'model_attribute' => 'availability', 'sort_order' => 300],
     ];
@@ -199,7 +209,11 @@ class VitFieldDefinition
      */
     public static function all(): \Illuminate\Support\Collection
     {
-        return collect(self::DEFINITIONS)->map(fn(array $def) => (object) $def);
+        if (self::$allCache === null) {
+            self::$allCache = collect(self::DEFINITIONS)->map(fn(array $def) => (object) $def);
+        }
+
+        return self::$allCache;
     }
 
     /**
