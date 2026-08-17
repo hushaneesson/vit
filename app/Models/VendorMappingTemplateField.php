@@ -15,6 +15,7 @@ class VendorMappingTemplateField extends Model
         'vendor_mapping_template_id',
         'field_key',
         'source_column_name',
+        'source_separator',
     ];
 
     public function template(): BelongsTo

@@ -1,5 +1,5 @@
 <div>
-    <div class="max-w-4xl px-4 py-6 mx-auto sm:py-10 catalog-upload-mapper">
+    <div class="px-4 py-6 mx-auto sm:py-10 catalog-upload-mapper">
 
         {{-- STEP RAIL with friendly descriptions --}}
         @php
@@ -105,7 +105,7 @@
                     <button wire:click="uploadFile" wire:loading.attr="disabled" wire:target="uploadFile"
                         @disabled(!$file)
                         class="inline-flex items-center justify-center w-full gap-2 px-5 py-2.5 text-sm font-semibold text-white rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition sm:w-auto
-                               {{ $file ? 'bg-slate-900 hover:bg-slate-800' : 'bg-slate-400' }}">
+                                   {{ $file ? 'bg-slate-900 hover:bg-slate-800' : 'bg-slate-400' }}">
                         <span wire:loading.remove wire:target="uploadFile">Continue to mapping &rarr;</span>
                         <span wire:loading wire:target="uploadFile">Processing file&hellip;</span>
                     </button>
@@ -125,8 +125,6 @@
                 @error('file')
                     <p class="mt-3 text-sm text-rose-600">{{ $message }}</p>
                 @enderror
-
-
             </div>
         @endif
 
@@ -139,16 +137,22 @@
                     <div class="min-w-0">
                         <h2 class="text-lg font-semibold sm:text-xl text-slate-900">Match your columns</h2>
                         <p class="py-2 mt-1 text-sm text-slate-500">
-                            <span class="block">Map the columns from your file to the VIT fields below. Only map the
-                                columns that exist in your file — anything missing can be completed later from the
-                                Catalog Item List.</span>
                             <span class="block">
-                                Fields marked <span class="font-semibold text-amber-600">*</span> are recommended for
-                                VIT submission. Mapping more fields now will reduce manual editing later.
+                                Map the columns from your file to the VIT fields below. Only map the
+                                columns that exist in your file — anything missing can be completed later from the
+                                Catalog Item List.
+                            </span>
+                            <span class="block">
+                                Fields marked with
+                                <span class="font-medium text-red-600">*</span>
+
+                                are recommended for VIT submission. Mapping more fields now will reduce manual editing
+                                later.
                             </span>
                         </p>
                     </div>
-                    <button wire:click="$set('mapping', @js($this->catalogFields->pluck('field_key')->mapWithKeys(fn($k) => [$k => null])->toArray()))" wire:loading.attr="disabled"
+
+                    <button wire:click="resetMapping" wire:loading.attr="disabled"
                         class="flex items-center self-start gap-1 px-3 py-1.5 text-xs font-medium text-slate-500 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 shrink-0 transition disabled:opacity-50 disabled:cursor-not-allowed"
                         title="Clear all column mappings and start over">
                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"
@@ -167,100 +171,402 @@
                     $progressPercent =
                         $totalRecommended > 0 ? round(($mappedRecommended / $totalRecommended) * 100) : 0;
                 @endphp
+
                 <div class="flex items-center gap-3 mt-4">
                     <div class="flex-1 h-2 overflow-hidden rounded-full bg-slate-100">
                         <div class="h-full rounded-full transition-all duration-500 {{ $mappedRecommended === $totalRecommended ? 'bg-emerald-500' : 'bg-slate-500' }}"
-                            style="width: {{ $progressPercent }}%"></div>
+                            style="width: {{ $progressPercent }}%">
+                        </div>
                     </div>
+
                     <span class="text-xs font-medium text-slate-500 whitespace-nowrap">
                         {{ $mappedRecommended }} of {{ $totalRecommended }} recommended fields
                     </span>
                 </div>
 
                 {{-- Scrolls horizontally on narrow screens instead of squeezing columns unreadably --}}
-                <div class="mt-4 overflow-x-auto border rounded-lg border-slate-200">
-                    <table class="w-full min-w-[640px] text-sm border-collapse">
+                <div class="mt-4 overflow-x-auto overflow-y-auto border rounded-lg border-slate-200">
+                    <table class="w-full min-w-[900px] table-fixed text-sm border-collapse">
                         <thead>
                             <tr class="text-xs font-semibold tracking-wide uppercase bg-slate-50 text-slate-500">
-                                <th class="p-3 text-left border-b border-slate-200">VIT Field</th>
-                                <th class="p-3 text-left border-b border-slate-200">Description</th>
-                                <th class="p-3 text-left border-b border-slate-200">Priority</th>
-                                <th class="p-3 text-left border-b border-slate-200 w-80">Uploaded File Column</th>
+                                <th class="w-1/2 p-3 text-left border-b border-slate-200">VIT Field</th>
+                                <th class="w-1/2 p-3 text-left border-b border-slate-200">Uploaded File Column</th>
                             </tr>
                         </thead>
+
                         <tbody class="divide-y divide-slate-100">
                             @foreach ($this->catalogFields as $field)
                                 @php
                                     $currentSelection = $this->mapping[$field->field_key] ?? null;
                                     $isSuggested = !empty($this->suggestedIndexes[$field->field_key]);
+                                    $availableColumns = $this->availableColumnsFor($field->field_key);
+                                    $rangeActive =
+                                        $field->is_multi_value &&
+                                        (!empty($this->rangeStarts[$field->field_key]) ||
+                                            !empty($this->rangeEnds[$field->field_key]));
                                 @endphp
+
                                 <tr wire:key="mapping-row-{{ $field->field_key }}" @class([
                                     'hover:bg-slate-50/60 transition',
                                     'bg-indigo-50/30' => $isSuggested,
                                 ])>
-                                    <td class="p-3">
-                                        <div class="flex items-center gap-2">
-                                            <span class="font-medium text-slate-900">{{ $field->web_app_label }}</span>
-                                        </div>
-                                    </td>
-                                    <td class="p-3">
-                                        @if ($field->description)
-                                            <p class="text-xs break-words text-slate-500">{{ $field->description }}
-                                            </p>
-                                        @endif
-                                    </td>
-                                    <td class="p-3">
-                                        @if ($field->requirement_type === 'required')
-                                            <span
-                                                class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-amber-50 text-amber-700 border border-amber-200">
-                                                Recommended <span class="text-amber-400">*</span>
+
+                                    {{-- VIT Field --}}
+                                    <td class="w-1/2 p-3">
+                                        <div class="flex items-center gap-1.5">
+                                            <span class="font-medium text-slate-900">
+                                                {{ $field->web_app_label }}
                                             </span>
-                                        @else
-                                            <span
-                                                class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-slate-50 text-slate-500 border border-slate-200">
-                                                Optional
-                                            </span>
-                                        @endif
-                                    </td>
-                                    <td class="p-3">
-                                        <div class="flex items-center gap-2">
-                                            <select wire:key="mapping-select-{{ $field->field_key }}"
-                                                wire:model.live="mapping.{{ $field->field_key }}"
-                                                class="w-full px-2.5 py-1.5 text-sm border rounded-lg border-slate-300 focus:border-slate-500 focus:ring-1 focus:ring-slate-500">
-                                                <option wire:key="mapping-opt-{{ $field->field_key }}-empty"
-                                                    value="">— Do not import</option>
-                                                @foreach ($this->availableColumnsFor($field->field_key) as $col)
-                                                    <option
-                                                        wire:key="mapping-opt-{{ $field->field_key }}-{{ $col->index }}"
-                                                        value="{{ $col->index }}">
-                                                        {{ $col->name }}
-                                                    </option>
-                                                @endforeach
-                                            </select>
-                                            @if ($isSuggested && $currentSelection === null)
-                                                <span
-                                                    class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0"
-                                                    title="Suggested match based on column name">
-                                                    Suggested
-                                                </span>
-                                            @elseif ($isSuggested && $currentSelection !== null)
-                                                <span
-                                                    class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 shrink-0">
-                                                    Suggested
+
+                                            @if ($field->requirement_type === 'required')
+                                                <span class="font-medium text-red-600"
+                                                    title="Recommended for VIT submission" aria-label="Recommended">
+                                                    *
                                                 </span>
                                             @endif
                                         </div>
-                                        @if ($currentSelection !== null)
-                                            @php
-                                                $sampleValue = collect($sampleRows)->first(
-                                                    fn($row) => trim((string) ($row[$currentSelection] ?? '')) !== '',
-                                                );
-                                            @endphp
-                                            <div class="mt-1.5 text-xs text-slate-500">
-                                                Example: {{ $sampleValue[$currentSelection] ?? '—' }}
+
+                                        @if ($field->description)
+                                            <p class="text-xs break-words text-slate-500">
+                                                {{ $field->description }}
+                                            </p>
+                                        @endif
+                                    </td>
+
+
+
+                                    {{-- Uploaded File Column --}}
+                                    <td class="w-1/2 p-3 align-top">
+                                        @if ($field->is_multi_value && $rangeActive)
+                                            {{-- RANGE MODE --}}
+                                            <div>
+                                                {{-- Label --}}
+                                                <div class="my-2">
+                                                    <span class="text-xs font-medium text-slate-600">
+                                                        Attribute range
+                                                    </span>
+                                                </div>
+
+                                                {{-- Selects --}}
+                                                <div class="flex items-center gap-2 my-2">
+                                                    <select wire:model.live="rangeStarts.{{ $field->field_key }}"
+                                                        class="flex-1 min-w-0 px-2.5 py-1.5 text-sm bg-white border rounded-lg border-slate-300 focus:border-slate-500 focus:ring-1 focus:ring-slate-500">
+                                                        <option value="">Start column</option>
+
+                                                        @foreach ($this->availableRangeColumnsFor($field->field_key) as $col)
+                                                            <option value="{{ $col->index }}">
+                                                                {{ $col->name }}
+                                                            </option>
+                                                        @endforeach
+                                                    </select>
+
+                                                    <span class="text-xs text-slate-400 shrink-0">
+                                                        to
+                                                    </span>
+
+                                                    <select wire:model.live="rangeEnds.{{ $field->field_key }}"
+                                                        class="flex-1 min-w-0 px-2.5 py-1.5 text-sm bg-white border rounded-lg border-slate-300 focus:border-slate-500 focus:ring-1 focus:ring-slate-500">
+                                                        <option value="">End column</option>
+
+                                                        @foreach ($this->availableRangeColumnsFor($field->field_key) as $col)
+                                                            <option value="{{ $col->index }}">
+                                                                {{ $col->name }}
+                                                            </option>
+                                                        @endforeach
+                                                    </select>
+                                                </div>
+
+                                                {{-- Info card, only when populated --}}
+                                                @if ($this->rangeColumnsFor($field->field_key))
+                                                    @php
+                                                        $rangeCols = $this->rangeColumnsFor($field->field_key);
+                                                        $first = $this->columns[$rangeCols[0]] ?? $rangeCols[0];
+                                                        $last =
+                                                            $this->columns[$rangeCols[count($rangeCols) - 1]] ??
+                                                            $rangeCols[count($rangeCols) - 1];
+
+                                                        $firstExample = $this->sampleRows[0][$rangeCols[0]] ?? null;
+                                                        $lastExample =
+                                                            $this->sampleRows[0][$rangeCols[count($rangeCols) - 1]] ??
+                                                            null;
+                                                    @endphp
+
+                                                    <div
+                                                        class="px-2.5 py-2 my-2 text-xs rounded-lg bg-slate-50 border border-slate-200">
+                                                        @if ($firstExample !== null || $lastExample !== null)
+                                                            <p
+                                                                class="flex flex-wrap items-baseline text-slate-500 gap-x-1">
+                                                                <span
+                                                                    class="font-medium text-slate-600">Examples:</span>
+
+                                                                @if ($firstExample !== null)
+                                                                    <span>{{ $firstExample }}</span>
+                                                                @endif
+
+                                                                @if ($firstExample !== null && $lastExample !== null)
+                                                                    <span>to</span>
+                                                                @endif
+
+                                                                @if ($lastExample !== null)
+                                                                    <span>{{ $lastExample }}</span>
+                                                                @endif
+                                                            </p>
+                                                        @endif
+                                                    </div>
+                                                @endif
+
+                                                {{-- Exit action, right-aligned --}}
+                                                <div class="flex items-center justify-end my-2">
+                                                    <button type="button"
+                                                        wire:click="$set('rangeStarts.{{ $field->field_key }}', null); $set('rangeEnds.{{ $field->field_key }}', null)"
+                                                        class="text-xs underline text-sky-600 hover:text-sky-700 shrink-0">
+                                                        Switch to single column
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        @else
+                                            {{-- SINGLE COLUMN MODE --}}
+
+                                            <div class="space-y-2">
+                                                <div wire:key="combobox-{{ $field->field_key }}-{{ md5(json_encode($this->mapping)) }}"
+                                                    x-data="{
+                                                        open: false,
+                                                        search: '',
+                                                        selectedIndex: @entangle('mapping.' . $field->field_key).live,
+                                                        columns: @js(
+    $availableColumns
+        ->map(
+            fn($col) => [
+                'index' => (string) $col->index,
+                'name' => $col->name,
+            ],
+        )
+        ->values(),
+),
+                                                        dropdownStyle: '',
+                                                        get selectedName() {
+                                                            const found = this.columns.find(
+                                                                c => String(c.index) === String(this.selectedIndex)
+                                                            );
+                                                            return found ? found.name : '';
+                                                        },
+                                                        get filteredColumns() {
+                                                            if (!this.search.trim()) {
+                                                                return this.columns;
+                                                            }
+                                                            const q = this.search.trim().toLowerCase();
+                                                            return this.columns.filter(c =>
+                                                                c.name.toLowerCase().includes(q)
+                                                            );
+                                                        },
+                                                        selectColumn(column) {
+                                                            this.selectedIndex = column.index;
+                                                            this.search = '';
+                                                            this.open = false;
+                                                        },
+                                                        clearSelection() {
+                                                            this.selectedIndex = '';
+                                                            this.search = '';
+                                                            this.open = false;
+                                                        },
+                                                        updateDropdownPosition() {
+                                                            this.$nextTick(() => {
+                                                                const trigger = this.$refs.trigger;
+                                                                const dropdown = this.$refs.dropdown;
+                                                                if (!trigger || !dropdown) {
+                                                                    return;
+                                                                }
+                                                                const rect = trigger.getBoundingClientRect();
+                                                                const viewportPadding = 12;
+                                                                const gap = 4;
+                                                                const spaceBelow =
+                                                                    window.innerHeight - rect.bottom - viewportPadding;
+                                                                const spaceAbove =
+                                                                    rect.top - viewportPadding;
+                                                                const minDropdownHeight = 180;
+                                                                let maxHeight;
+                                                                let top;
+                                                                if (
+                                                                    spaceBelow >= minDropdownHeight ||
+                                                                    spaceBelow >= spaceAbove
+                                                                ) {
+                                                                    top = rect.bottom + gap;
+                                                                    maxHeight = Math.max(spaceBelow, 120);
+                                                                } else {
+                                                                    maxHeight = Math.max(spaceAbove, 120);
+                                                                    top = rect.top - maxHeight - gap;
+                                                                }
+                                                                const width = rect.width;
+                                                                dropdown.style.position = 'fixed';
+                                                                dropdown.style.left = rect.left + 'px';
+                                                                dropdown.style.top = top + 'px';
+                                                                dropdown.style.width = width + 'px';
+                                                                dropdown.style.maxHeight = maxHeight + 'px';
+                                                                dropdown.style.zIndex = '9999';
+                                                            });
+                                                        },
+                                                        toggleDropdown() {
+                                                            this.open = !this.open;
+                                                            if (this.open) {
+                                                                this.$nextTick(() => {
+                                                                    this.updateDropdownPosition();
+                                                                });
+                                                            }
+                                                        },
+                                                        handleViewportChange() {
+                                                            if (this.open) {
+                                                                this.updateDropdownPosition();
+                                                            }
+                                                        }
+                                                    }" x-init="window.addEventListener('resize', handleViewportChange);
+                                                    window.addEventListener('scroll', handleViewportChange, true);
+                                                    $cleanup(() => {
+                                                        window.removeEventListener('resize', handleViewportChange);
+                                                        window.removeEventListener('scroll', handleViewportChange, true);
+                                                    });" class="relative">
+
+                                                    {{-- Selected column + Suggested indicator --}}
+                                                    <div class="flex items-center gap-2">
+                                                        <div class="flex-1 min-w-0">
+                                                            <button type="button" x-ref="trigger"
+                                                                @click="toggleDropdown()"
+                                                                @keydown.escape="open = false"
+                                                                class="flex items-center justify-between w-full gap-2 px-2.5 py-1.5 text-sm text-left bg-white border rounded-lg border-slate-300 focus:border-slate-500 focus:ring-1 focus:ring-slate-500">
+                                                                <span
+                                                                    x-show="selectedIndex !== null && selectedIndex !== ''"
+                                                                    x-text="selectedName"
+                                                                    class="min-w-0 truncate text-slate-900"></span>
+
+                                                                <span
+                                                                    x-show="selectedIndex === null || selectedIndex === ''"
+                                                                    class="text-slate-400">
+                                                                    — Do not import
+                                                                </span>
+
+                                                                <svg class="w-4 h-4 text-slate-400 shrink-0"
+                                                                    fill="none" viewBox="0 0 24 24"
+                                                                    stroke="currentColor" stroke-width="1.5">
+                                                                    <path stroke-linecap="round"
+                                                                        stroke-linejoin="round"
+                                                                        d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+                                                                </svg>
+                                                            </button>
+                                                        </div>
+
+                                                        {{-- Suggested indicator --}}
+                                                        @if ($isSuggested && $currentSelection === null && !$rangeActive)
+                                                            <span
+                                                                class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0"
+                                                                title="Suggested match based on column name">
+                                                                Suggested match available
+                                                            </span>
+                                                        @elseif ($isSuggested && $currentSelection !== null && !$rangeActive)
+                                                            <span
+                                                                class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 shrink-0">
+                                                                Suggested
+                                                            </span>
+                                                        @endif
+                                                    </div>
+
+                                                    {{-- Dropdown --}}
+                                                    <template x-teleport="body">
+                                                        <div x-show="open" x-cloak x-ref="dropdown"
+                                                            @click.outside="open = false"
+                                                            @keydown.escape.window="open = false"
+                                                            class="overflow-hidden bg-white border rounded-lg shadow-xl border-slate-300"
+                                                            style="display: none;">
+
+                                                            {{-- Search --}}
+                                                            <div class="p-1.5 border-b border-slate-200 bg-white">
+                                                                <input type="text" x-model="search"
+                                                                    @keydown.escape="open = false"
+                                                                    placeholder="Search file columns..."
+                                                                    autocomplete="off"
+                                                                    class="w-full px-2.5 py-1.5 text-sm bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:bg-white focus:border-slate-400 focus:ring-1 focus:ring-slate-400" />
+                                                            </div>
+
+                                                            {{-- Options --}}
+                                                            <div class="overflow-y-auto overscroll-contain"
+                                                                style="max-height: inherit;" @wheel.stop>
+
+                                                                {{-- Do not import --}}
+                                                                <button type="button" @click="clearSelection()"
+                                                                    class="w-full px-3 py-2 text-sm text-left text-slate-600 hover:bg-slate-50"
+                                                                    :class="selectedIndex === null ||
+                                                                        selectedIndex === '' ?
+                                                                        'bg-slate-100 font-medium text-slate-900' :
+                                                                        ''">
+                                                                    — Do not import
+                                                                </button>
+
+                                                                {{-- Columns --}}
+                                                                <template x-for="column in filteredColumns"
+                                                                    :key="column.index">
+                                                                    <button type="button"
+                                                                        @click="selectColumn(column)"
+                                                                        class="w-full px-3 py-2 text-sm text-left hover:bg-slate-50"
+                                                                        :class="String(selectedIndex) === String(column.index) ?
+                                                                            'bg-slate-100 font-medium text-slate-900' :
+                                                                            'text-slate-700'">
+                                                                        <span x-text="column.name"
+                                                                            class="block truncate"></span>
+                                                                    </button>
+                                                                </template>
+
+                                                                {{-- No results --}}
+                                                                <div x-show="filteredColumns.length === 0"
+                                                                    class="px-3 py-3 text-sm text-slate-500">
+                                                                    No matching columns found.
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </template>
+                                                </div>
+
+                                                {{-- Selected column details --}}
+                                                @if ($currentSelection !== null && isset($this->sampleRows[0][$currentSelection]))
+                                                    <div
+                                                        class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 border border-slate-200">
+                                                        <span class="font-medium text-slate-600">Example:</span>
+                                                        <span class="text-slate-500">
+                                                            {{ $this->sampleRows[0][$currentSelection] }}
+                                                        </span>
+                                                    </div>
+                                                @endif
+
+                                                {{-- Separator + range option, same row --}}
+                                                @if ($field->is_multi_value && $currentSelection !== null)
+                                                    <div class="flex items-center justify-between gap-2">
+                                                        <div class="flex items-center gap-2">
+                                                            <label
+                                                                class="text-xs text-slate-500 shrink-0">Separator:</label>
+                                                            <select
+                                                                wire:model.live="separators.{{ $field->field_key }}"
+                                                                class="w-28 px-2 py-1.5 text-sm bg-white border rounded-lg border-slate-300 focus:border-slate-500 focus:ring-1 focus:ring-slate-500">
+                                                                <option value="">None</option>
+                                                                <option value=",">Comma (,)</option>
+                                                                <option value=";">Semicolon (;)</option>
+                                                                <option value="|">Pipe (|)</option>
+                                                            </select>
+                                                        </div>
+
+                                                        <button type="button"
+                                                            wire:click="$set('rangeStarts.{{ $field->field_key }}', {{ array_key_first($this->columns) ?? 0 }}); $set('rangeEnds.{{ $field->field_key }}', {{ array_key_last($this->columns) ?? 0 }})"
+                                                            class="text-xs underline text-sky-600 hover:text-sky-700 shrink-0">
+                                                            Use a column range instead
+                                                        </button>
+                                                    </div>
+
+                                                    @if (isset($this->separatorValidationErrors[$field->field_key]))
+                                                        <p class="mt-1 text-xs text-rose-600">
+                                                            {{ $this->separatorValidationErrors[$field->field_key] }}
+                                                        </p>
+                                                    @endif
+                                                @endif
                                             </div>
                                         @endif
                                     </td>
+
                                 </tr>
                             @endforeach
                         </tbody>
@@ -273,10 +579,12 @@
                         <svg class="w-5 h-5 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24"
                             stroke="currentColor" stroke-width="1.5">
                             <path stroke-linecap="round" stroke-linejoin="round"
-                                d="m11.25 11.25.04-.02a.75.75 0 0 1 1.063.452l.255.766a.75.75 0 0 0 1.063.452l.04-.02a.75.75 0 0 1 1.063.452l.255.766a.75.75 0 0 0 1.063.452l.04-.02a.75.75 0 0 1 1.063.452l.255.766a.75.75 0 0 0 1.063.452l.04-.02a.75.75 0 0 1 1.063.452l.255.766M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                                d="m11.25 11.25.04-.02a.75.75 0 0 1 1.063.452l.255.766a.75.75 0 0 0 1.063.452l.04-.02a.75.75 0 0 1 1.063.452l.255.766a.75.75 0 0 0 1.063.452l.04-.02a.75.75 0 0 1 1.063.452l.255.766a.75.75 0 0 1 1.063.452l.255.766M21 12a9 9 0 1 1-18 3.7" />
                         </svg>
+
                         <span>
-                            <strong>Not in this file:</strong> {{ $this->unmappedRequiredFields()->join(', ') }}.
+                            <strong>Not in this file:</strong>
+                            {{ $this->unmappedRequiredFields()->join(', ') }}.
                             You can continue without these — they can be completed later from the Catalog Item List
                             before requesting review.
                         </span>
@@ -286,6 +594,12 @@
                 @error('mapping')
                     <p class="mt-4 text-sm text-rose-600">{{ $message }}</p>
                 @enderror
+
+                @if (!empty($this->separatorValidationErrors))
+                    @foreach ($this->separatorValidationErrors as $error)
+                        <p class="mt-2 text-sm text-rose-600">{{ $error }}</p>
+                    @endforeach
+                @endif
 
                 <div class="flex flex-col-reverse gap-3 mt-6 sm:flex-row sm:items-center sm:justify-between">
                     <button wire:click="startOver" wire:loading.attr="disabled"
@@ -308,6 +622,7 @@
                 </div>
             </div>
         @endif
+
 
         {{-- ============================================================ --}}
         {{-- STEP 3: Processing                                            --}}
@@ -411,8 +726,7 @@
                             class="p-4 text-center border rounded-lg border-sky-200 bg-sky-50 min-w-[100px] sm:min-w-[120px] flex-1">
                             <dt class="text-xs font-medium tracking-wide uppercase text-sky-700">Unchanged</dt>
                             <dd class="mt-1 text-xl font-semibold sm:text-2xl text-sky-700">
-                                {{ $progress['unchanged_rows'] }}
-                            </dd>
+                                {{ $progress['unchanged_rows'] }}</dd>
                         </div>
                     @endif
                     @if ($progress['invalid_rows'] > 0)
@@ -424,6 +738,51 @@
                         </div>
                     @endif
                 </dl>
+
+                {{-- Warning-only rows: imported successfully but surfaced business-data warnings --}}
+                @if ($this->warningRows->isNotEmpty())
+                    <div class="mt-6 overflow-hidden border rounded-lg border-amber-200">
+                        <div class="flex items-center justify-between px-4 py-2.5 bg-amber-50">
+                            <span class="text-xs font-semibold tracking-wide uppercase text-amber-700">
+                                Imported with warnings &mdash; <span class="font-normal lowercase">CatalogItem
+                                    created/updated</span>
+                            </span>
+                            <span class="text-xs text-amber-600">{{ $this->warningRows->count() }} row(s)</span>
+                        </div>
+                        <div class="overflow-x-auto overflow-y-auto max-h-48">
+                            <table class="w-full min-w-[420px] text-sm border-collapse">
+                                <thead class="sticky top-0 bg-slate-50">
+                                    <tr class="text-xs font-semibold tracking-wide uppercase text-slate-500">
+                                        <th class="p-2.5 pl-4 text-left border-b border-slate-200">Row</th>
+                                        <th class="p-2.5 text-left border-b border-slate-200">Warnings</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-amber-100">
+                                    @foreach ($this->warningRows as $warningRow)
+                                        <tr class="hover:bg-amber-50/40">
+                                            <td class="p-2.5 pl-4 font-mono text-xs text-slate-900">
+                                                {{ $warningRow->row_number }}</td>
+                                            <td class="p-2.5 text-xs text-amber-700">
+                                                @php
+                                                    $payload = is_string($warningRow->errors)
+                                                        ? json_decode($warningRow->errors, true)
+                                                        : $warningRow->errors;
+                                                    $warningMessages =
+                                                        is_array($payload) && !empty($payload['warnings'])
+                                                            ? collect($payload['warnings'])
+                                                                ->pluck('message')
+                                                                ->implode('; ')
+                                                            : (string) $warningRow->errors;
+                                                @endphp
+                                                {{ $warningMessages }}
+                                            </td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                @endif
 
                 {{-- Failed rows --}}
                 @if ($progress['invalid_rows'] > 0 && $this->failedRows->isNotEmpty())
@@ -458,13 +817,16 @@
                                                     {{ $failedRow->row_number }}</td>
                                                 <td class="p-2.5 text-xs text-rose-700">
                                                     @php
-                                                        $fbMsgs = is_array($failedRow->errors)
-                                                            ? collect($failedRow->errors)
+                                                        $payload = is_string($failedRow->errors)
+                                                            ? json_decode($failedRow->errors, true)
+                                                            : $failedRow->errors;
+                                                        $errorMessages = is_array($payload)
+                                                            ? collect($payload['errors'] ?? [])
                                                                 ->pluck('message')
                                                                 ->implode('; ')
                                                             : (string) $failedRow->errors;
                                                     @endphp
-                                                    {{ $fbMsgs }}
+                                                    {{ $errorMessages }}
                                                 </td>
                                             </tr>
                                         @endforeach
@@ -537,13 +899,16 @@
                                                     {{ $failedRow->row_number }}</td>
                                                 <td class="p-2.5 text-xs text-rose-700">
                                                     @php
-                                                        $fbMsgs2 = is_array($failedRow->errors)
-                                                            ? collect($failedRow->errors)
+                                                        $payload = is_string($failedRow->errors)
+                                                            ? json_decode($failedRow->errors, true)
+                                                            : $failedRow->errors;
+                                                        $errorMessages = is_array($payload)
+                                                            ? collect($payload['errors'] ?? [])
                                                                 ->pluck('message')
                                                                 ->implode('; ')
                                                             : (string) $failedRow->errors;
                                                     @endphp
-                                                    {{ $fbMsgs2 }}
+                                                    {{ $errorMessages }}
                                                 </td>
                                             </tr>
                                         @endforeach
@@ -561,7 +926,7 @@
                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"
                             stroke-width="2">
                             <path stroke-linecap="round" stroke-linejoin="round"
-                                d="M2.25 7.125C2.25 6.504 2.754 6 3.375 6h6.75c.621 0 1.125.504 1.125 1.125v3.75c0 .621-.504 1.125-1.125 1.125h-6.75a1.125 1.125 0 0 1-1.125-1.125v-3.75ZM14.25 8.625c0-.621.504-1.125 1.125-1.125h5.25c.621 0 1.125.504 1.125 1.125v8.25c0 .621-.504 1.125-1.125 1.125h-5.25a1.125 1.125 0 0 1-1.125-1.125v-8.25ZM3.75 16.125c0-.621.504-1.125 1.125-1.125h5.25c.621 0 1.125.504 1.125 1.125v2.25c0 .621-.504 1.125-1.125 1.125h-5.25a1.125 1.125 0 0 1-1.125-1.125v-2.25Z" />
+                                d="M2.25 7.125C2.25 6.504 2.754 6 3.375 6h6.75c.621 0 1.125.504 1.125 1.125v3.75c0 .621-.504 1.125-1.125 1.125h-6.75a1.125 1.125 0 0 1-1.125-1.125v-3.75ZM14.25 8.625c0-.621.504-1.125 1.125-1.125h5.25c.621 0 1.125.504 1.125 1.125v8.25c0 .621.504 1.125 1.125 1.125h-5.25a1.125 1.125 0 0 1-1.125-1.125v-8.25ZM3.75 16.125c0-.621.504-1.125 1.125-1.125h5.25c.621 0 1.125.504 1.125 1.125v2.25c0 .621-.504 1.125-1.125 1.125h-5.25a1.125 1.125 0 0 1-1.125-1.125v-2.25Z" />
                         </svg>
                         View my catalog
                     </a>

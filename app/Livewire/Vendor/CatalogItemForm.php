@@ -128,10 +128,10 @@ class CatalogItemForm extends Component
         $this->specifications = ! empty($catalogItem->specifications) ? $catalogItem->specifications : [['key' => '', 'value' => '']];
         $this->classifications = ! empty($catalogItem->classifications) ? $catalogItem->classifications : [''];
 
-        $this->existingImages = $catalogItem->images->map(fn(CatalogItemImage $image) => [
-            'id' => $image->id,
-            'url' => route('vendor.catalog-images.show', $image),
-        ])->all();
+        // $this->existingImages = $catalogItem->images->map(fn(CatalogItemImage $image) => [
+        //     'id' => $image->id,
+        //     'url' => route('vendor.catalog-images.show', $image),
+        // ])->all();
     }
 
     #[Computed]

@@ -51,6 +51,7 @@ return new class extends Migration
             $table->string('field_key', 100);
 
             $table->string('source_column_name');
+            $table->string('source_separator')->nullable();
 
             $table->timestamps();
 

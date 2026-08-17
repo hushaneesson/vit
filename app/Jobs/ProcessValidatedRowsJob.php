@@ -7,6 +7,7 @@ use App\Models\CatalogItem;
 use App\Models\CatalogUpload;
 use App\Models\Vendor;
 use App\Notifications\CatalogUploadValidationReportNotification;
+use App\Services\VitFieldDefinition;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -19,7 +20,7 @@ use Illuminate\Support\Str;
 use Throwable;
 
 /**
- * Phase 8B: consumes the validated CatalogUploadRow records from
+ * consumes the validated CatalogUploadRow records from
  * ProcessCatalogUploadJob and creates/updates CatalogItem rows in
  * the vendor's catalog.
  *
@@ -94,31 +95,89 @@ class ProcessValidatedRowsJob implements ShouldQueue
                     $data = json_decode((string) ($data ?? ''), true) ?: [];
                 }
 
-                // Build the attribute map directly from VIT field keys.
-                // CatalogItem columns now match VIT field keys, so no translation needed.
+                Log::info('ProcessValidatedRowsJob: processing row', [
+                    'upload_id' => $upload->id,
+                    'row_number' => $row->row_number,
+                    'row_status' => $row->status,
+                    'row_errors' => $row->errors,
+                    // 'row_data_keys' => array_keys($data),
+                    'dealer_sku' => $data['dealer_sku'] ?? null,
+                ]);
+
+                // Build the attribute map using VitFieldDefinition as the source
+                // of truth. Resolve model_attribute, field_type, and is_multi_value
+                // dynamically so the mapper stays in sync with the export layer.
                 $attrs = [
                     'vendor_id' => $vendor->id,
                 ];
 
+                // Pre-fetch definitions for all keys present in this row to avoid
+                // repeated static lookups inside the loop.
+                $definitions = VitFieldDefinition::all()
+                    ->whereIn('field_key', array_keys($data))
+                    ->keyBy('field_key');
+
                 foreach ($data as $fieldKey => $rawValue) {
+                    $definition = $definitions->get($fieldKey);
+                    $modelAttribute = $definition ? ($definition->model_attribute ?? $fieldKey) : $fieldKey;
+
                     if (is_null($rawValue) || $rawValue === '' || $rawValue === []) {
                         if ($fieldKey === 'item_weight') {
-                            $attrs[$fieldKey] = 0.01;
+                            $attrs[$modelAttribute] = 0.01;
                             continue;
                         }
-                        $attrs[$fieldKey] = null;
+                        // is_discontinued must never be NULL — default to false
+                        if ($fieldKey === 'discontinued') {
+                            $attrs[$modelAttribute] = false;
+                            continue;
+                        }
+                        $attrs[$modelAttribute] = null;
                         continue;
                     }
 
-                    // Cast multi-value arrays for JSON columns
-                    if (in_array($fieldKey, ['search_terms', 'classifications', 'specifications', 'selling_points'], true)) {
-                        $attrs[$fieldKey] = is_array($rawValue) ? $rawValue : [$rawValue];
-                    } elseif ($fieldKey === 'item_weight') {
-                        $attrs[$fieldKey] = is_numeric($rawValue) ? (float) $rawValue : 0.01;
-                    } elseif (in_array($fieldKey, ['quantity_per_unit', 'min_qty_per_order', 'max_qty_per_order', 'multiples', 'list_price', 'selling_price'], true)) {
-                        $attrs[$fieldKey] = is_numeric($rawValue) ? (float) $rawValue : null;
+                    // Multi-value fields: normalize based on field type.
+                    // Specifications uses key/value objects, all others are simple arrays.
+                    if ($definition && $definition->is_multi_value) {
+                        $parts = is_array($rawValue) ? $rawValue : json_decode((string) $rawValue, true);
+                        if (!is_array($parts)) {
+                            $parts = [];
+                        }
+
+                        if ($definition->is_key_value) {
+                            // Specifications: normalize to key/value objects
+                            $attrs[$modelAttribute] = $this->normalizeKeyValueMultiValue($parts);
+                        } else {
+                            // Normal array fields: just clean and preserve as simple array
+                            $cleaned = [];
+                            foreach ($parts as $value) {
+                                if (is_string($value)) {
+                                    $value = trim($value);
+                                }
+                                if ($value !== '' && $value !== null) {
+                                    $cleaned[] = $value;
+                                }
+                            }
+                            $attrs[$modelAttribute] = $cleaned;
+                        }
+                        continue;
+                    }
+
+                    // Type-aware casting based on field_type
+                    if ($definition) {
+                        $cast = match ($definition->field_type) {
+                            'number', 'decimal' => is_numeric($rawValue) ? (float) $rawValue : null,
+                            'boolean' => is_bool($rawValue) ? $rawValue : (in_array(strtolower((string) $rawValue), ['true', 'false', '1', '0', 'yes', 'no'], true) ? (bool) $rawValue : false),
+                            default => (string) $rawValue,
+                        };
+
+                        // Preserve special item_weight fallback
+                        if ($fieldKey === 'item_weight') {
+                            $cast = is_numeric($rawValue) ? (float) $rawValue : 0.01;
+                        }
+
+                        $attrs[$modelAttribute] = $cast;
                     } else {
-                        $attrs[$fieldKey] = (string) $rawValue;
+                        $attrs[$modelAttribute] = (string) $rawValue;
                     }
                 }
 
@@ -167,11 +226,34 @@ class ProcessValidatedRowsJob implements ShouldQueue
                 $attrs['created_at'] = now();
                 $attrs['updated_at'] = now();
 
+                // TEMP DEBUG: diagnose catalog_items.name cannot be null.
+                // short_description is the VIT field whose model_attribute is 'name'.
+                $nameDef = VitFieldDefinition::find('short_description');
+                Log::info('ProcessValidatedRowsJob: about to create CatalogItem', [
+                    'upload_id' => $upload->id,
+                    'row_number' => $row->row_number,
+                    'dealer_sku' => $attrs['dealer_sku'] ?? null,
+                    'attrs_keys' => array_keys($attrs),
+                    'name_value' => $attrs['name'] ?? null,
+                    'name_field_key' => 'short_description',
+                    'name_model_attribute' => $nameDef->model_attribute ?? null,
+                ]);
+
                 try {
                     CatalogItem::create($attrs);
                     $createdCount++;
                 } catch (\Illuminate\Database\QueryException $e) {
-                    if ($e->getCode() === '23000' && str_contains($e->getMessage(), 'catalog_items_dealer_sku_unique')) {
+                    // A duplicate (vendor_id, dealer_sku) can occur when the same
+                    // dealer_sku appears more than once in the upload, or when a
+                    // concurrent job races the create. Treat it deterministically:
+                    // re-fetch the existing item and update it instead of failing
+                    // the whole upload. Match the unique constraint by the dealer_sku
+                    // column rather than relying on a specific index name.
+                    $isDuplicateSku = $e->getCode() === '23000'
+                        && str_contains($e->getMessage(), 'dealer_sku')
+                        && str_contains($e->getMessage(), 'Duplicate entry');
+
+                    if ($isDuplicateSku) {
                         $existing = CatalogItem::where('vendor_id', $vendor->id)
                             ->where('dealer_sku', $sellerSku)
                             ->first();
@@ -203,14 +285,25 @@ class ProcessValidatedRowsJob implements ShouldQueue
                             ->orderBy('row_number')
                             ->get(['row_number', 'errors']);
 
+                        $warningRows = $upload->rows()
+                            ->where('status', 'valid')
+                            ->whereNotNull('errors')
+                            ->orderBy('row_number')
+                            ->get(['row_number', 'errors']);
+
+                        $warningRows = $warningRows->filter(function ($row) {
+                            $payload = is_string($row->errors) ? json_decode($row->errors, true) : $row->errors;
+                            return is_array($payload) && !empty($payload['warnings'] ?? []);
+                        });
+
                         Notification::route('mail', $client->email)
                             ->notify(new CatalogUploadValidationReportNotification(
                                 catalogName: 'Upload #' . $upload->id,
                                 processedAt: $upload->processing_completed_at,
                                 totalErrors: $upload->invalid_rows,
-                                totalWarnings: 0,
+                                totalWarnings: $warningRows->count(),
                                 errors: $failedRows,
-                                warnings: collect(),
+                                warnings: $warningRows,
                             ));
 
                         $upload->update(['validation_report_emailed_at' => now()]);
@@ -239,14 +332,71 @@ class ProcessValidatedRowsJob implements ShouldQueue
         } catch (Throwable $e) {
             DB::rollBack();
 
+            Log::error('ProcessValidatedRowsJob: processing failed', [
+                'upload_id' => $upload->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
             $upload->update([
                 'status' => CatalogUploadStatus::Failed,
-                'failure_reason' => 'Row processing failed: ' . $e->getMessage(),
+                'failure_reason' => Str::limit('Row processing failed: ' . $e->getMessage(), 5000),
                 'processing_completed_at' => now(),
             ]);
 
             throw $e;
         }
+    }
+
+    /**
+     * Normalize multi-value data into the canonical key/value object format.
+     * Only used for specifications field.
+     *
+     * @param  array<int, mixed>  $parts
+     * @return array<int, array{key: string, value: string}>
+     */
+    private function normalizeKeyValueMultiValue(array $parts): array
+    {
+        $normalized = [];
+
+        foreach ($parts as $entry) {
+            // Already canonical
+            if (is_array($entry) && isset($entry['key']) && isset($entry['value'])) {
+                $key = trim((string) $entry['key']);
+                $value = trim((string) $entry['value']);
+
+                if ($key !== '' && $value !== '') {
+                    $normalized[] = ['key' => $key, 'value' => $value];
+                }
+                continue;
+            }
+
+            // Associative array: ['Color' => 'Silver']
+            if (is_array($entry) && array_keys($entry) !== range(0, count($entry) - 1)) {
+                foreach ($entry as $key => $value) {
+                    $key = trim((string) $key);
+                    $value = trim((string) $value);
+
+                    if ($key !== '' && $value !== '') {
+                        $normalized[] = ['key' => $key, 'value' => $value];
+                    }
+                }
+                continue;
+            }
+
+            // Indexed string: "Color=Silver"
+            if (is_string($entry) && str_contains($entry, '=')) {
+                $equalsPos = strpos($entry, '=');
+                $key = trim(substr($entry, 0, $equalsPos));
+                $value = trim(substr($entry, $equalsPos + 1));
+
+                if ($key !== '' && $value !== '') {
+                    $normalized[] = ['key' => $key, 'value' => $value];
+                }
+            }
+        }
+
+        return $normalized;
     }
 
     /**
@@ -317,16 +467,39 @@ class ProcessValidatedRowsJob implements ShouldQueue
                 continue;
             }
 
-            // JSON fields
-            if (in_array($column, ['search_terms', 'classifications', 'specifications', 'selling_points'], true)) {
+            // Dynamic multi-value JSON fields come from the spec metadata; this
+            // keeps the comparison logic aligned with the import/export contract.
+            // Use model_attribute (database column name) when available so the
+            // lookup matches the keys in $newAttrs / $existing->getRawOriginal().
+            $multiValueColumns = VitFieldDefinition::all()
+                ->where('is_multi_value', true)
+                ->map(fn($def) => $def->model_attribute ?? $def->field_key)
+                ->values()
+                ->all();
+
+            if (in_array($column, $multiValueColumns, true)) {
                 $decodedOld = is_array($oldValue) ? $oldValue : json_decode((string) $oldValue, true);
                 $decodedNew = is_array($newValue) ? $newValue : json_decode((string) $newValue, true);
 
-                if (is_array($decodedOld)) {
-                    sort($decodedOld);
-                }
-                if (is_array($decodedNew)) {
-                    sort($decodedNew);
+                // Get field definition to determine comparison strategy
+                $fieldDef = VitFieldDefinition::find($column);
+
+                if ($fieldDef && $fieldDef->is_key_value) {
+                    // Specifications: normalize to canonical format and sort by key for comparison
+                    if (is_array($decodedOld)) {
+                        usort($decodedOld, fn($a, $b) => ($a['key'] ?? '') <=> ($b['key'] ?? ''));
+                    }
+                    if (is_array($decodedNew)) {
+                        usort($decodedNew, fn($a, $b) => ($a['key'] ?? '') <=> ($b['key'] ?? ''));
+                    }
+                } else {
+                    // Normal array fields: sort values for order-independent comparison
+                    if (is_array($decodedOld)) {
+                        sort($decodedOld);
+                    }
+                    if (is_array($decodedNew)) {
+                        sort($decodedNew);
+                    }
                 }
 
                 if ($decodedOld !== $decodedNew) {

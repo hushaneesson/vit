@@ -157,7 +157,7 @@ class CatalogUploadController extends Controller
 
     private function activeCatalogFieldsForUi(): array
     {
-        return VitFieldDefinition::visibleInWebApp()
+        return VitFieldDefinition::frontendVisible()
             ->map(fn($field) => [
                 'field_key' => $field->field_key,
                 'web_app_label' => $field->web_app_label,
