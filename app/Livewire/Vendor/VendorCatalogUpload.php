@@ -69,7 +69,7 @@ class VendorCatalogUpload extends Component
     public function rules(): array
     {
         return [
-            'file' => ['required', 'file', 'mimes:csv,txt,xlsx,xls', 'max:51200'],
+            'file' => ['required', 'file', 'mimes:csv,xlsx,xls', 'max:51200'],
         ];
     }
 
@@ -157,7 +157,7 @@ class VendorCatalogUpload extends Component
         $client = Auth::guard('client')->user();
 
         $extension = strtolower($this->file->getClientOriginalExtension());
-        $fileType = $extension === 'txt' ? 'csv' : $extension;
+        $fileType = $extension;
 
         $storedPath = $this->file->storeAs(
             "catalog-uploads/{$client->vendor_id}",
