@@ -42,7 +42,10 @@ class CatalogFileInspectionService
         });
 
         $spreadsheet = $reader->load($localPath);
-        $sheet = $spreadsheet->getActiveSheet();
+        // Explicitly use the FIRST worksheet. Multi-sheet workbooks must be
+        // processed from Sheet 1 only; getActiveSheet() could return a
+        // different sheet if the workbook metadata marks another as active.
+        $sheet = $spreadsheet->getSheet(0);
         $rows = $sheet->toArray(null, true, true, false);
 
         $headerRow = array_map(
@@ -82,8 +85,22 @@ class CatalogFileInspectionService
 
         $reader = $this->makeReader($fileType, $localPath);
         $reader->setReadDataOnly(true);
+
+        // Only the header row is needed to compute the file signature. Limit
+        // the read to row 1 so a very large worksheet's data rows are never
+        // materialized into memory just to fingerprint the column structure.
+        $reader->setReadFilter(new class(1) implements \PhpOffice\PhpSpreadsheet\Reader\IReadFilter {
+            public function __construct(private int $maxRow) {}
+
+            public function readCell(string $columnAddress, int $row, string $worksheetName = ''): bool
+            {
+                return $row <= $this->maxRow;
+            }
+        });
+
         $spreadsheet = $reader->load($localPath);
-        $sheet = $spreadsheet->getActiveSheet();
+        // Explicitly use the FIRST worksheet (see inspect()).
+        $sheet = $spreadsheet->getSheet(0);
         $rows = $sheet->toArray(null, true, true, false);
 
         $headerRow = array_map(

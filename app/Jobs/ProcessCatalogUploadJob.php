@@ -16,8 +16,10 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Reader\Csv as CsvReader;
+use PhpOffice\PhpSpreadsheet\Reader\IReadFilter;
 
 class ProcessCatalogUploadJob implements ShouldQueue
 {
@@ -76,8 +78,52 @@ class ProcessCatalogUploadJob implements ShouldQueue
                 : IOFactory::createReader($upload->file_type === 'xls' ? 'Xls' : 'Xlsx');
 
             $reader->setReadDataOnly(true);
+
+            // Memory: only the first worksheet is ever needed for catalog
+            // processing. Without this, PhpSpreadsheet's load() materializes
+            // every worksheet in the workbook into the Cell collection, which
+            // can exhaust PHP's memory on multi-sheet/large files. Reading the
+            // sheet name list is cheap (metadata only) and lets us restrict
+            // load() to the first worksheet. CSV readers always produce a
+            // single worksheet, so this is only needed for Excel readers.
+            if ($upload->file_type !== 'csv') {
+                $sheetNames = $reader->listWorksheetNames($localPath);
+                if (!empty($sheetNames)) {
+                    $reader->setLoadSheetsOnly($sheetNames[0]);
+                }
+
+                // Memory: tell the Excel reader to materialize ONLY the columns
+                // the user actually mapped (read from the persisted column
+                // mappings), so PhpSpreadsheet never builds Cell objects for
+                // unmapped columns. This targets the original memory-exhaustion
+                // point (Cells.php CellCollection::add() at load()). The 0-based
+                // indexes come from the SAME source column_index values used
+                // during mapping, so mapRow()'s original-index lookups stay
+                // correct, and range-mapped columns are already persisted as
+                // multiple column-mapping rows.
+                $requiredColumns = $this->requiredSourceColumnIndexes($upload);
+                if (!empty($requiredColumns)) {
+                    $allowedColumns = array_flip($requiredColumns);
+
+                    $reader->setReadFilter(new class($allowedColumns) implements IReadFilter {
+                        public function __construct(private array $allowedColumns) {}
+
+                        public function readCell(string $columnAddress, int $row, string $worksheetName = ''): bool
+                        {
+                            if ($row < 1) {
+                                return false;
+                            }
+
+                            return isset($this->allowedColumns[Coordinate::columnIndexFromString($columnAddress) - 1]);
+                        }
+                    });
+                }
+            }
             $spreadsheet = $reader->load($localPath);
-            $sheet = $spreadsheet->getActiveSheet();
+            // Explicitly use the FIRST worksheet. Multi-sheet workbooks must
+            // be processed from Sheet 1 only; getActiveSheet() could return a
+            // different sheet if the workbook metadata marks another as active.
+            $sheet = $spreadsheet->getSheet(0);
 
             $highestRow = $sheet->getHighestDataRow();
             $successCount = 0;
@@ -88,8 +134,20 @@ class ProcessCatalogUploadJob implements ShouldQueue
             // Row 1 is the header - data starts at row 2.
             for ($rowIndex = 2; $rowIndex <= $highestRow; $rowIndex++) {
                 $rowCells = [];
-                foreach ($sheet->getRowIterator($rowIndex, $rowIndex)->current()->getCellIterator() as $cell) {
-                    $rowCells[] = $cell->getValue();
+                $row = $sheet->getRowIterator($rowIndex, $rowIndex)->current();
+
+                if ($row !== null) {
+                    // Iterate ONLY existing cells (onlyExisting=true) so unmapped
+                    // columns excluded by the read filter are never auto-created
+                    // (which would re-defeat the memory optimization). Index each
+                    // value by its real Excel coordinate so mapRow()'s
+                    // column_index lookups stay correct even though the row is
+                    // now sparse — only mapped columns are present, keyed by
+                    // their original 0-based offset from column A.
+                    foreach ($row->getCellIterator('A', null, true) as $cell) {
+                        $colIndex = Coordinate::columnIndexFromString($cell->getColumn()) - 1;
+                        $rowCells[$colIndex] = $cell->getValue();
+                    }
                 }
 
                 if ($this->rowIsBlank($rowCells)) {
@@ -196,6 +254,36 @@ class ProcessCatalogUploadJob implements ShouldQueue
         }
 
         return true;
+    }
+
+    /**
+     * Determine the 0-based source column indexes the mapped upload actually
+     * requires, derived from the persisted column mappings.
+     *
+     * Normal and multi-value single-column mappings contribute their
+     * column_index directly. Range mappings are persisted as multiple rows
+     * (one per column in the span), so every required column index is already
+     * present in columnMappings and no span arithmetic is needed here.
+     *
+     * Unmapped ("do not import") columns and rows whose field_key is null are
+     * excluded, so PhpSpreadsheet never materializes cells for them. The
+     * indexes returned are the SAME 0-based offsets used during mapping, so
+     * when the row-extraction loop keys cells by original column coordinate,
+     * mapRow()'s column_index lookups stay correct.
+     *
+     * @return array<int, int> sorted, unique 0-based column indexes
+     */
+    private function requiredSourceColumnIndexes(CatalogUpload $upload): array
+    {
+        return $upload->columnMappings
+            ->whereNotNull('field_key')
+            ->pluck('column_index')
+            ->map(fn($index) => (int) $index)
+            ->filter(fn($index) => $index >= 0)
+            ->unique()
+            ->sort()
+            ->values()
+            ->all();
     }
 
     /**
