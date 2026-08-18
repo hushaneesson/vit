@@ -18,9 +18,9 @@ class VendorResource extends Resource
 {
     protected static ?string $model = Vendor::class;
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedRectangleStack;
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedBuildingStorefront;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Clients';
+    protected static string|UnitEnum|null $navigationGroup = 'Vendors';
 
     public static function form(Schema $schema): Schema
     {

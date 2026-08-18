@@ -19,11 +19,6 @@ class UnitOfMeasuresTable
                     ->searchable(),
                 TextColumn::make('description')
                     ->searchable(),
-                IconColumn::make('active')
-                    ->boolean(),
-                TextColumn::make('sort_order')
-                    ->numeric()
-                    ->sortable(),
                 TextColumn::make('created_at')
                     ->dateTime()
                     ->sortable()

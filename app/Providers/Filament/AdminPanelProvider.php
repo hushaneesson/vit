@@ -32,8 +32,8 @@ class AdminPanelProvider extends PanelProvider
             ->colors([
                 'primary' => Color::Sky,
             ])
-            ->brandLogo(fn (): string => asset('/logo.png'))
-            ->brandLogoHeight(fn (): string => '60px')
+            ->brandLogo(fn(): string => asset('/logo.png'))
+            ->brandLogoHeight(fn(): string => '60px')
             ->viteTheme('resources/css/filament/admin/theme.css')
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\Filament\Resources')
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\Filament\Pages')
@@ -57,7 +57,7 @@ class AdminPanelProvider extends PanelProvider
                 DispatchServingFilamentEvent::class,
             ])
             ->plugins([
-                FilamentShieldPlugin::make(),
+                // FilamentShieldPlugin::make(),
             ])
             ->authMiddleware([
                 Authenticate::class,

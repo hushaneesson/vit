@@ -2,7 +2,7 @@
 
 namespace App\Jobs;
 
-use App\Models\Submission;
+use App\Models\CatalogSubmission;
 use App\Notifications\CatalogUploadedNotification;
 use App\Notifications\CatalogUploadFailedNotification;
 use App\Services\VitApiClient;
@@ -16,7 +16,7 @@ use Illuminate\Support\Facades\Notification;
 use Throwable;
 
 /**
- * Phase 11: uploads a single pending/failed submission to VIT's catalog API.
+ * Uploads a single pending/failed catalog submission to VIT's catalog API.
  * Used both by the admin's manual "Upload to VIT" bulk action and by the
  * scheduled auto-retry command.
  */
@@ -30,20 +30,21 @@ class UploadSubmissionToVit implements ShouldQueue
 
     public function handle(VitApiClient $client): void
     {
-        $submission = Submission::find($this->submissionId);
+        $submission = CatalogSubmission::find($this->submissionId);
 
         if (! $submission) {
             return;
         }
 
-        $submission->update(['status' => 'processing']);
+        $submission->update(['processing_status' => 'processing']);
 
         try {
-            $response = $client->upload($submission);
+            $response = $client->uploadCatalogSubmission($submission);
 
             if ($response->successful()) {
                 $submission->update([
                     'status' => 'uploaded',
+                    'processing_status' => 'completed',
                     'uploaded_at' => now(),
                     'vit_api_response' => $response->json() ?? ['raw' => $response->body()],
                 ]);
@@ -53,17 +54,17 @@ class UploadSubmissionToVit implements ShouldQueue
                 return;
             }
 
-            $this->recordFailure($submission, 'HTTP '.$response->status().': '.$response->body());
+            $this->recordFailure($submission, 'HTTP ' . $response->status() . ': ' . $response->body());
         } catch (Throwable $e) {
-            Log::error('VIT upload failed for submission '.$submission->id, ['error' => $e->getMessage()]);
+            Log::error('VIT upload failed for submission ' . $submission->id, ['error' => $e->getMessage()]);
             $this->recordFailure($submission, $e->getMessage());
         }
     }
 
-    protected function recordFailure(Submission $submission, string $error): void
+    protected function recordFailure(CatalogSubmission $submission, string $error): void
     {
         $submission->update([
-            'status' => 'failed',
+            'processing_status' => 'failed',
             'upload_attempts' => $submission->upload_attempts + 1,
             'last_upload_error' => $error,
         ]);
@@ -71,15 +72,20 @@ class UploadSubmissionToVit implements ShouldQueue
         $this->notifyFailure($submission);
     }
 
-    protected function notifySuccess(Submission $submission): void
+    protected function notifySuccess(CatalogSubmission $submission): void
     {
-        $submission->client?->notify(new CatalogUploadedNotification($submission));
+        $client = $submission->requestedByClient;
+
+        if ($client && $client->email) {
+            Notification::route('mail', $client->email)
+                ->notify(new CatalogUploadedNotification($submission));
+        }
 
         Notification::route('mail', config('vit.gateway_email'))
             ->notify(new CatalogUploadedNotification($submission));
     }
 
-    protected function notifyFailure(Submission $submission): void
+    protected function notifyFailure(CatalogSubmission $submission): void
     {
         Notification::route('mail', config('vit.gateway_email'))
             ->notify(new CatalogUploadFailedNotification($submission));

@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Auth\Authenticatable;
 use Illuminate\Contracts\Auth\Authenticatable as AuthenticatableContract;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -18,7 +19,7 @@ use Illuminate\Support\Str;
  */
 class Client extends Model implements AuthenticatableContract
 {
-    use Authenticatable, Notifiable;
+    use Authenticatable, HasFactory, Notifiable;
 
     protected $fillable = [
         'vendor_id',
@@ -38,6 +39,10 @@ class Client extends Model implements AuthenticatableContract
     protected $hidden = [
         'otp_code',
         'invitation_token',
+    ];
+
+    protected $with = [
+        'vendor',
     ];
 
     protected function casts(): array
@@ -60,9 +65,9 @@ class Client extends Model implements AuthenticatableContract
         return $this->hasMany(CatalogItem::class);
     }
 
-    public function submissions(): HasMany
+    public function catalogSubmissions(): HasMany
     {
-        return $this->hasMany(Submission::class);
+        return $this->hasMany(CatalogSubmission::class);
     }
 
     public function generateInvitationToken(): string

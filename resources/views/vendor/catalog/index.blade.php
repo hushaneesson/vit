@@ -1,59 +1,166 @@
 <x-layouts.vendor title="My Catalogs">
     <div class="space-y-6">
-        <div class="flex items-center justify-between">
+        <div class="flex flex-col gap-4 md:items-center md:justify-between md:flex-row">
             <div>
                 <h1 class="text-xl font-semibold">My Catalogs</h1>
                 <p class="text-sm text-gray-500">{{ $vendor->name }}</p>
             </div>
-            <a href="{{ route('vendor.catalog.create') }}"
-                class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700">
-                + Add Catalog Item
-            </a>
+            <div class="flex items-center justify-end w-full gap-2 md:w-auto">
+                <a href="{{ route('vendor.catalog-upload') }}" class="w-full text-white md:w-auto btn btn-gray">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round"
+                            d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 7.5 12 3m0 0L7.5 7.5M12 3v13.5" />
+                    </svg>
+                    Batch Upload
+                </a>
+                <a href="{{ route('vendor.catalog.create') }}" class="w-full md:w-auto btn btn-primary">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                    </svg>
+                    Add Item
+                </a>
+            </div>
         </div>
 
-        @if ($items !== null)
-            <div class="p-2 bg-white rounded-lg shadow-lg">
+        {{-- Catalog submission status and button --}}
+        @livewire('vendor.catalog-submission-button')
+
+        <div class="p-2 bg-white rounded-lg shadow-lg">
+            <form method="GET" action="{{ route('vendor.catalog.index') }}" class="px-4 py-8 mb-4">
+                <div class="gap-4 mb-4 md:flex">
+                    <div class="relative flex-1">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            class="absolute w-4 h-4 text-gray-400 -translate-y-1/2 pointer-events-none left-3 top-5 md:top-6">
+                            <circle cx="11" cy="11" r="8" stroke-width="2" />
+                            <path d="m21 21-4.35-4.35" stroke-width="2" stroke-linecap="round" />
+                        </svg>
+                        <input type="text" name="search" value="{{ request('search') }}"
+                            placeholder="Search by product name or sku..."
+                            class="w-full py-2 pr-8 text-sm border border-gray-300 rounded-md pl-9 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500" />
+                        @if (request('search'))
+                            <button type="button"
+                                onclick="this.closest('form').querySelector('[name=search]').value=''; this.closest('form').querySelector('[name=status]').value=''; this.closest('form').submit();"
+                                class="absolute p-1 text-gray-400 transition -translate-y-1/2 rounded right-2 top-1/2 hover:text-gray-600 hover:bg-gray-100">
+                                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                                    stroke-width="2.5">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        @endif
+                    </div>
+
+                    <select name="status"
+                        class="py-2 pl-3 pr-8 text-sm text-gray-700 border border-gray-300 rounded-md focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500 sm:w-48">
+                        <option value="">All Status</option>
+                        <option value="incomplete" @selected(request('status') === 'incomplete')>
+                            Incomplete
+                        </option>
+                        <option value="acceptable" @selected(request('status') === 'acceptable')>
+                            Acceptable
+                        </option>
+                        <option value="excellent" @selected(request('status') === 'excellent')>
+                            Excellent
+                        </option>
+                    </select>
+                </div>
+
+                <div class="flex justify-end gap-2">
+                    <button type="submit" class="py-1.5 btn btn-success">
+                        Apply Filters
+                    </button>
+
+                    @if (request('search') || request('status'))
+                        <a href="{{ route('vendor.catalog.index') }}" class="w-20 py-1.5 btn btn-gray">
+                            Clear
+                        </a>
+                    @endif
+                </div>
+            </form>
+
+            <div class="relative">
                 @if ($items->isEmpty())
-                    <p class="p-4 text-sm text-gray-500">No items in this catalog.</p>
+                    <div class="py-16 text-center">
+                        <svg class="w-12 h-12 mx-auto text-gray-300" fill="none" viewBox="0 0 24 24"
+                            stroke="currentColor" stroke-width="1.5">
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+                        </svg>
+                        <h3 class="mt-3 text-sm font-semibold text-gray-900">No catalog items found</h3>
+                        <p class="mt-1 text-sm text-gray-500">Try adjusting your search or filters.</p>
+                        @if (request('search') || request('status'))
+                            <a href="{{ route('vendor.catalog.index') }}"
+                                class="inline-flex items-center gap-1.5 px-4 py-2 mt-4 text-sm font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">
+                                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                                    stroke-width="2">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                                Clear filters
+                            </a>
+                        @endif
+                    </div>
                 @else
                     <div class="overflow-x-auto">
-                        <table class="min-w-full divide-y divide-gray-200">
-                            <thead class="bg-gray-50">
+                        <table class="min-w-full divide-y divide-gray-200 whitespace-nowrap">
+                            <thead class="bg-gray-50 ">
                                 <tr>
-                                    <th class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">Image</th>
-                                    <th class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">Product</th>
-                                    <th class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">Vendor Part #</th>
-                                    <th class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">Status</th>
-                                    <th class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase"></th>
+                                    <th
+                                        class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">
+                                        Product</th>
+                                    <th
+                                        class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">
+                                        Seller SKU</th>
+                                    <th
+                                        class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">
+                                        Status</th>
+                                    <th
+                                        class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody class="bg-white divide-y divide-gray-200">
                                 @foreach ($items as $item)
                                     <tr class="text-sm hover:bg-gray-50 whitespace-nowrap">
                                         <td class="px-6 py-4">
-                                            @if ($item->images->isNotEmpty())
-                                                <img src="{{ route('vendor.catalog-images.show', $item->images->first()) }}" class="object-cover w-12 h-12 border rounded">
-                                            @endif
-                                        </td>
-                                        <td class="px-6 py-4">
                                             <div class="font-medium">{{ $item->name }}</div>
                                         </td>
-                                        <td class="px-6 py-4 text-gray-500">{{ $item->vendor_sku }}</td>
+                                        <td class="px-6 py-4 text-gray-500">{{ $item->dealer_sku }}</td>
                                         <td class="px-6 py-4">
+                                            @php $status = $item->status ?? 'incomplete'; @endphp
                                             <span @class([
-                                                'px-2 py-1 text-xs font-semibold leading-5 uppercase rounded-full',
-                                                'text-emerald-600 bg-emerald-100' => $item->status === 'active',
-                                                'text-gray-600 bg-gray-100' => $item->status !== 'active',
+                                                'inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold leading-5 rounded-full',
+                                                'text-rose-700 bg-rose-100' => $status === 'incomplete',
+                                                'text-amber-700 bg-amber-100' => $status === 'acceptable',
+                                                'text-emerald-700 bg-emerald-100' => $status === 'excellent',
                                             ])>
-                                                implement
+                                                @if ($status === 'excellent')
+                                                    <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                                        <path fill-rule="evenodd"
+                                                            d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z"
+                                                            clip-rule="evenodd" />
+                                                    </svg>
+                                                @endif
+                                                @if ($status === 'incomplete')
+                                                    <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24"
+                                                        stroke="currentColor" stroke-width="2">
+                                                        <path stroke-linecap="round" stroke-linejoin="round"
+                                                            d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+                                                    </svg>
+                                                @endif
+                                                <span>{{ $status }}</span>
+                                                @if ($item->completeness_score > 0)
+                                                    <span class="opacity-60">({{ $item->completeness_score }}%)</span>
+                                                @endif
                                             </span>
                                         </td>
                                         <td class="px-6 py-4 space-x-3">
-                                            <a href="{{ route('vendor.catalog.edit', $item) }}" class="text-indigo-600 hover:text-indigo-800">Edit</a>
-                                            <form method="POST" action="{{ route('vendor.catalog.destroy', $item) }}" class="inline">
+                                            <a href="{{ route('vendor.catalog.edit', $item) }}"
+                                                class="text-sky-600 hover:text-sky-800">Edit</a>
+                                            <form method="POST"
+                                                action="{{ route('vendor.catalog.destroy', $item) }}" class="inline">
                                                 @csrf
                                                 @method('DELETE')
-                                                <button type="submit" class="text-red-600 hover:text-red-800" onclick="return confirm('Delete this catalog item?')">Delete</button>
+                                                <button type="submit" class="text-red-600 hover:text-red-800"
+                                                    onclick="return confirm('Delete this catalog item?')">Delete</button>
                                             </form>
                                         </td>
                                     </tr>
@@ -65,9 +172,15 @@
                     <div class="p-2 mt-4">
                         {{ $items->links('pagination::tailwind') }}
                     </div>
-
                 @endif
             </div>
-        @endif
+        </div>
     </div>
+
+    <script>
+        document.querySelector('form[action$="catalog"]')?.addEventListener('submit', function() {
+            document.getElementById('catalog-loading-overlay').classList.remove('hidden');
+            document.getElementById('catalog-loading-overlay').classList.add('flex');
+        });
+    </script>
 </x-layouts.vendor>

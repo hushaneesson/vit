@@ -19,10 +19,9 @@ class ProductHierarchyResource extends Resource
 {
     protected static ?string $model = ProductHierarchy::class;
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedRectangleStack;
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedRectangleGroup;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Catalog';
-
+    protected static string|UnitEnum|null $navigationGroup = 'Catalog Management';
 
 
     public static function form(Schema $schema): Schema

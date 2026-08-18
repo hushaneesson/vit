@@ -10,7 +10,7 @@ class Appointment extends Schedule
 {
     protected static function booted(): void
     {
-        static::addGlobalScope('appointments_only', function (Builder $query): void {
+        static::addGlobalScope('appointments', function (Builder $query): void {
             $query->where('schedule_type', ScheduleTypes::APPOINTMENT->value);
         });
 

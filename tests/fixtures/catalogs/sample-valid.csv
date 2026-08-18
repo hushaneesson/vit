@@ -1,0 +1,3 @@
+dealer_sku,name,manufacturer_sku,manufacturer,brand_name,list_price,selling_price,description,unit_of_measure,unspsc_code,item_weight
+SKU-001,Widget A,MFG-001,Acme Corp,Acme,19.99,14.99,High quality widget,EA,14111507,2.5
+SKU-002,Widget B,MFG-002,Acme Corp,Acme,29.99,24.99,Premium widget,EA,14111507,3.0
