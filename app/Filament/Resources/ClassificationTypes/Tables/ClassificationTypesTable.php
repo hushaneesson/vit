@@ -25,9 +25,6 @@ class ClassificationTypesTable
                     ->sortable()
                     ->label('Required')
                     ->boolean(),
-                TextColumn::make('sort_order')
-                    ->numeric()
-                    ->sortable(),
             ])
             ->filters([
                 //

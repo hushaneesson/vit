@@ -7,7 +7,12 @@ use Illuminate\Database\Eloquent\Model;
 class ClassificationType extends Model
 {
     protected $fillable = [
-        'key', 'label', 'description', 'is_always_required', 'active', 'sort_order',
+        'key',
+        'label',
+        'description',
+        'is_always_required',
+        'active',
+        'sort_order',
     ];
 
     protected function casts(): array
@@ -16,10 +21,5 @@ class ClassificationType extends Model
             'is_always_required' => 'boolean',
             'active' => 'boolean',
         ];
-    }
-
-    public function scopeActive($query)
-    {
-        return $query->where('active', true);
     }
 }

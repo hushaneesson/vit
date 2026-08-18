@@ -2,15 +2,21 @@
 
 namespace App\Livewire\Vendor;
 
+use App\Mail\NewCommodityTypeMail;
 use App\Models\CatalogItem;
 use App\Models\CatalogItemImage;
+use App\Models\ClassificationType;
 use App\Models\CommodityType;
+use App\Models\CountryCode;
 use App\Models\ProductHierarchy;
 use App\Models\UnitOfMeasure;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 use Livewire\WithFileUploads;
@@ -23,72 +29,54 @@ class CatalogItemForm extends Component
 
     // Identification
     public string $name = '';
-
     public string $sellerSku = '';
-
-    public string $replacementSku = '';
-
+    public array $replacementSkus = [''];
     public string $manufacturerSku = '';
 
     public string $manufacturer = '';
-
     public string $brandName = '';
 
-    public string $productTypeOrFamily = '';
-
+    public string $productCategory = '';
     public string $hierarchy = '';
 
     public string $description = '';
 
+    public ?string $availability = null;
     public string $unitOfMeasure = '';
-
     public ?string $quantityPerUnit = null;
+    public ?string $minQtyPerOrder = null;
+    public ?string $maxQtyPerOrder = null;
+    public ?string $multiples = null;
 
     public ?string $itemWeight = null;
-
-    public ?string $availability = null;
-
     public string $leadTime = '';
 
-    // Images
-    /** @var array<int, \Livewire\Features\SupportFileUploads\TemporaryUploadedFile> */
-    public array $newImages = [];
-
-    /** @var array<int, array{id:int, url:string}> */
-    public array $existingImages = [];
-
-    /** @var array<int, string> */
-    public array $searchTerms = [''];
-
     public ?string $listPrice = null;
-
     public ?string $sellingPricePerUnit = null;
 
-    /** @var array<int, string> */
+    public array $searchTerms = [''];
     public array $sellingPoints = [''];
 
-    /** @var array<int, array{key:string, value:string}> */
+    // Images
+    public array $newImages = [];
+    public array $existingImages = [];
+
     public array $specifications = [['key' => '', 'value' => '']];
-
+    public array $classifications = [['type' => '', 'value' => '']];
     public string $unspscCode = '';
-
     public string $msdsLink = '';
 
-    /** @var array<int, string> */
-    public array $classifications = [''];
-
-    public ?string $minQtyPerOrder = null;
-
-    public ?string $maxQtyPerOrder = null;
-
-    public ?string $multiples = null;
 
     public function mount(?CatalogItem $catalogItem = null): void
     {
         if ($catalogItem && $catalogItem->exists) {
             $this->authorizeVendorOwnership($catalogItem);
             $this->fillFromModel($catalogItem);
+
+            return;
         }
+
+        $this->classifications = $this->ensureRequiredClassificationRows($this->classifications);
     }
 
     protected function authorizeVendorOwnership(CatalogItem $catalogItem): void
@@ -103,11 +91,11 @@ class CatalogItemForm extends Component
 
         $this->name = $catalogItem->name;
         $this->sellerSku = $catalogItem->dealer_sku;
-        $this->replacementSku = $catalogItem->replacement_sku ?? '';
+        $this->replacementSkus = ! empty($catalogItem->replacement_sku) ? array_values($catalogItem->replacement_sku) : [''];
         $this->manufacturerSku = $catalogItem->manufacturer_sku ?? '';
         $this->manufacturer = $catalogItem->manufacturer ?? '';
         $this->brandName = $catalogItem->brand_name ?? '';
-        $this->productTypeOrFamily = $catalogItem->category ?? '';
+        $this->productCategory = $catalogItem->category ?? '';
         $this->hierarchy = $catalogItem->hierarchy ?? '';
         $this->description = $catalogItem->description ?? '';
         $this->unitOfMeasure = $catalogItem->unit_of_measure ?? '';
@@ -126,7 +114,9 @@ class CatalogItemForm extends Component
         $this->searchTerms = ! empty($catalogItem->search_terms) ? $catalogItem->search_terms : [''];
         $this->sellingPoints = ! empty($catalogItem->selling_points) ? $catalogItem->selling_points : [''];
         $this->specifications = ! empty($catalogItem->specifications) ? $catalogItem->specifications : [['key' => '', 'value' => '']];
-        $this->classifications = ! empty($catalogItem->classifications) ? $catalogItem->classifications : [''];
+        $this->classifications = $this->ensureRequiredClassificationRows(
+            $this->mapStoredClassificationsToRows($catalogItem->classifications)
+        );
 
         // $this->existingImages = $catalogItem->images->map(fn(CatalogItemImage $image) => [
         //     'id' => $image->id,
@@ -156,9 +146,38 @@ class CatalogItemForm extends Component
             ->get();
     }
 
+    #[Computed]
+    public function classificationTypeOptions()
+    {
+        return ClassificationType::query()
+            ->orderBy('is_always_required', 'desc')
+            ->orderBy('label')
+            ->get();
+    }
+
+    #[Computed]
+    public function countries()
+    {
+        return CountryCode::orderBy('name')
+            ->get();
+    }
+
     public function addSearchTerm(): void
     {
         $this->searchTerms[] = '';
+    }
+
+    public function addReplacementSku(): void
+    {
+        if (count($this->replacementSkus) < 4) {
+            $this->replacementSkus[] = '';
+        }
+    }
+
+    public function removeReplacementSku(int $index): void
+    {
+        unset($this->replacementSkus[$index]);
+        $this->replacementSkus = array_values($this->replacementSkus);
     }
 
     public function removeSearchTerm(int $index): void
@@ -191,13 +210,24 @@ class CatalogItemForm extends Component
 
     public function addClassification(): void
     {
-        $this->classifications[] = '';
+        $this->classifications[] = ['type' => '', 'value' => ''];
     }
 
     public function removeClassification(int $index): void
     {
+        if (! array_key_exists($index, $this->classifications)) {
+            return;
+        }
+
+        $type = trim((string) ($this->classifications[$index]['type'] ?? ''));
+
+        if ($type !== '' && in_array($type, $this->requiredClassificationTypeKeys(), true)) {
+            return;
+        }
+
         unset($this->classifications[$index]);
         $this->classifications = array_values($this->classifications);
+        $this->classifications = $this->ensureRequiredClassificationRows($this->classifications);
     }
 
     public function removeExistingImage(int $imageId): void
@@ -226,15 +256,16 @@ class CatalogItemForm extends Component
                     ->where('vendor_id', $client->vendor_id)
                     ->ignore($this->catalogItemId),
             ],
-            'replacementSku' => ['nullable', 'string', 'max:255'],
+            'replacementSkus' => ['nullable', 'array', 'max:4'],
+            'replacementSkus.*' => ['nullable', 'string', 'max:255', 'exists:catalog_items:dealer_sku'],
             'manufacturerSku' => ['nullable', 'string', 'max:255'],
 
-            'productTypeOrFamily' => ['required', 'string', 'max:50'],
+            'productCategory' => ['required'],
             'hierarchy' => ['required', 'string', 'max:255'],
 
-            'description' => ['required', 'string'],
-            'unitOfMeasure' => ['required', 'string', 'max:50'],
-            'quantityPerUnit' => ['nullable', 'integer', 'min:0'],
+            'description' => ['required', 'string', 'max:4000'],
+            'unitOfMeasure' => ['required'],
+            'quantityPerUnit' => ['nullable', 'integer', 'min:1'],
 
             'newImages' => [$this->catalogItemId || count($this->existingImages) ? 'nullable' : 'array'],
             'newImages.*' => ['image', 'max:8192'],
@@ -249,7 +280,7 @@ class CatalogItemForm extends Component
             'sellingPricePerUnit' => ['required', 'numeric', 'min:0', 'lte:listPrice'],
             'itemWeight' => ['required', 'numeric', 'min:0'],
             'availability' => ['nullable', 'integer', 'min:0'],
-            'leadTime' => ['nullable', Rule::in(['1-2 days', '3-5 days', '5-7 days'])],
+            'leadTime' => ['nullable', Rule::in(['0-3 days', '3-5 days', '5-10 days', '10 & over'])],
 
             'sellingPoints' => ['required', 'array', 'min:1'],
             'sellingPoints.*' => ['nullable', 'string'],
@@ -262,7 +293,8 @@ class CatalogItemForm extends Component
             'msdsLink' => ['nullable', 'url', 'max:300'],
 
             'classifications' => ['nullable', 'array'],
-            'classifications.*' => ['nullable', 'string'],
+            'classifications.*.type' => ['nullable', 'required_with:classifications.*.value',],
+            'classifications.*.value' => ['nullable', 'required_with:classifications.*.type',],
 
             'minQtyPerOrder' => ['nullable', 'integer', 'min:0'],
             'maxQtyPerOrder' => ['nullable', 'integer', 'min:0'],
@@ -270,16 +302,47 @@ class CatalogItemForm extends Component
         ];
     }
 
+    public function messages(): array
+    {
+        return [
+            'classifications.*.type.required_with' => 'All classification rows must include both a type and a value.',
+            'classifications.*.value.required_with' => 'All classification rows must include both a type and a value.',
+        ];
+    }
+
     public function save()
     {
         $client = Auth::guard('client')->user();
         $vendor = $client->vendor;
+        $this->classifications = $this->ensureRequiredClassificationRows($this->classifications);
 
-        $this->validate();
+        try {
+            $this->validate();
+        } catch (ValidationException $e) {
+            $this->dispatch('scroll-to-first-error');
+
+            throw $e;
+        }
+
+        if ($this->hasDuplicateClassificationTypes()) {
+            $this->addError('classifications', 'Each classification type can only be selected once.');
+            $this->dispatch('scroll-to-first-error');
+
+            return;
+        }
 
         $searchTermsClean = array_values(array_filter(array_map('trim', $this->searchTerms)));
+        $replacementSkusClean = array_values(array_filter(array_map('trim', $this->replacementSkus)));
         $sellingPointsClean = array_values(array_filter(array_map('trim', $this->sellingPoints)));
-        $classificationsClean = array_values(array_filter(array_map('trim', $this->classifications)));
+        $classificationsClean = [];
+        foreach ($this->classifications as $classification) {
+            $type = trim((string) ($classification['type'] ?? ''));
+            $value = trim((string) ($classification['value'] ?? ''));
+
+            if ($type !== '' && $value !== '') {
+                $classificationsClean[] = "{$type}={$value}";
+            }
+        }
 
         $specPairs = [];
         foreach ($this->specifications as $spec) {
@@ -290,21 +353,31 @@ class CatalogItemForm extends Component
             }
         }
 
-        $catalogItem = DB::transaction(function () use ($vendor, $searchTermsClean, $sellingPointsClean, $specPairs, $classificationsClean) {
+        // create category and get id if new
+        if (!is_numeric($this->productCategory)) {
+            $commodityType = CommodityType::firstOrCreate(['approved' => false, 'name' => Str::headline($this->productCategory)]);
+            $this->productCategory = $commodityType->id;
+
+            // notify management of new category creation
+            Mail::to(config('vit.gateway_email'))
+                ->send(new NewCommodityTypeMail($commodityType->name));
+        }
+
+        $catalogItem = DB::transaction(function () use ($vendor, $searchTermsClean, $replacementSkusClean, $sellingPointsClean, $specPairs, $classificationsClean) {
             $attrs = [
                 'name' => $this->name,
                 'dealer_sku' => $this->sellerSku,
-                'replacement_sku' => $this->replacementSku !== '' ? $this->replacementSku : null,
+                'replacement_sku' => $replacementSkusClean !== [] ? $replacementSkusClean : null,
                 'manufacturer_sku' => $this->manufacturerSku,
                 'manufacturer' => $this->manufacturer,
                 'brand_name' => $this->brandName,
-                'category' => $this->productTypeOrFamily,
+                'category' => $this->productCategory,
                 'hierarchy' => $this->hierarchy,
                 'description' => $this->description,
                 'unit_of_measure' => $this->unitOfMeasure,
                 'quantity_per_unit' => $this->quantityPerUnit !== null && $this->quantityPerUnit !== '' ? (int) $this->quantityPerUnit : null,
                 'item_weight' => $this->itemWeight,
-                'availability' => $this->availability !== null && $this->availability !== '' ? (int) $this->availability : null,
+                'availability' => $this->availability !== null && $this->availability !== '' ? (int) $this->availability : 999,
                 'lead_time' => $this->leadTime !== '' ? $this->leadTime : null,
                 'min_qty_per_order' => $this->minQtyPerOrder !== null && $this->minQtyPerOrder !== '' ? (int) $this->minQtyPerOrder : null,
                 'max_qty_per_order' => $this->maxQtyPerOrder !== null && $this->maxQtyPerOrder !== '' ? (int) $this->maxQtyPerOrder : null,
@@ -359,5 +432,121 @@ class CatalogItemForm extends Component
     public function render()
     {
         return view('livewire.vendor.catalog-item-form');
+    }
+
+    /**
+     * @param  mixed  $stored
+     * @return array<int, array{type:string, value:string}>
+     */
+    protected function mapStoredClassificationsToRows($stored): array
+    {
+        if (! is_array($stored) || empty($stored)) {
+            return [['type' => '', 'value' => '']];
+        }
+
+        $rows = [];
+
+        foreach ($stored as $entry) {
+            if (is_array($entry)) {
+                $rows[] = [
+                    'type' => (string) ($entry['type'] ?? $entry['key'] ?? ''),
+                    'value' => (string) ($entry['value'] ?? ''),
+                ];
+
+                continue;
+            }
+
+            $text = trim((string) $entry);
+
+            if ($text === '') {
+                continue;
+            }
+
+            if (str_contains($text, '=')) {
+                [$type, $value] = explode('=', $text, 2);
+
+                $rows[] = [
+                    'type' => trim($type),
+                    'value' => trim($value),
+                ];
+
+                continue;
+            }
+
+            $rows[] = [
+                'type' => '',
+                'value' => $text,
+            ];
+        }
+
+        return $rows !== [] ? $rows : [['type' => '', 'value' => '']];
+    }
+
+    protected function hasDuplicateClassificationTypes(): bool
+    {
+        $types = collect($this->classifications)
+            ->map(fn(array $row) => trim((string) ($row['type'] ?? '')))
+            ->filter()
+            ->values();
+
+        return $types->count() !== $types->unique()->count();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function requiredClassificationTypeKeys(): array
+    {
+        return ClassificationType::query()
+            ->where('is_always_required', true)
+            ->pluck('key')
+            ->map(fn($key) => trim((string) $key))
+            ->filter()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $rows
+     * @return array<int, array{type:string, value:string}>
+     */
+    protected function ensureRequiredClassificationRows(array $rows): array
+    {
+        $normalized = array_values(array_map(
+            fn(array $row) => [
+                'type' => trim((string) ($row['type'] ?? '')),
+                'value' => trim((string) ($row['value'] ?? '')),
+            ],
+            $rows,
+        ));
+
+        $requiredKeys = $this->requiredClassificationTypeKeys();
+
+        if ($requiredKeys === []) {
+            return $normalized !== [] ? $normalized : [['type' => '', 'value' => '']];
+        }
+
+        $rowsByType = collect($normalized)
+            ->filter(fn(array $row) => $row['type'] !== '')
+            ->keyBy('type');
+
+        $requiredRows = collect($requiredKeys)
+            ->map(function (string $key) use ($rowsByType): array {
+                $row = $rowsByType->get($key);
+
+                return [
+                    'type' => $key,
+                    'value' => trim((string) ($row['value'] ?? '')),
+                ];
+            })
+            ->values()
+            ->all();
+
+        $nonRequiredRows = collect($normalized)
+            ->filter(fn(array $row) => ! in_array($row['type'], $requiredKeys, true))
+            ->values()
+            ->all();
+
+        return array_values(array_merge($requiredRows, $nonRequiredRows));
     }
 }
