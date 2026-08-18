@@ -29,7 +29,7 @@ class CatalogItemFactory extends Factory
             'manufacturer' => $this->faker->optional()->company(),
             'brand_name' => $this->faker->optional()->company(),
 
-            'hierarchy' => ProductHierarchy::where('level', 3)->inRandomOrder()->first()?->hierarchy_number,
+            'hierarchy' => ProductHierarchy::where('level', 3)->inRandomOrder()->first()?->id,
             'category' => CommodityType::inRandomOrder()->first()?->id,
 
             'item_weight' => $this->faker->randomFloat(2, 0.1, 50),

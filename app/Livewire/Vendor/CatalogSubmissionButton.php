@@ -34,6 +34,12 @@ class CatalogSubmissionButton extends Component
             return null;
         }
 
+        $canSubmit = CatalogItem::leftJoin('commodity_types', 'catalog_items.category', '=', 'commodity_types.id')
+            ->leftJoin('product_hierarchies', 'catalog_items.hierarchy', '=', 'product_hierarchies.hierarchy_number')
+            ->where('commodity_types.approved', false)
+            ->whereNull('product_hierarchies.hierarchy_number')
+            ->count();
+// dd($canSubmit);
         $total = CatalogItem::where('vendor_id', $client->vendor_id)->count();
         $complete = CatalogItem::where('vendor_id', $client->vendor_id)
             ->whereIn('status', ['acceptable', 'excellent'])
@@ -41,6 +47,7 @@ class CatalogSubmissionButton extends Component
         $incomplete = $total - $complete;
 
         return [
+            'can_submit' => $canSubmit === 0,
             'total' => $total,
             'complete' => $complete,
             'incomplete' => $incomplete,
@@ -127,6 +134,7 @@ class CatalogSubmissionButton extends Component
             $completeItems = CatalogItem::where('vendor_id', $vendorId)
                 ->whereIn('status', ['acceptable', 'excellent'])
                 ->count();
+
             $incompleteItems = $totalItems - $completeItems;
 
             $submission = null;

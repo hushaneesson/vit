@@ -83,8 +83,8 @@ class CatalogExportService
             $sheet->getColumnDimension($column)->setAutoSize(true);
         }
 
-        $safeCatalogName = Str::slug($catalogName);
-        $path = "exports/vendor-{$vendor->id}/catalog-{$safeCatalogName}-" . now()->format('Ymd-His') . '.xlsx';
+        $safeCatalogName = $catalogName;
+        $path = "exports/vendor-{$vendor->id}/{$safeCatalogName}-" . now()->format('Ymd-His') . '.xlsx';
 
         Storage::disk($disk)->makeDirectory(dirname($path));
 
@@ -138,10 +138,11 @@ class CatalogExportService
     {
         $vendor = $submission->vendor;
         $vendorName = is_string($vendor->name) ? $vendor->name : 'Unknown';
-        $catalogName = 'Export ' . $vendorName . ' ' . now()->format('M j, Y g:i A');
+        $catalogName = $vendorName;
         $disk = $submission->disk ?? 'local';
 
-        $itemsQuery = CatalogItem::where('vendor_id', $vendor->id)
+        $itemsQuery = CatalogItem::with(['commodityType', 'hierarchyInfo', 'unitOfMeasure'])
+            ->where('vendor_id', $vendor->id)
             ->whereIn('status', ['acceptable', 'excellent'])
             ->orderBy('id');
 
@@ -347,17 +348,33 @@ class CatalogExportService
             return $item->dealer_sku ?? '';
         }
 
+        if ($fieldKey === 'hierarchy') {
+            return $item->hierarchyInfo?->hierarchy_number;
+        }
+
+        if ($fieldKey === 'product_commodity_type') {
+            return $item->commodityType?->name;
+        }
+
+        if ($fieldKey === 'unit_of_measure') {
+            return $item->unitOfMeasure?->code;
+        }
+
+        if ($fieldKey === 'item_weight_in_pounds') {
+            return $item->item_weight;
+        }
+
         // Determine the Eloquent attribute to read from CatalogItem.
         // model_attribute in the DEFINITIONS handles all overrides (e.g.
         // shortdescription -> name, image_urls -> images, etc.).
         $attr = $field->model_attribute ?? $fieldKey;
 
         // TODO: remove this special case for hierarchy once the field def is updated to use model_attribute
-        if ($fieldKey === 'hierarchy') {
-            $rawValue = $item->hierarchy ?? $item->{$fieldKey} ?? null;
-        } else {
-            $rawValue = $item->{$attr} ?? $item->{$fieldKey} ?? null;
-        }
+        // if ($fieldKey === 'hierarchy') {
+        //     $rawValue = $item->hierarchy ?? $item->{$fieldKey} ?? null;
+        // } else {
+        $rawValue = $item->{$attr} ?? $item->{$fieldKey} ?? null;
+        // }
 
         if (is_null($rawValue) || $rawValue === '' || $rawValue === []) {
             return '';

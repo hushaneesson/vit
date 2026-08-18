@@ -67,17 +67,17 @@ class CatalogItem extends Model
 
     public function hierarchyInfo()
     {
-        return $this->belongsTo(ProductHierarchy::class, 'hierarchy', 'hierarchy_number');
+        return $this->belongsTo(ProductHierarchy::class, 'hierarchy', 'id');
     }
 
     public function commodityType()
     {
-        return $this->belongsTo(CommodityType::class, 'category', 'name');
+        return $this->belongsTo(CommodityType::class, 'category', 'id');
     }
 
     public function unitOfMeasure()
     {
-        return $this->belongsTo(UnitOfMeasure::class, 'unit_of_measure', 'code');
+        return $this->belongsTo(UnitOfMeasure::class, 'unit_of_measure', 'id');
     }
 
     protected function replacementSku(): Attribute

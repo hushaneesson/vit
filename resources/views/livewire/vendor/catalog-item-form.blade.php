@@ -142,7 +142,7 @@
                     <div>
                         <label>Hierarchy <span class="text-red-600">*</span></label>
                         <x-searchable-select wire-model="hierarchy" :options="$this->hierarchyOptions->map(
-                            fn($h) => ['value' => $h->hierarchy_number, 'label' => $h->name],
+                            fn($h) => ['value' => $h->id, 'label' => $h->name],
                         )" :allow-create="false"
                             placeholder="Select a product hierarchy..." />
 
