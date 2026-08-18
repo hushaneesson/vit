@@ -30,13 +30,13 @@ class CatalogItemFactory extends Factory
             'brand_name' => $this->faker->optional()->company(),
 
             'hierarchy' => ProductHierarchy::where('level', 3)->inRandomOrder()->first()?->hierarchy_number,
-            'category' => CommodityType::inRandomOrder()->first()?->name,
+            'category' => CommodityType::inRandomOrder()->first()?->id,
 
             'item_weight' => $this->faker->randomFloat(2, 0.1, 50),
             'availability' => $this->faker->numberBetween(0, 1000),
-            'lead_time' => $this->faker->randomElement(['1-2 days', '3-5 days', '1-2 weeks', '2-4 weeks']),
+            'lead_time' => $this->faker->randomElement(['0-3 days', '3-5 days', '5-10 days', '10 & over']),
 
-            'unit_of_measure' => UnitOfMeasure::inRandomOrder()->first()?->name,
+            'unit_of_measure' => UnitOfMeasure::inRandomOrder()->first()?->id,
             'quantity_per_unit' => $this->faker->randomElement([1, 5, 10, 12, 24, 50]),
             'min_qty_per_order' => $this->faker->optional()->numberBetween(1, 10),
             'max_qty_per_order' => $this->faker->optional()->numberBetween(50, 500),

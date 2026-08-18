@@ -7,6 +7,7 @@ use App\Models\CatalogItem;
 use App\Models\CatalogItemImage;
 use App\Models\ClassificationType;
 use App\Models\CommodityType;
+use App\Models\CountryCode;
 use App\Models\ProductHierarchy;
 use App\Models\UnitOfMeasure;
 use Illuminate\Support\Facades\Auth;
@@ -15,6 +16,7 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 use Livewire\WithFileUploads;
@@ -70,7 +72,11 @@ class CatalogItemForm extends Component
         if ($catalogItem && $catalogItem->exists) {
             $this->authorizeVendorOwnership($catalogItem);
             $this->fillFromModel($catalogItem);
+
+            return;
         }
+
+        $this->classifications = $this->ensureRequiredClassificationRows($this->classifications);
     }
 
     protected function authorizeVendorOwnership(CatalogItem $catalogItem): void
@@ -108,7 +114,9 @@ class CatalogItemForm extends Component
         $this->searchTerms = ! empty($catalogItem->search_terms) ? $catalogItem->search_terms : [''];
         $this->sellingPoints = ! empty($catalogItem->selling_points) ? $catalogItem->selling_points : [''];
         $this->specifications = ! empty($catalogItem->specifications) ? $catalogItem->specifications : [['key' => '', 'value' => '']];
-        $this->classifications = $this->mapStoredClassificationsToRows($catalogItem->classifications);
+        $this->classifications = $this->ensureRequiredClassificationRows(
+            $this->mapStoredClassificationsToRows($catalogItem->classifications)
+        );
 
         // $this->existingImages = $catalogItem->images->map(fn(CatalogItemImage $image) => [
         //     'id' => $image->id,
@@ -142,9 +150,15 @@ class CatalogItemForm extends Component
     public function classificationTypeOptions()
     {
         return ClassificationType::query()
-            ->where('active', true)
-            ->orderBy('sort_order')
+            ->orderBy('is_always_required', 'desc')
             ->orderBy('label')
+            ->get();
+    }
+
+    #[Computed]
+    public function countries()
+    {
+        return CountryCode::orderBy('name')
             ->get();
     }
 
@@ -201,8 +215,19 @@ class CatalogItemForm extends Component
 
     public function removeClassification(int $index): void
     {
+        if (! array_key_exists($index, $this->classifications)) {
+            return;
+        }
+
+        $type = trim((string) ($this->classifications[$index]['type'] ?? ''));
+
+        if ($type !== '' && in_array($type, $this->requiredClassificationTypeKeys(), true)) {
+            return;
+        }
+
         unset($this->classifications[$index]);
         $this->classifications = array_values($this->classifications);
+        $this->classifications = $this->ensureRequiredClassificationRows($this->classifications);
     }
 
     public function removeExistingImage(int $imageId): void
@@ -277,15 +302,32 @@ class CatalogItemForm extends Component
         ];
     }
 
+    public function messages(): array
+    {
+        return [
+            'classifications.*.type.required_with' => 'All classification rows must include both a type and a value.',
+            'classifications.*.value.required_with' => 'All classification rows must include both a type and a value.',
+        ];
+    }
+
     public function save()
     {
         $client = Auth::guard('client')->user();
         $vendor = $client->vendor;
+        $this->classifications = $this->ensureRequiredClassificationRows($this->classifications);
 
-        $this->validate();
+        try {
+            $this->validate();
+        } catch (ValidationException $e) {
+            $this->dispatch('scroll-to-first-error');
+
+            throw $e;
+        }
 
         if ($this->hasDuplicateClassificationTypes()) {
             $this->addError('classifications', 'Each classification type can only be selected once.');
+            $this->dispatch('scroll-to-first-error');
+
             return;
         }
 
@@ -448,5 +490,63 @@ class CatalogItemForm extends Component
             ->values();
 
         return $types->count() !== $types->unique()->count();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function requiredClassificationTypeKeys(): array
+    {
+        return ClassificationType::query()
+            ->where('is_always_required', true)
+            ->pluck('key')
+            ->map(fn($key) => trim((string) $key))
+            ->filter()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $rows
+     * @return array<int, array{type:string, value:string}>
+     */
+    protected function ensureRequiredClassificationRows(array $rows): array
+    {
+        $normalized = array_values(array_map(
+            fn(array $row) => [
+                'type' => trim((string) ($row['type'] ?? '')),
+                'value' => trim((string) ($row['value'] ?? '')),
+            ],
+            $rows,
+        ));
+
+        $requiredKeys = $this->requiredClassificationTypeKeys();
+
+        if ($requiredKeys === []) {
+            return $normalized !== [] ? $normalized : [['type' => '', 'value' => '']];
+        }
+
+        $rowsByType = collect($normalized)
+            ->filter(fn(array $row) => $row['type'] !== '')
+            ->keyBy('type');
+
+        $requiredRows = collect($requiredKeys)
+            ->map(function (string $key) use ($rowsByType): array {
+                $row = $rowsByType->get($key);
+
+                return [
+                    'type' => $key,
+                    'value' => trim((string) ($row['value'] ?? '')),
+                ];
+            })
+            ->values()
+            ->all();
+
+        $nonRequiredRows = collect($normalized)
+            ->filter(fn(array $row) => ! in_array($row['type'], $requiredKeys, true))
+            ->values()
+            ->all();
+
+        return array_values(array_merge($requiredRows, $nonRequiredRows));
     }
 }

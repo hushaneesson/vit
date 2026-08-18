@@ -1,4 +1,26 @@
-<div class="mx-auto space-y-6">
+<div class="mx-auto space-y-6" x-data="{
+    scrollToFirstError() {
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                const firstError = this.$el.querySelector('p.text-sm.text-red-600');
+
+                if (!firstError) {
+                    return;
+                }
+
+                const field = firstError.previousElementSibling?.matches('input, textarea, select') ?
+                    firstError.previousElementSibling :
+                    firstError.closest('div')?.querySelector('input, textarea, select');
+
+                firstError.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+                if (field) {
+                    field.focus({ preventScroll: true });
+                }
+            });
+        });
+    }
+}" x-on:scroll-to-first-error.window="scrollToFirstError()">
     {{-- Page header --}}
     <div class="px-6 py-5 bg-white border border-gray-200 shadow-sm rounded-xl">
         <div class="flex items-center gap-3">
@@ -108,9 +130,7 @@
                 <div class="grid gap-8 lg:grid-cols-2">
                     <div>
                         <label>Product Category <span class="text-red-600">*</span></label>
-                        <x-searchable-select wire-model="productCategory" :options="$this->commodityTypeOptions->map(
-                            fn($o) => ['value' => $o->id, 'label' => $o->name],
-                        )" :allow-create="true"
+                        <x-searchable-select wire-model="productCategory" :options="$this->commodityTypeOptions->map(fn($o) => ['value' => $o->id, 'label' => $o->name])" :allow-create="true"
                             placeholder="Select a product type..." />
 
                         <p class="text-sm text-gray-500 mt-1.5">Pick the broad commodity group for reporting and search.
@@ -466,11 +486,17 @@
                         @foreach ($classifications as $index => $classification)
                             @php
                                 $selectedType = $classification['type'] ?? '';
+                                $isRequiredType =
+                                    $selectedType !== '' &&
+                                    $this->classificationTypeOptions
+                                        ->where('key', $selectedType)
+                                        ->where('is_always_required', true)
+                                        ->isNotEmpty();
                                 $selectedTypesInOtherRows = collect($classifications)
                                     ->map(fn($row, $i) => $i === $index ? null : $row['type'] ?? null)
                                     ->filter();
                             @endphp
-                            <div class="flex gap-2">
+                            <div class="flex items-center gap-2">
                                 <x-searchable-select wire-model="classifications.{{ $index }}.type"
                                     class="flex-1" :options="$this->classificationTypeOptions
                                         ->filter(
@@ -479,15 +505,29 @@
                                         )
                                         ->map(fn($t) => ['value' => $t->key, 'label' => $t->label])
                                         ->values()
-                                        ->toArray()" :allow-create="false"
+                                        ->toArray()" :allow-create="false" :disabled="$isRequiredType"
                                     placeholder="Select an option..." />
 
-                                <input type="text" wire:model="classifications.{{ $index }}.value"
-                                    placeholder="Enter value"
-                                    class="block w-1/2 text-sm border-gray-300 rounded-lg shadow-sm focus:border-sky-500 focus:ring-sky-500 focus:ring-1">
-                                @if (count($classifications) > 1)
+
+
+
+                                @if ($classification['type'] === 'COUNTRY_OF_ORIGIN')
+                                    <x-searchable-select wire-model="classifications.{{ $index }}.value"
+                                        class="flex-1" :options="$this->countries
+                                            ->map(fn($t) => ['value' => $t->code, 'label' => $t->name])
+                                            ->values()
+                                            ->toArray()" :allow-create="false" :disabled="$isRequiredType"
+                                        placeholder="Select an option..." />
+                                @else
+                                    <input type="text" wire:model="classifications.{{ $index }}.value"
+                                        placeholder="Enter value"
+                                        class="block w-1/2 text-sm border-gray-300 rounded-lg shadow-sm focus:border-sky-500 focus:ring-sky-500 focus:ring-1">
+                                @endif
+
+
+                                @if (!$isRequiredType && count($classifications) > 1)
                                     <button type="button" wire:click="removeClassification({{ $index }})"
-                                        class="flex-shrink-0 px-3 text-sm text-red-600 transition-colors rounded-lg hover:bg-red-50">Remove</button>
+                                        class="px-3 text-sm text-red-600 transition-colors rounded-lg shrink-0 hover:bg-red-50">Remove</button>
                                 @endif
                             </div>
                         @endforeach
@@ -539,7 +579,7 @@
                     <div>
                         <label>Unit of Measure <span class="text-red-600">*</span></label>
                         <x-searchable-select wire-model="unitOfMeasure" :options="$this->unitOfMeasureOptions->map(
-                            fn($m) => ['value' => $m->code, 'label' => $m->code . ' - ' . $m->description],
+                            fn($m) => ['value' => $m->id, 'label' => $m->code . ' - ' . $m->description],
                         )" :allow-create="true"
                             placeholder="Select an option..." />
                         <p class="text-sm text-gray-500 mt-1.5">How the item is sold. Example: EA (each), BX (box), CS
