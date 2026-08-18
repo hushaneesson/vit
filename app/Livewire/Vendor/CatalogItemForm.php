@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Vendor;
 
+use App\Mail\NewCommodityTypeMail;
 use App\Models\CatalogItem;
 use App\Models\CatalogItemImage;
 use App\Models\ClassificationType;
@@ -10,7 +11,9 @@ use App\Models\ProductHierarchy;
 use App\Models\UnitOfMeasure;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
@@ -25,13 +28,13 @@ class CatalogItemForm extends Component
     // Identification
     public string $name = '';
     public string $sellerSku = '';
-    public string $replacementSku = '';
+    public array $replacementSkus = [''];
     public string $manufacturerSku = '';
 
     public string $manufacturer = '';
     public string $brandName = '';
 
-    public string $productTypeOrFamily = '';
+    public string $productCategory = '';
     public string $hierarchy = '';
 
     public string $description = '';
@@ -53,15 +56,10 @@ class CatalogItemForm extends Component
     public array $sellingPoints = [''];
 
     // Images
-    /** @var array<int, \Livewire\Features\SupportFileUploads\TemporaryUploadedFile> */
     public array $newImages = [];
-
-    /** @var array<int, array{id:int, url:string}> */
     public array $existingImages = [];
 
-    /** @var array<int, array{key:string, value:string}> */
     public array $specifications = [['key' => '', 'value' => '']];
-    /** @var array<int, array{type:string, value:string}> */
     public array $classifications = [['type' => '', 'value' => '']];
     public string $unspscCode = '';
     public string $msdsLink = '';
@@ -87,11 +85,11 @@ class CatalogItemForm extends Component
 
         $this->name = $catalogItem->name;
         $this->sellerSku = $catalogItem->dealer_sku;
-        $this->replacementSku = $catalogItem->replacement_sku ?? '';
+        $this->replacementSkus = ! empty($catalogItem->replacement_sku) ? array_values($catalogItem->replacement_sku) : [''];
         $this->manufacturerSku = $catalogItem->manufacturer_sku ?? '';
         $this->manufacturer = $catalogItem->manufacturer ?? '';
         $this->brandName = $catalogItem->brand_name ?? '';
-        $this->productTypeOrFamily = $catalogItem->category ?? '';
+        $this->productCategory = $catalogItem->category ?? '';
         $this->hierarchy = $catalogItem->hierarchy ?? '';
         $this->description = $catalogItem->description ?? '';
         $this->unitOfMeasure = $catalogItem->unit_of_measure ?? '';
@@ -153,6 +151,19 @@ class CatalogItemForm extends Component
     public function addSearchTerm(): void
     {
         $this->searchTerms[] = '';
+    }
+
+    public function addReplacementSku(): void
+    {
+        if (count($this->replacementSkus) < 4) {
+            $this->replacementSkus[] = '';
+        }
+    }
+
+    public function removeReplacementSku(int $index): void
+    {
+        unset($this->replacementSkus[$index]);
+        $this->replacementSkus = array_values($this->replacementSkus);
     }
 
     public function removeSearchTerm(int $index): void
@@ -220,10 +231,11 @@ class CatalogItemForm extends Component
                     ->where('vendor_id', $client->vendor_id)
                     ->ignore($this->catalogItemId),
             ],
-            'replacementSku' => ['nullable', 'string', 'max:255'],
+            'replacementSkus' => ['nullable', 'array', 'max:4'],
+            'replacementSkus.*' => ['nullable', 'string', 'max:255', 'exists:catalog_items:dealer_sku'],
             'manufacturerSku' => ['nullable', 'string', 'max:255'],
 
-            'productTypeOrFamily' => ['required'],
+            'productCategory' => ['required'],
             'hierarchy' => ['required', 'string', 'max:255'],
 
             'description' => ['required', 'string', 'max:4000'],
@@ -243,7 +255,7 @@ class CatalogItemForm extends Component
             'sellingPricePerUnit' => ['required', 'numeric', 'min:0', 'lte:listPrice'],
             'itemWeight' => ['required', 'numeric', 'min:0'],
             'availability' => ['nullable', 'integer', 'min:0'],
-            'leadTime' => ['nullable', Rule::in(['1-2 days', '3-5 days', '5-7 days'])],
+            'leadTime' => ['nullable', Rule::in(['0-3 days', '3-5 days', '5-10 days', '10 & over'])],
 
             'sellingPoints' => ['required', 'array', 'min:1'],
             'sellingPoints.*' => ['nullable', 'string'],
@@ -274,11 +286,11 @@ class CatalogItemForm extends Component
 
         if ($this->hasDuplicateClassificationTypes()) {
             $this->addError('classifications', 'Each classification type can only be selected once.');
-
             return;
         }
 
         $searchTermsClean = array_values(array_filter(array_map('trim', $this->searchTerms)));
+        $replacementSkusClean = array_values(array_filter(array_map('trim', $this->replacementSkus)));
         $sellingPointsClean = array_values(array_filter(array_map('trim', $this->sellingPoints)));
         $classificationsClean = [];
         foreach ($this->classifications as $classification) {
@@ -299,21 +311,31 @@ class CatalogItemForm extends Component
             }
         }
 
-        $catalogItem = DB::transaction(function () use ($vendor, $searchTermsClean, $sellingPointsClean, $specPairs, $classificationsClean) {
+        // create category and get id if new
+        if (!is_numeric($this->productCategory)) {
+            $commodityType = CommodityType::firstOrCreate(['approved' => false, 'name' => Str::headline($this->productCategory)]);
+            $this->productCategory = $commodityType->id;
+
+            // notify management of new category creation
+            Mail::to(config('vit.gateway_email'))
+                ->send(new NewCommodityTypeMail($commodityType->name));
+        }
+
+        $catalogItem = DB::transaction(function () use ($vendor, $searchTermsClean, $replacementSkusClean, $sellingPointsClean, $specPairs, $classificationsClean) {
             $attrs = [
                 'name' => $this->name,
                 'dealer_sku' => $this->sellerSku,
-                'replacement_sku' => $this->replacementSku !== '' ? $this->replacementSku : null,
+                'replacement_sku' => $replacementSkusClean !== [] ? $replacementSkusClean : null,
                 'manufacturer_sku' => $this->manufacturerSku,
                 'manufacturer' => $this->manufacturer,
                 'brand_name' => $this->brandName,
-                'category' => $this->productTypeOrFamily,
+                'category' => $this->productCategory,
                 'hierarchy' => $this->hierarchy,
                 'description' => $this->description,
                 'unit_of_measure' => $this->unitOfMeasure,
                 'quantity_per_unit' => $this->quantityPerUnit !== null && $this->quantityPerUnit !== '' ? (int) $this->quantityPerUnit : null,
                 'item_weight' => $this->itemWeight,
-                'availability' => $this->availability !== null && $this->availability !== '' ? (int) $this->availability : null,
+                'availability' => $this->availability !== null && $this->availability !== '' ? (int) $this->availability : 999,
                 'lead_time' => $this->leadTime !== '' ? $this->leadTime : null,
                 'min_qty_per_order' => $this->minQtyPerOrder !== null && $this->minQtyPerOrder !== '' ? (int) $this->minQtyPerOrder : null,
                 'max_qty_per_order' => $this->maxQtyPerOrder !== null && $this->maxQtyPerOrder !== '' ? (int) $this->maxQtyPerOrder : null,

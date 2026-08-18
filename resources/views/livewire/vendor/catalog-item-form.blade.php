@@ -61,38 +61,61 @@
                         @enderror
                     </div>
                     <div>
-                        <label>Replacement SKU</label>
-                        <input type="text" wire:model="replacementSku"
-                            class="mt-1.5 block w-full rounded-lg border-gray-300 shadow-sm text-sm focus:border-sky-500 focus:ring-sky-500 focus:ring-1" />
-                        <p class="text-sm text-gray-500 mt-1.5">Use when this item replaces another Seller SKU. Example:
-                            BT-2000 replaces BT-1000.</p>
-                        @error('replacementSku')
+                        <label>Replacement SKUs</label>
+                        <p class="text-sm text-gray-500 mt-1.5">Use when this item replaces other Seller SKUs. Add up to
+                            four values.</p>
+                        <div class="space-y-2 mt-1.5">
+                            @foreach ($replacementSkus as $index => $sku)
+                                <div class="flex gap-2">
+                                    <input type="text" wire:model="replacementSkus.{{ $index }}"
+                                        class="block w-full text-sm border-gray-300 rounded-lg shadow-sm focus:border-sky-500 focus:ring-sky-500 focus:ring-1">
+                                    @if (count($replacementSkus) > 1)
+                                        <button type="button" wire:click="removeReplacementSku({{ $index }})"
+                                            class="flex-shrink-0 px-3 text-sm text-red-600 transition-colors rounded-lg hover:bg-red-50">Remove</button>
+                                    @endif
+                                </div>
+                            @endforeach
+                        </div>
+                        @error('replacementSkus')
                             <p class="text-sm text-red-600 mt-1.5">{{ $message }}</p>
                         @enderror
+                        @error('replacementSkus.*')
+                            <p class="text-sm text-red-600 mt-1.5">{{ $message }}</p>
+                        @enderror
+                        @if (count($replacementSkus) < 4)
+                            <button type="button" wire:click="addReplacementSku"
+                                class="inline-flex items-center gap-1 mt-2 text-sm font-medium text-sky-600 hover:text-sky-700">
+                                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                                    stroke-width="2">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                                </svg>
+                                Add another SKU
+                            </button>
+                        @endif
                     </div>
                 </div>
             </div>
         </section>
 
-        {{-- Product Type --}}
+        {{-- Product Category --}}
         <section class="bg-white border border-gray-200 shadow-sm rounded-xl">
             <div class="flex items-center gap-3 px-6 py-4 border-b border-gray-100 bg-gray-50/60">
                 <span
                     class="flex items-center justify-center flex-shrink-0 text-xs font-semibold text-white rounded-full w-7 h-7 bg-sky-600">2</span>
-                <h2 class="font-semibold text-gray-900">Product Type</h2>
+                <h2 class="font-semibold text-gray-900">Product Category</h2>
             </div>
             <div class="p-6">
                 <div class="grid gap-8 lg:grid-cols-2">
                     <div>
-                        <label>Product Type <span class="text-red-600">*</span></label>
-                        <x-searchable-select wire-model="productTypeOrFamily" :options="$this->commodityTypeOptions->map(
-                            fn($o) => ['value' => $o->name, 'label' => $o->name],
+                        <label>Product Category <span class="text-red-600">*</span></label>
+                        <x-searchable-select wire-model="productCategory" :options="$this->commodityTypeOptions->map(
+                            fn($o) => ['value' => $o->id, 'label' => $o->name],
                         )" :allow-create="true"
                             placeholder="Select a product type..." />
 
                         <p class="text-sm text-gray-500 mt-1.5">Pick the broad commodity group for reporting and search.
                         </p>
-                        @error('productTypeOrFamily')
+                        @error('productCategory')
                             <p class="text-sm text-red-600 mt-1.5">{{ $message }}</p>
                         @enderror
                     </div>
@@ -315,11 +338,12 @@
                         <select wire:model="leadTime"
                             class="mt-1.5 block w-full rounded-lg border-gray-300 shadow-sm text-sm focus:border-sky-500 focus:ring-sky-500 focus:ring-1">
                             <option value="">Select an option</option>
-                            <option value="1-2 days">1-2 days</option>
+                            <option value="0-3 days">0-3 days</option>
                             <option value="3-5 days">3-5 days</option>
-                            <option value="5-7 days">5-7 days</option>
+                            <option value="5-10 days">5-10 days</option>
+                            <option value="10 & over">10 & over</option>
                         </select>
-                        <p class="text-sm text-gray-500 mt-1.5">Typical time from order placement to shipment.</p>
+                        <p class="text-sm text-gray-500 mt-1.5">Typical time for order to be shipped.</p>
                         @error('leadTime')
                             <p class="text-sm text-red-600 mt-1.5">{{ $message }}</p>
                         @enderror
@@ -374,10 +398,10 @@
                         @foreach ($specifications as $index => $spec)
                             <div class="flex gap-2">
                                 <input type="text" wire:model="specifications.{{ $index }}.key"
-                                    placeholder="e.g. Color"
+                                    placeholder="Attribute e.g. Color"
                                     class="block w-full text-sm border-gray-300 rounded-lg shadow-sm focus:border-sky-500 focus:ring-sky-500 focus:ring-1">
                                 <input type="text" wire:model="specifications.{{ $index }}.value"
-                                    placeholder="e.g. Red"
+                                    placeholder="Value e.g. Red"
                                     class="block w-full text-sm border-gray-300 rounded-lg shadow-sm focus:border-sky-500 focus:ring-sky-500 focus:ring-1">
                                 @if (count($specifications) > 1)
                                     <button type="button" wire:click="removeSpecification({{ $index }})"
@@ -415,7 +439,7 @@
                         <input type="text" wire:model="unspscCode"
                             class="mt-1.5 block w-full rounded-lg border-gray-300 shadow-sm text-sm focus:border-sky-500 focus:ring-sky-500 focus:ring-1" />
                         <p class="text-sm text-gray-500 mt-1.5">
-                            Don't know it? <a href="https://www.unspsc.org" target="_blank"
+                            Don't know it? <a href="https://www.ungm.org/public/unspsc" target="_blank"
                                 class="underline text-sky-600 hover:text-sky-700">Look it up here</a>.
                         </p>
                         @error('unspscCode')

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -77,6 +78,51 @@ class CatalogItem extends Model
     public function unitOfMeasure()
     {
         return $this->belongsTo(UnitOfMeasure::class, 'unit_of_measure', 'code');
+    }
+
+    protected function replacementSku(): Attribute
+    {
+        return Attribute::make(
+            get: function ($value) {
+                if ($value === null || $value === '') {
+                    return [];
+                }
+
+                if (is_array($value)) {
+                    return $this->normalizeReplacementSkuList($value);
+                }
+
+                if (is_string($value)) {
+                    $decoded = json_decode($value, true);
+
+                    if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                        return $this->normalizeReplacementSkuList($decoded);
+                    }
+
+                    return [$value];
+                }
+
+                return [];
+            },
+            set: function ($value) {
+                $replacementSkus = is_array($value) ? $value : [$value];
+                $replacementSkus = $this->normalizeReplacementSkuList($replacementSkus);
+
+                return $replacementSkus === [] ? null : json_encode($replacementSkus);
+            },
+        );
+    }
+
+    /**
+     * @param  array<int, mixed>  $replacementSkus
+     * @return array<int, string>
+     */
+    protected function normalizeReplacementSkuList(array $replacementSkus): array
+    {
+        return array_values(array_filter(array_map(
+            fn($replacementSku) => trim((string) $replacementSku),
+            $replacementSkus,
+        ), fn($replacementSku) => $replacementSku !== ''));
     }
 
     protected static array $requiredFields = [

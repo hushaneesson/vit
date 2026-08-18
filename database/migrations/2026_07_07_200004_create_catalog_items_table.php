@@ -13,7 +13,7 @@ return new class extends Migration
             $table->foreignId('vendor_id')->constrained('vendors')->cascadeOnDelete();
 
             $table->string('dealer_sku', 255);
-            $table->string('replacement_sku', 255)->nullable();
+            $table->json('replacement_sku')->nullable();
             $table->string('name', 255);
             $table->text('description')->nullable();
 
