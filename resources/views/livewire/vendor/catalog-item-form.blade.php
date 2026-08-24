@@ -129,8 +129,14 @@
             <div class="p-6">
                 <div class="grid gap-8 lg:grid-cols-2">
                     <div>
-                        <label>Product Category <span class="text-red-600">*</span></label>
-                        <x-searchable-select wire-model="productCategory" :options="$this->commodityTypeOptions->map(fn($o) => ['value' => $o->id, 'label' => $o->name])" :allow-create="true"
+                        <div class="flex items-center justify-between gap-3">
+                            <label>Product Category <span class="text-red-600">*</span></label>
+                            <button type="button" wire:click="openAddProductCategoryModal"
+                                class="text-sm font-medium text-sky-600 hover:text-sky-700">
+                                Add New
+                            </button>
+                        </div>
+                        <x-searchable-select wire:key="product-category-select-{{ $productCategorySelectKey }}" wire-model="productCategory" :options="$this->commodityTypeOptions->map(fn($o) => ['value' => $o->id, 'label' => $o->name])" :allow-create="false"
                             placeholder="Select a product type..." />
 
                         <p class="text-sm text-gray-500 mt-1.5">Pick the broad commodity group for reporting and search.
@@ -663,6 +669,51 @@
         </div>
 
     </form>
+
+    <div x-data x-show="$wire.showAddProductCategoryModal" x-cloak
+        x-on:keydown.escape.window="$wire.closeAddProductCategoryModal()"
+        class="fixed inset-0 z-50 flex items-center justify-center px-4">
+        <div class="fixed inset-0 transition-opacity bg-gray-900/50" x-on:click="$wire.closeAddProductCategoryModal()"
+            x-show="$wire.showAddProductCategoryModal" x-transition.opacity></div>
+
+        <div class="relative w-full max-w-md p-6 bg-white shadow-xl rounded-xl"
+            x-show="$wire.showAddProductCategoryModal" x-transition>
+            <div class="flex items-start justify-between mb-4">
+                <div>
+                    <h3 class="text-base font-semibold text-gray-900">Add Product Category</h3>
+                    <p class="mt-1 text-sm text-gray-500">Create a new category and use it on this item immediately.</p>
+                </div>
+
+                <button type="button" wire:click="closeAddProductCategoryModal"
+                    class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <div class="space-y-4">
+                <div>
+                    <label>Category Name</label>
+                    <input type="text" wire:model.defer="newProductCategoryName"
+                        class="mt-1.5 block w-full rounded-lg border-gray-300 shadow-sm text-sm focus:border-sky-500 focus:ring-sky-500 focus:ring-1"
+                        placeholder="Example: Janitorial Supplies" />
+                    @error('newProductCategoryName')
+                        <p class="mt-1.5 text-sm text-red-600">{{ $message }}</p>
+                    @enderror
+                </div>
+            </div>
+
+            <div class="flex justify-end gap-2 mt-6">
+                <button type="button" wire:click="closeAddProductCategoryModal" class="btn btn-gray">
+                    Cancel
+                </button>
+                <button type="button" wire:click="saveProductCategory" wire:loading.attr="disabled"
+                    wire:target="saveProductCategory" class="btn btn-primary">
+                    <span wire:loading.remove wire:target="saveProductCategory">Save Category</span>
+                    <span wire:loading wire:target="saveProductCategory">Saving...</span>
+                </button>
+            </div>
+        </div>
+    </div>
 
     <div x-data x-show="$wire.showAddUnitOfMeasureModal" x-cloak
         x-on:keydown.escape.window="$wire.closeAddUnitOfMeasureModal()"

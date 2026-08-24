@@ -29,6 +29,9 @@ class CatalogItemForm extends Component
 
     public ?string $catalogItemId = null;
     public ?int $catalogId = null;
+    public bool $showAddProductCategoryModal = false;
+    public int $productCategorySelectKey = 0;
+    public string $newProductCategoryName = '';
     public bool $showAddUnitOfMeasureModal = false;
     public int $unitOfMeasureSelectKey = 0;
     public string $newUnitOfMeasureCode = '';
@@ -322,6 +325,46 @@ class CatalogItemForm extends Component
         $this->showAddUnitOfMeasureModal = true;
     }
 
+    public function openAddProductCategoryModal(): void
+    {
+        $this->resetValidation([
+            'newProductCategoryName',
+        ]);
+        $this->newProductCategoryName = '';
+        $this->showAddProductCategoryModal = true;
+    }
+
+    public function closeAddProductCategoryModal(): void
+    {
+        $this->showAddProductCategoryModal = false;
+    }
+
+    public function saveProductCategory(): void
+    {
+        $validated = $this->validate([
+            'newProductCategoryName' => ['required', 'string', 'max:255', Rule::unique('commodity_types', 'name')],
+        ], [], [
+            'newProductCategoryName' => 'product category name',
+        ]);
+
+        $commodityType = CommodityType::create([
+            'approved' => false,
+            'name' => Str::headline(trim($validated['newProductCategoryName'])),
+        ]);
+
+        Mail::to(config('vit.gateway_email'))
+            ->send(new NewCommodityTypeMail($commodityType->name));
+
+        $this->productCategory = (string) $commodityType->id;
+        $this->productCategorySelectKey++;
+        $this->showAddProductCategoryModal = false;
+        $this->newProductCategoryName = '';
+        $this->resetValidation([
+            'newProductCategoryName',
+            'productCategory',
+        ]);
+    }
+
     public function closeAddUnitOfMeasureModal(): void
     {
         $this->showAddUnitOfMeasureModal = false;
@@ -384,7 +427,7 @@ class CatalogItemForm extends Component
             'replacementSkus.*' => ['nullable', 'string', 'max:255', 'exists:catalog_items:dealer_sku'],
             'manufacturerSku' => ['nullable', 'string', 'max:255'],
 
-            'productCategory' => ['required'],
+            'productCategory' => ['required', Rule::exists('commodity_types', 'id')],
             'hierarchy' => ['required', 'string', 'max:255'],
 
             'description' => ['required', 'string', 'max:4000'],
@@ -497,16 +540,6 @@ class CatalogItemForm extends Component
             if ($k !== '' && $v !== '') {
                 $specPairs[] = ['key' => $k, 'value' => $v];
             }
-        }
-
-        // create category and get id if new
-        if (!is_numeric($this->productCategory)) {
-            $commodityType = CommodityType::firstOrCreate(['approved' => false, 'name' => Str::headline($this->productCategory)]);
-            $this->productCategory = $commodityType->id;
-
-            // notify management of new category creation
-            Mail::to(config('vit.gateway_email'))
-                ->send(new NewCommodityTypeMail($commodityType->name));
         }
 
         $catalogItem = DB::transaction(function () use ($vendor, $searchTermsClean, $replacementSkusClean, $sellingPointsClean, $imageUrlsClean, $specPairs, $classificationsClean) {
