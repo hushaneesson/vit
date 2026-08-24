@@ -28,6 +28,14 @@ class VendorCatalogUpload extends Component
 
     public ?int $catalogUploadId = null;
 
+    /**
+     * Catalog being used during this catalog-specific batch upload.
+     * Populated from the catalog upload route so the generated
+     * CatalogUpload (and the CatalogItems derived from it) can be
+     * associated with the correct catalog.
+     */
+    public ?int $catalogId = null;
+
     public array $columns = [];
     public array $sampleRows = [];
     public array $mapping = [];
@@ -169,6 +177,7 @@ class VendorCatalogUpload extends Component
         $upload = CatalogUpload::create([
             'client_id' => $client->id,
             'vendor_id' => $client->vendor_id,
+            'catalog_id' => $this->catalogId,
             'original_filename' => $this->file->getClientOriginalName(),
             'file_path' => $storedPath,
             'disk' => self::DISK,

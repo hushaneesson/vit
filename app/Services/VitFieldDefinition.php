@@ -145,7 +145,7 @@ class VitFieldDefinition
         // into this array. The exporter reads the array as-is and joins the
         // entries with the join_separator — it must NOT know about or filter
         // specific classification keys.
-        ['field_key' => 'classifications', 'web_app_label' => 'Classifications', 'description' => 'Product classifications in KEY=value format', 'requirement_type' => 'optional', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => true, 'join_separator' => '|', 'max_length' => null, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'classifications', 'model_attribute' => 'classifications', 'sort_order' => 155, 'is_key_value' => false],
+        ['field_key' => 'classifications', 'web_app_label' => 'Classifications', 'description' => 'Product classifications in KEY=value format', 'requirement_type' => 'optional', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => true, 'join_separator' => '|', 'max_length' => null, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'classifications', 'model_attribute' => 'classifications', 'sort_order' => 155, 'is_key_value' => true],
 
         // STRUCTURAL: per spec, UNSPSC does not get its own csv column — it's always-required
         // but delivered as "UNSPSC=value" packed into the "classifications" column.
