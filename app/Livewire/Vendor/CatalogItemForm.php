@@ -3,6 +3,7 @@
 namespace App\Livewire\Vendor;
 
 use App\Mail\NewCommodityTypeMail;
+use App\Mail\NewUnitOfMeasureMail;
 use App\Models\Catalog;
 use App\Models\CatalogItem;
 use App\Models\CatalogItemImage;
@@ -28,6 +29,10 @@ class CatalogItemForm extends Component
 
     public ?string $catalogItemId = null;
     public ?int $catalogId = null;
+    public bool $showAddUnitOfMeasureModal = false;
+    public int $unitOfMeasureSelectKey = 0;
+    public string $newUnitOfMeasureCode = '';
+    public string $newUnitOfMeasureDescription = '';
 
     // Identification
     public string $name = '';
@@ -252,6 +257,57 @@ class CatalogItemForm extends Component
         }
 
         $this->existingImages = collect($this->existingImages)->reject(fn($i) => $i['id'] === $imageId)->values()->all();
+    }
+
+    public function openAddUnitOfMeasureModal(): void
+    {
+        $this->resetValidation([
+            'newUnitOfMeasureCode',
+            'newUnitOfMeasureDescription',
+        ]);
+        $this->newUnitOfMeasureCode = '';
+        $this->newUnitOfMeasureDescription = '';
+        $this->showAddUnitOfMeasureModal = true;
+    }
+
+    public function closeAddUnitOfMeasureModal(): void
+    {
+        $this->showAddUnitOfMeasureModal = false;
+    }
+
+    public function saveUnitOfMeasure(): void
+    {
+        $validated = $this->validate([
+            'newUnitOfMeasureCode' => ['required', 'string', 'max:10', Rule::unique('units_of_measure', 'code')],
+            'newUnitOfMeasureDescription' => ['required', 'string', 'max:255'],
+        ], [], [
+            'newUnitOfMeasureCode' => 'unit of measure code',
+            'newUnitOfMeasureDescription' => 'unit of measure description',
+        ]);
+
+        $unitOfMeasure = UnitOfMeasure::create([
+            'code' => Str::upper(trim($validated['newUnitOfMeasureCode'])),
+            'description' => trim($validated['newUnitOfMeasureDescription']),
+            'active' => false,
+        ]);
+
+        // notify management of new category creation
+        Mail::to(config('vit.gateway_email'))
+            ->send(new NewUnitOfMeasureMail(
+                $unitOfMeasure->code,
+                $unitOfMeasure->description
+            ));
+
+        $this->unitOfMeasure = (string) $unitOfMeasure->id;
+        $this->unitOfMeasureSelectKey++;
+        $this->showAddUnitOfMeasureModal = false;
+        $this->newUnitOfMeasureCode = '';
+        $this->newUnitOfMeasureDescription = '';
+        $this->resetValidation([
+            'newUnitOfMeasureCode',
+            'newUnitOfMeasureDescription',
+            'unitOfMeasure',
+        ]);
     }
 
     public function rules(): array

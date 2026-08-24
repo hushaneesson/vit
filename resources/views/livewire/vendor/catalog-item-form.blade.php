@@ -551,10 +551,17 @@
 
                 <div class="grid gap-8 md:grid-cols-2">
                     <div>
-                        <label>Unit of Measure <span class="text-red-600">*</span></label>
-                        <x-searchable-select wire-model="unitOfMeasure" :options="$this->unitOfMeasureOptions->map(
-                            fn($m) => ['value' => $m->id, 'label' => $m->code . ' - ' . $m->description],
-                        )" :allow-create="true"
+                        <div class="flex items-center justify-between gap-3">
+                            <label>Unit of Measure <span class="text-red-600">*</span></label>
+                            <button type="button" wire:click="openAddUnitOfMeasureModal"
+                                class="text-sm font-medium text-sky-600 hover:text-sky-700">
+                                Add New
+                            </button>
+                        </div>
+                        <x-searchable-select wire:key="unit-of-measure-select-{{ $unitOfMeasureSelectKey }}"
+                            wire-model="unitOfMeasure" :options="$this->unitOfMeasureOptions->map(
+                                fn($m) => ['value' => $m->id, 'label' => $m->code . ' - ' . $m->description],
+                            )" :allow-create="false"
                             placeholder="Select an option..." />
                         <p class="text-sm text-gray-500 mt-1.5">How the item is sold. Example: EA (each), BX (box), CS
                             (case).</p>
@@ -615,4 +622,59 @@
         </div>
 
     </form>
+
+    <div x-data x-show="$wire.showAddUnitOfMeasureModal" x-cloak
+        x-on:keydown.escape.window="$wire.closeAddUnitOfMeasureModal()"
+        class="fixed inset-0 z-50 flex items-center justify-center px-4">
+        <div class="fixed inset-0 transition-opacity bg-gray-900/50" x-on:click="$wire.closeAddUnitOfMeasureModal()"
+            x-show="$wire.showAddUnitOfMeasureModal" x-transition.opacity></div>
+
+        <div class="relative w-full max-w-md p-6 bg-white shadow-xl rounded-xl"
+            x-show="$wire.showAddUnitOfMeasureModal" x-transition>
+            <div class="flex items-start justify-between mb-4">
+                <div>
+                    <h3 class="text-base font-semibold text-gray-900">Add Unit of Measure</h3>
+                    <p class="mt-1 text-sm text-gray-500">Create a new unit and use it on this item immediately.</p>
+                </div>
+
+                <button type="button" wire:click="closeAddUnitOfMeasureModal"
+                    class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <div class="space-y-4">
+                <div>
+                    <label>Code</label>
+                    <input type="text" wire:model.defer="newUnitOfMeasureCode" maxlength="10"
+                        class="mt-1.5 block w-full rounded-lg border-gray-300 shadow-sm text-sm uppercase focus:border-sky-500 focus:ring-sky-500 focus:ring-1"
+                        placeholder="Example: EA" />
+                    @error('newUnitOfMeasureCode')
+                        <p class="mt-1.5 text-sm text-red-600">{{ $message }}</p>
+                    @enderror
+                </div>
+
+                <div>
+                    <label>Description</label>
+                    <input type="text" wire:model.defer="newUnitOfMeasureDescription"
+                        class="mt-1.5 block w-full rounded-lg border-gray-300 shadow-sm text-sm focus:border-sky-500 focus:ring-sky-500 focus:ring-1"
+                        placeholder="Example: Each" />
+                    @error('newUnitOfMeasureDescription')
+                        <p class="mt-1.5 text-sm text-red-600">{{ $message }}</p>
+                    @enderror
+                </div>
+            </div>
+
+            <div class="flex justify-end gap-2 mt-6">
+                <button type="button" wire:click="closeAddUnitOfMeasureModal" class="btn btn-gray">
+                    Cancel
+                </button>
+                <button type="button" wire:click="saveUnitOfMeasure" wire:loading.attr="disabled"
+                    wire:target="saveUnitOfMeasure" class="btn btn-primary">
+                    <span wire:loading.remove wire:target="saveUnitOfMeasure">Save Unit</span>
+                    <span wire:loading wire:target="saveUnitOfMeasure">Saving...</span>
+                </button>
+            </div>
+        </div>
+    </div>
 </div>
