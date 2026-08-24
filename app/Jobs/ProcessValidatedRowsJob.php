@@ -5,6 +5,8 @@ namespace App\Jobs;
 use App\Enums\CatalogUploadStatus;
 use App\Models\CatalogItem;
 use App\Models\CatalogUpload;
+use App\Models\ClassificationType;
+use App\Models\CountryCode;
 use App\Models\Vendor;
 use App\Notifications\CatalogUploadValidationReportNotification;
 use App\Services\VitFieldDefinition;
@@ -121,8 +123,20 @@ class ProcessValidatedRowsJob implements ShouldQueue
                     $definition = $definitions->get($fieldKey);
                     $modelAttribute = $definition ? ($definition->model_attribute ?? $fieldKey) : $fieldKey;
 
+                    // model_attribute may be a relationship dot-path (e.g.
+                    // "commodityType.name", "hierarchyInfo.hierarchy_number",
+                    // "unitOfMeasure.code") or an accessor (e.g.
+                    // "countryOfOrigin") for the exporter's data_get().
+                    // The processing pipeline writes to the actual DB column,
+                    // which is the field_key for those relationship-backed
+                    // fields (the FK column). Only use model_attribute when
+                    // it is a simple column name (no dot and not an accessor).
+                    if (str_contains($modelAttribute, '.') || $modelAttribute === 'countryOfOrigin') {
+                        $modelAttribute = $fieldKey;
+                    }
+
                     if (is_null($rawValue) || $rawValue === '' || $rawValue === []) {
-                        if ($fieldKey === 'item_weight') {
+                        if ($fieldKey === 'item_weight_in_pounds') {
                             $attrs[$modelAttribute] = 0.01;
                             continue;
                         }
@@ -144,8 +158,18 @@ class ProcessValidatedRowsJob implements ShouldQueue
                         }
 
                         if ($definition->is_key_value) {
-                            // Specifications: normalize to key/value objects
-                            $attrs[$modelAttribute] = $this->normalizeKeyValueMultiValue($parts);
+                            // Specifications are normalized eagerly. Classifications,
+                            // by contrast, collect contributions from Country of
+                            // Origin, UNSPSC, and MSDS processing below, so their raw
+                            // mapped entries must be preserved here rather than
+                            // converted now. The one FINAL normalization pass happens
+                            // only after every classification source has contributed.
+                            if ($modelAttribute === 'classifications') {
+                                $attrs[$modelAttribute] = $parts;
+                            } else {
+                                // Specifications: normalize to key/value objects
+                                $attrs[$modelAttribute] = $this->normalizeKeyValueMultiValue($parts);
+                            }
                         } else {
                             // Normal array fields: just clean and preserve as simple array
                             $cleaned = [];
@@ -171,7 +195,7 @@ class ProcessValidatedRowsJob implements ShouldQueue
                         };
 
                         // Preserve special item_weight fallback
-                        if ($fieldKey === 'item_weight') {
+                        if ($fieldKey === 'item_weight_in_pounds') {
                             $cast = is_numeric($rawValue) ? (float) $rawValue : 0.01;
                         }
 
@@ -181,6 +205,151 @@ class ProcessValidatedRowsJob implements ShouldQueue
                     }
                 }
 
+                // Country of Origin is not a standalone column — it is packed
+                // into the classifications JSON array as "COUNTRY_OF_ORIGIN=XX"
+                // (the application's canonical classification key/value format).
+                // Extract it from the mapped row and merge it into the
+                // classifications attribute so it is not silently discarded.
+                // The model_attribute for country_of_origin is 'countryOfOrigin'
+                // (the CatalogItem accessor), but the processing pipeline uses
+                // the field_key 'country_of_origin' as the key in $attrs.
+                // Always unset the key so it never reaches
+                // CatalogItem::create()/update() as a fake column.
+                if (array_key_exists('country_of_origin', $attrs)) {
+                    $countryOfOrigin = $attrs['country_of_origin'];
+
+                    unset($attrs['country_of_origin']);
+
+                    if ($countryOfOrigin !== null && $countryOfOrigin !== '') {
+                        // The vendor's file provides a country NAME (or a 2-letter code).
+                        // Resolve it to the canonical 2-letter code from the
+                        // country_codes reference table. Only the code is stored in
+                        // classifications — the name is an input, the code is the
+                        // normalized stored value.
+                        $country = CountryCode::query()
+                            ->where('name', trim((string) $countryOfOrigin))
+                            ->orWhere('code', strtoupper(trim((string) $countryOfOrigin)))
+                            ->first();
+
+                        // Not found — leave Country of Origin absent so the vendor can
+                        // correct it manually on the edit screen. Do not invent a code
+                        // and do not store the raw name.
+                        if ($country !== null) {
+                            $classifications = $attrs['classifications'] ?? [];
+                            if (! is_array($classifications)) {
+                                $classifications = [];
+                            }
+
+                            // Replace any existing COUNTRY_OF_ORIGIN= entry with the
+                            // resolved code. Prevents duplicates on upload updates.
+                            $classifications = array_values(array_filter(
+                                $classifications,
+                                fn($entry) => ! (
+                                    is_string($entry)
+                                    && str_starts_with(strtoupper(trim($entry)), 'COUNTRY_OF_ORIGIN=')
+                                ),
+                            ));
+                            $classifications[] = 'COUNTRY_OF_ORIGIN=' . strtoupper($country->code);
+
+                            $attrs['classifications'] = $classifications;
+                        }
+                    }
+                }
+
+                // UNSPSC is packed into the classifications JSON array as
+                // "KEY=value" (the application's canonical classification
+                // key/value format), making classifications the source of
+                // truth for the exported UNSPSC value. The classification key
+                // comes from the classification_types table (the source of
+                // truth for classification keys), not a hardcoded string.
+                // The unspsc_code column is still populated for the edit form
+                // and completeness scoring, but the classification entry is
+                // what the exporter reads. Replace any existing entry with
+                // this key with the newly processed value to prevent
+                // duplicates on upload updates. If the uploaded value is
+                // empty, no entry is created.
+                if (array_key_exists('unspsc_code', $attrs)) {
+                    $unspsc = $attrs['unspsc_code'];
+
+                    if ($unspsc !== null && $unspsc !== '') {
+                        $unspscType = ClassificationType::query()
+                            ->where('key', 'UNSPSC')
+                            ->first();
+
+                        if ($unspscType !== null) {
+                            $unspscKey = trim((string) $unspscType->key);
+
+                            if ($unspscKey !== '') {
+                                $classifications = $attrs['classifications'] ?? [];
+                                if (! is_array($classifications)) {
+                                    $classifications = [];
+                                }
+
+                                // Replace any existing entry with this key with
+                                // the newly processed value. Prevents duplicates
+                                // on upload updates.
+                                $classifications = array_values(array_filter(
+                                    $classifications,
+                                    fn($entry) => ! (
+                                        is_string($entry)
+                                        && str_starts_with(strtoupper(trim($entry)), strtoupper($unspscKey) . '=')
+                                    ),
+                                ));
+                                $classifications[] = $unspscKey . '=' . trim((string) $unspsc);
+
+                                $attrs['classifications'] = $classifications;
+                            }
+                        }
+                    }
+                }
+
+                // MSDS Link is also represented in the classifications JSON array as
+                // "MSDS_URL=<value>" so classifications contains the canonical
+                // classification representation used by the catalog item form/export.
+                // The msds_link database column remains populated for the rest of the app.
+                //
+                // If an MSDS_URL classification already exists, replace it with the
+                // newly uploaded value to prevent duplicates. If the uploaded value is
+                // empty, do not create a classification entry.
+                if (array_key_exists('msds_link', $attrs)) {
+                    $msdsLink = $attrs['msds_link'];
+
+                    if ($msdsLink !== null && $msdsLink !== '') {
+                        $classifications = $attrs['classifications'] ?? [];
+
+                        if (! is_array($classifications)) {
+                            $classifications = [];
+                        }
+
+                        // Remove any existing MSDS_URL entry before adding the
+                        // newly processed value.
+                        $classifications = array_values(array_filter(
+                            $classifications,
+                            fn($entry) => ! (
+                                is_string($entry)
+                                && str_starts_with(
+                                    strtoupper(trim($entry)),
+                                    'MSDS_URL='
+                                )
+                            ),
+                        ));
+
+                        $classifications[] = 'MSDS_URL=' . trim((string) $msdsLink);
+
+                        $attrs['classifications'] = $classifications;
+                    }
+                }
+
+                // FINAL classifications normalization. classifications now holds
+                // every contributor's entry — the mapper's own classifications plus
+                // Country of Origin, UNSPSC, and MSDS. Only after all of those
+                // sources have finished flushing do we normalize the complete value
+                // into the canonical key/value object array (the same structure
+                // used for specifications) that is persisted to
+                // CatalogItem.classifications.
+                if (array_key_exists('classifications', $attrs)) {
+                    $attrs['classifications'] = $this->normalizeClassifications($attrs['classifications']);
+                }
                 // Build the update payload — only fields that have non-blank
                 // values in the CSV. This ensures we never overwrite existing
                 // data with blank CSV values.
@@ -225,19 +394,6 @@ class ProcessValidatedRowsJob implements ShouldQueue
                 $attrs['id'] = (string) Str::uuid();
                 $attrs['created_at'] = now();
                 $attrs['updated_at'] = now();
-
-                // TEMP DEBUG: diagnose catalog_items.name cannot be null.
-                // short_description is the VIT field whose model_attribute is 'name'.
-                $nameDef = VitFieldDefinition::find('short_description');
-                Log::info('ProcessValidatedRowsJob: about to create CatalogItem', [
-                    'upload_id' => $upload->id,
-                    'row_number' => $row->row_number,
-                    'dealer_sku' => $attrs['dealer_sku'] ?? null,
-                    'attrs_keys' => array_keys($attrs),
-                    'name_value' => $attrs['name'] ?? null,
-                    'name_field_key' => 'short_description',
-                    'name_model_attribute' => $nameDef->model_attribute ?? null,
-                ]);
 
                 try {
                     CatalogItem::create($attrs);
@@ -400,6 +556,88 @@ class ProcessValidatedRowsJob implements ShouldQueue
     }
 
     /**
+     * Normalize the FINAL classifications value into the canonical key/value
+     * object structure: [{"key": "...", "value": "..."}, ...] — matching how
+     * specifications are stored.
+     *
+     * This MUST run only after every classification source has contributed to
+     * $attrs['classifications']: the mapper's own classifications plus the
+     * Country of Origin, UNSPSC, and MSDS processing above.
+     *
+     * The incoming value may already be any of:
+     *   - an empty/null value
+     *   - an array of "KEY=value" strings
+     *   - an array of key/value objects ({"key": ..., "value": ...})
+     *   - an associative array (["Color" => "Silver"])
+     *   - a JSON-encoded representation of any of the above
+     *   - a mixture produced by the existing processing flow
+     *
+     * No fixed classification key list is assumed. Case-insensitive duplicate
+     * keys collapse into the first-seen position with the LAST value winning,
+     * so a later Country of Origin / UNSPSC / MSDS entry replaces an earlier
+     * entry for the same key instead of duplicating it.
+     *
+     * @param  mixed  $value
+     * @return array<int, array{key: string, value: string}>|null
+     */
+    private function normalizeClassifications(mixed $value): ?array
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (is_string($value)) {
+            $decoded = json_decode($value, true);
+            $parts = (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) ? $decoded : [$value];
+        } else {
+            $parts = is_array($value) ? $value : [];
+        }
+
+        $normalized = [];
+        $seenKeys = []; // uppercased key => index in $normalized
+
+        foreach ($parts as $entry) {
+            $key = null;
+            $entryValue = null;
+
+            if (is_array($entry) && isset($entry['key']) && isset($entry['value'])) {
+                // Already canonical key/value object
+                $key = trim((string) $entry['key']);
+                $entryValue = trim((string) $entry['value']);
+            } elseif (is_array($entry) && array_keys($entry) !== range(0, count($entry) - 1)) {
+                // Associative array: ['Color' => 'Silver'] — take the first pair
+                foreach ($entry as $assocKey => $assocValue) {
+                    $key = trim((string) $assocKey);
+                    $entryValue = trim((string) $assocValue);
+                    break;
+                }
+            } elseif (is_string($entry) && str_contains($entry, '=')) {
+                // Indexed string: "Color=Silver" — split on the first '=' only
+                $equalsPos = strpos($entry, '=');
+                $key = trim(substr($entry, 0, $equalsPos));
+                $entryValue = trim(substr($entry, $equalsPos + 1));
+            }
+
+            if ($key === '' || $entryValue === '') {
+                continue;
+            }
+
+            $lookupKey = strtoupper($key);
+
+            if (array_key_exists($lookupKey, $seenKeys)) {
+                // Duplicate classification key: keep the first-seen position but
+                // let the LAST processed value win (replaces the older entry).
+                $normalized[$seenKeys[$lookupKey]]['value'] = $entryValue;
+            } else {
+                $seenKeys[$lookupKey] = count($normalized);
+                $normalized[] = ['key' => $key, 'value' => $entryValue];
+            }
+        }
+
+        return $normalized === [] ? null : $normalized;
+    }
+
+    /**
      * Normalize incoming CSV values for comparison against database values.
      *
      * This ensures consistent comparison regardless of how the CSV data
@@ -469,11 +707,12 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
             // Dynamic multi-value JSON fields come from the spec metadata; this
             // keeps the comparison logic aligned with the import/export contract.
-            // Use model_attribute (database column name) when available so the
-            // lookup matches the keys in $newAttrs / $existing->getRawOriginal().
+            // The keys in $newAttrs are field_keys (the processing pipeline
+            // writes to the DB column via field_key for relationship-backed
+            // fields), so compare against field_key values.
             $multiValueColumns = VitFieldDefinition::all()
                 ->where('is_multi_value', true)
-                ->map(fn($def) => $def->model_attribute ?? $def->field_key)
+                ->pluck('field_key')
                 ->values()
                 ->all();
 
@@ -514,6 +753,12 @@ class ProcessValidatedRowsJob implements ShouldQueue
                     $detectedChanges[$column] = ['old' => $oldValue, 'new' => $newValue];
                 }
                 continue;
+            }
+
+            if (is_array($oldValue) || is_array($newValue)) {
+                // Arrays (e.g., multi-value spec data) — normalize and compare as JSON
+                $oldValue = json_encode($oldValue ?? []);
+                $newValue = json_encode($newValue ?? []);
             }
 
             // String comparison
