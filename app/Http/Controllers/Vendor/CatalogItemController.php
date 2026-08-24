@@ -38,7 +38,7 @@ class CatalogItemController extends Controller
 
         $items->appends($request->only(['search', 'status']));
 
-        return view('vendor.catalog.index', [
+        return view('vendor.catalog-items.index', [
             'vendor' => $client->vendor,
             'catalog' => $catalog,
             'items' => $items,
@@ -48,7 +48,7 @@ class CatalogItemController extends Controller
 
     public function renderUpload()
     {
-        return view('vendor.catalog.upload');
+        return view('vendor.catalog-items.upload');
     }
 
     public function create(Catalog $catalog)
@@ -56,7 +56,7 @@ class CatalogItemController extends Controller
         $client = Auth::guard('client')->user();
         abort_unless($client->vendor_id === $catalog->vendor_id, 403);
 
-        return view('vendor.catalog.create', [
+        return view('vendor.catalog-items.create', [
             'catalogId' => (int) $catalog->id,
             'catalog' => $catalog,
         ]);
@@ -67,7 +67,7 @@ class CatalogItemController extends Controller
         $client = Auth::guard('client')->user();
         abort_unless($client->vendor_id === $catalogItem->vendor_id, 403);
 
-        return view('vendor.catalog.edit', ['catalogItem' => $catalogItem]);
+        return view('vendor.catalog-items.edit', ['catalogItem' => $catalogItem]);
     }
 
     public function destroy(CatalogItem $catalogItem): RedirectResponse

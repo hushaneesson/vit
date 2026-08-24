@@ -10,7 +10,7 @@
                     <i class="fas fa-arrow-left"></i>
                     Back to Catalogs
                 </a>
-                <a href="{{ route('vendor.catalog-upload') }}" class="w-full text-white md:w-auto btn btn-gray">
+                <a href="{{ route('vendor.catalog-upload', ['catalogId' => $catalog->id]) }}" class="w-full text-white md:w-auto btn btn-gray">
                     <i class="fas fa-upload"></i>
                     Batch Upload
                 </a>
@@ -31,7 +31,7 @@
                 <div class="gap-4 mb-4 md:flex">
                     <div class="relative flex-1">
                         <i
-                            class="fas fa-search absolute text-gray-400 -translate-y-1/2 pointer-events-none left-3 top-5 md:top-6"></i>
+                            class="absolute text-gray-400 -translate-y-1/2 pointer-events-none fas fa-search left-3 top-5 md:top-6"></i>
                         <input type="text" name="search" value="{{ request('search') }}"
                             placeholder="Search by product name or sku..."
                             class="w-full py-2 pr-8 text-sm border border-gray-300 rounded-md pl-9 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500" />
@@ -39,7 +39,7 @@
                             <button type="button"
                                 onclick="this.closest('form').querySelector('[name=search]').value=''; this.closest('form').querySelector('[name=status]').value=''; this.closest('form').submit();"
                                 class="absolute p-1 text-gray-400 transition -translate-y-1/2 rounded right-2 top-1/2 hover:text-gray-600 hover:bg-gray-100">
-                                <i class="fas fa-times text-xs"></i>
+                                <i class="text-xs fas fa-times"></i>
                             </button>
                         @endif
                     </div>
@@ -76,7 +76,7 @@
             <div class="relative">
                 @if ($items->isEmpty())
                     <div class="py-16 text-center">
-                        <i class="fas fa-search text-4xl text-gray-300"></i>
+                        <i class="text-4xl text-gray-300 fas fa-search"></i>
                         <h3 class="mt-3 text-sm font-semibold text-gray-900">No catalog items found</h3>
                         <p class="mt-1 text-sm text-gray-500">Try adjusting your search or filters.</p>
                         @if (request('search') || request('status'))
