@@ -71,9 +71,9 @@
                 </p> --}}
 
                 {{-- Upload requirements notice --}}
-                <div class="flex gap-3 p-4 mt-4 border rounded-lg border-rose-200">
+                <div class="flex gap-3 p-4 mt-4 border rounded-lg border-sky-200">
                     <div class="flex items-center justify-center flex-shrink-0 rounded-full w-9 h-9">
-                        <svg class="w-5 h-5 text-rose-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                        <svg class="w-5 h-5 text-sky-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"
                             stroke-width="2">
                             <path stroke-linecap="round" stroke-linejoin="round"
                                 d="M12 9v3.75m0 3.75h.008v.008H12v-.008ZM21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
