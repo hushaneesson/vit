@@ -6,11 +6,8 @@ use App\Models\CatalogItem;
 use App\Models\CatalogSubmission;
 use App\Models\Vendor;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
-use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
 /**
  * Generates a VIT-compliant .xlsx file from catalog submission data.
@@ -22,11 +19,12 @@ use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
  * (falling back to field_key) so that name mismatches between field_key and
  * the model column are handled in one place (VitFieldDefinition).
  *
- * Fields that pack into the classifications column (unspsc_code, msds_link,
- * country_of_origin) are merged into classifications at write time, not
- * written as their own columns. Quantity_per_unit is appended onto the end
- * of the name (shortdescription) value rather than getting its own column,
- * formatted as "10 Reams/CS" (quantity + unit_word + "/" + UOM).
+ * Classifications is read directly from CatalogItem.classifications (cast
+ * to array) and joined with the field's join_separator — the exporter does
+ * not know or care about specific classification keys. Quantity_per_unit is
+ * appended onto the end of the name (shortdescription) value rather than
+ * getting its own column, formatted as "10 Reams/CS" (quantity + unit_word
+ * + "/" + UOM).
  */
 class CatalogExportService
 {
@@ -103,30 +101,6 @@ class CatalogExportService
         return $path;
     }
 
-    public function generateAndStore(Vendor $vendor, string $catalogName, Collection $items, string $disk = 'local'): string
-    {
-        $spreadsheet = $this->generate($vendor, $catalogName, $items);
-
-        $safeCatalogName = Str::slug($catalogName);
-        $path = "exports/vendor-{$vendor->id}/catalog-{$safeCatalogName}-" . now()->format('Ymd-His') . '.xlsx';
-
-        Storage::disk($disk)->makeDirectory(dirname($path));
-
-        if ($disk === 'local') {
-            $fullPath = Storage::disk($disk)->path($path);
-            $writer = \PhpOffice\PhpSpreadsheet\IOFactory::createWriter($spreadsheet, 'Xlsx');
-            $writer->save($fullPath);
-        } else {
-            $tempPath = tempnam(sys_get_temp_dir(), 'catalog_export_');
-            $writer = \PhpOffice\PhpSpreadsheet\IOFactory::createWriter($spreadsheet, 'Xlsx');
-            $writer->save($tempPath);
-            Storage::disk($disk)->put($path, file_get_contents($tempPath));
-            unlink($tempPath);
-        }
-
-        return $path;
-    }
-
     /**
      * Generate Excel file from ALL current CatalogItems belonging to the
      * submission's vendor.
@@ -145,6 +119,7 @@ class CatalogExportService
             ->where('vendor_id', $vendor->id)
             ->whereIn('status', ['acceptable', 'excellent'])
             ->orderBy('id');
+
 
         return $this->generateAndStoreFromQuery($vendor, $catalogName, $itemsQuery, $disk);
     }
@@ -176,19 +151,7 @@ class CatalogExportService
             $column = $this->columnLetter($index);
             $cell = "{$column}{$rowNumber}";
 
-            try {
-                $value = $resolvedValues[$field->field_key] ?? '';
-            } catch (\Throwable $e) {
-                Log::error('Failed to resolve field value while writing item row', [
-                    'field_key' => $field->field_key,
-                    'item_id' => $item->id ?? null,
-                    'row_number' => $rowNumber,
-                    'error' => $e->getMessage(),
-                    'trace' => $e->getTraceAsString(),
-                ]);
-
-                $value = '';
-            }
+            $value = $resolvedValues[$field->field_key] ?? '';
 
             $sheet->setCellValueExplicit($cell, $value, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
         }
@@ -197,7 +160,6 @@ class CatalogExportService
     /**
      * Resolve all field values for a single row, applying:
      *  - model_attribute mapping (field_key -> Eloquent attribute name)
-     *  - packed fields (UNSPSC, MSDS Link, Country of Origin -> classifications)
      *  - appended fields (quantity_per_unit -> appended to shortdescription's value)
      *
      * quantity_per_unit append format: "{quantity} {unit_word}/{unit_of_measure}"
@@ -210,46 +172,11 @@ class CatalogExportService
         $values = [];
 
         // 1. Collect raw values for all exportable fields.
-        // Hierarchy is a selected leaf in the product_hierarchies table. The
-        // CatalogItem stores the chosen hierarchy_number (the VIT value) in
-        // the scalar hierarchy column, so resolveValue() reads that string
-        // directly rather than inventing a display path from unrelated data.
         foreach ($fields as $field) {
             $values[$field->field_key] = $this->resolveValue($field, $item, $vendor);
         }
 
-        // 2. Merge packed fields into their target (classifications).
-        $packedFields = VitFieldDefinition::packedFields()
-            ->where('packs_into_field', 'classifications');
-
-        if ($packedFields->isNotEmpty()) {
-            $classificationsRaw = $values['classifications'] ?? '';
-            $classificationParts = $this->extractClassificationParts($classificationsRaw);
-
-            foreach ($packedFields as $packed) {
-                $packedValue = $this->resolveValue($packed, $item, $vendor);
-
-                // MSDS link is conditional on Hazmat — only pack if the item
-                // is flagged Hazmat. If not Hazmat, skip the MSDS field entirely.
-                if ($packed->field_key === 'msds_link') {
-                    $isHazmat = $this->hasHazmatClassification($classificationParts);
-                    if (! $isHazmat) {
-                        continue;
-                    }
-                }
-
-                if ($packedValue !== '') {
-                    $classificationParts[] = "{$packed->packs_into_key}={$packedValue}";
-                }
-            }
-
-            $classificationsDefinition = VitFieldDefinition::find('classifications');
-            $classificationSeparator = $classificationsDefinition?->join_separator ?? '|';
-
-            $values['classifications'] = implode($classificationSeparator, $classificationParts);
-        }
-
-        // 3. Apply appended fields (quantity_per_unit onto shortdescription).
+        // 2. Apply appended fields (quantity_per_unit onto shortdescription).
         $appendedFields = VitFieldDefinition::appendedFields();
 
         foreach ($appendedFields as $appended) {
@@ -277,51 +204,9 @@ class CatalogExportService
                     ? "{$targetValue}, {$formattedAppend}"
                     : $formattedAppend;
             }
-
-            // The appended field does NOT get its own column (excluded from
-            // exportableFields() because vit_csv_column is null).
-            $values[$appended->field_key] = '';
         }
 
         return $values;
-    }
-
-    /**
-     * Split the raw classifications value into individual parts.
-     * Handles JSON-encoded arrays, pipe-separated strings, and empty values.
-     */
-    private function extractClassificationParts(string $rawValue): array
-    {
-        if ($rawValue === '') {
-            return [];
-        }
-
-        $maybeJson = json_decode($rawValue, true);
-        if (is_array($maybeJson)) {
-            return array_values(array_filter($maybeJson, fn($part) => trim((string) $part) !== ''));
-        }
-
-        if ($rawValue === '' || $rawValue === '[]') {
-            return [];
-        }
-
-        $classificationSeparator = VitFieldDefinition::find('classifications')?->join_separator ?? '|';
-
-        return array_values(array_filter(explode($classificationSeparator, $rawValue), fn($part) => trim((string) $part) !== ''));
-    }
-
-    /**
-     * Check whether the classifications data includes "Hazmat".
-     */
-    private function hasHazmatClassification(array $classificationParts): bool
-    {
-        foreach ($classificationParts as $part) {
-            if (trim((string) $part) === 'Hazmat') {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     /**
@@ -340,6 +225,10 @@ class CatalogExportService
             return $vendor->name ?? '';
         }
 
+        if ($fieldKey === 'catalog_name') {
+            return $vendor->name ?? '';
+        }
+
         if ($fieldKey === 'type') {
             return 'ELINK';
         }
@@ -348,33 +237,16 @@ class CatalogExportService
             return $item->dealer_sku ?? '';
         }
 
-        if ($fieldKey === 'hierarchy') {
-            return $item->hierarchyInfo?->hierarchy_number;
-        }
-
-        if ($fieldKey === 'product_commodity_type') {
-            return $item->commodityType?->name;
-        }
-
-        if ($fieldKey === 'unit_of_measure') {
-            return $item->unitOfMeasure?->code;
-        }
-
-        if ($fieldKey === 'item_weight_in_pounds') {
-            return $item->item_weight;
-        }
-
         // Determine the Eloquent attribute to read from CatalogItem.
         // model_attribute in the DEFINITIONS handles all overrides (e.g.
-        // shortdescription -> name, image_urls -> images, etc.).
+        // shortdescription -> name, image_urls -> images, hierarchy ->
+        // hierarchyInfo.hierarchy_number, unit_of_measure ->
+        // unitOfMeasure.code, product_commodity_type -> commodityType.name,
+        // item_weight_in_pounds -> item_weight, country_of_origin ->
+        // countryOfOrigin accessor).
         $attr = $field->model_attribute ?? $fieldKey;
 
-        // TODO: remove this special case for hierarchy once the field def is updated to use model_attribute
-        // if ($fieldKey === 'hierarchy') {
-        //     $rawValue = $item->hierarchy ?? $item->{$fieldKey} ?? null;
-        // } else {
-        $rawValue = $item->{$attr} ?? $item->{$fieldKey} ?? null;
-        // }
+        $rawValue = data_get($item, $attr);
 
         if (is_null($rawValue) || $rawValue === '' || $rawValue === []) {
             return '';

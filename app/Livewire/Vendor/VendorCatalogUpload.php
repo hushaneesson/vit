@@ -41,8 +41,6 @@ class VendorCatalogUpload extends Component
 
     public array $rangeEnds = [];
 
-    public array $columnSearch = [];
-
     public bool $suggestionsFinalized = false;
 
     public array $separatorValidationErrors = [];
@@ -105,19 +103,22 @@ class VendorCatalogUpload extends Component
     /**
      * Columns that may be used as range Start/End for a multi-value field.
      *
-     * A column is available if it is not mapped to another field, or if it
-     * belongs to this field's own existing range (so an active range stays
-     * editable). Columns mapped to other fields are excluded.
+     * A column is available if it belongs to this field's own existing range
+     * (so an active range stays editable), or if it is not occupied by
+     * another field's range. Columns directly mapped to a normal field are
+     * intentionally still selectable here: a range is allowed to touch a
+     * directly-mapped column, and that column is simply excluded from the
+     * range when the mapping is persisted. Only range-vs-range overlap is a
+     * real conflict.
      *
      * @return \Illuminate\Support\Collection<int, object>
      */
     public function availableRangeColumnsFor(string $fieldKey)
     {
-        $takenIndexes = $this->mappedColumnIndexes();
         $ownRange = $this->rangeColumnsFor($fieldKey);
         $ownRangeStr = array_map(fn($i) => (string) $i, $ownRange);
 
-        // Columns occupied by OTHER fields' ranges must also be excluded so a
+        // Columns occupied by OTHER fields' ranges must be excluded so a
         // range cannot overlap another field's range.
         $otherRangeTaken = collect($this->rangeStarts)
             ->reject(fn($start, $key) => $key === $fieldKey)
@@ -125,12 +126,12 @@ class VendorCatalogUpload extends Component
             ->map(fn($i) => (string) $i)
             ->values();
 
-        return collect($this->columns)->map(function ($name, $index) use ($takenIndexes, $ownRangeStr, $otherRangeTaken) {
+        return collect($this->columns)->map(function ($name, $index) use ($ownRangeStr, $otherRangeTaken) {
             $indexStr = (string) $index;
             return (object) [
                 'index' => $indexStr,
                 'name' => $name,
-                'available' => in_array($indexStr, $ownRangeStr, true) || (!$takenIndexes->contains($indexStr) && !$otherRangeTaken->contains($indexStr)),
+                'available' => in_array($indexStr, $ownRangeStr, true) || !$otherRangeTaken->contains($indexStr),
             ];
         })->where('available', true)->values();
     }
@@ -145,7 +146,7 @@ class VendorCatalogUpload extends Component
     public function unmappedRequiredFields()
     {
         return $this->catalogFields
-            ->where('requirement_type', 'required')
+            ->whereIn('requirement_type', ['required', 'recommended'])
             ->reject(fn($field) => $this->mappedFieldKeys()->contains($field->field_key))
             ->pluck('web_app_label');
     }
@@ -220,6 +221,7 @@ class VendorCatalogUpload extends Component
             foreach (array_keys($this->rangeStarts) as $fieldKey) {
                 $this->mapping[$fieldKey] = null;
             }
+
             return;
         }
 
@@ -228,14 +230,20 @@ class VendorCatalogUpload extends Component
         }
 
         $previous = $this->rangeStarts[$key] ?? null;
-        $this->rangeStarts[$key] = $value !== null && $value !== '' ? (string) $value : null;
+
+        $this->rangeStarts[$key] = $value !== null && $value !== ''
+            ? (string) $value
+            : null;
 
         if ($this->rangeStarts[$key] !== null) {
             $this->mapping[$key] = null;
         }
 
-        // Prevent a range that would cross a column mapped to another field.
-        if ($this->rangeCrossesMappedColumn($key)) {
+        // A range is allowed to contain columns already mapped to another
+        // field. Those columns will be ignored when the range is processed.
+        //
+        // We only need to prevent overlap with another range.
+        if ($this->rangeOverlapsAnotherRange($key)) {
             $this->rangeStarts[$key] = $previous;
         }
     }
@@ -250,6 +258,7 @@ class VendorCatalogUpload extends Component
             foreach (array_keys($this->rangeEnds) as $fieldKey) {
                 $this->mapping[$fieldKey] = null;
             }
+
             return;
         }
 
@@ -258,14 +267,20 @@ class VendorCatalogUpload extends Component
         }
 
         $previous = $this->rangeEnds[$key] ?? null;
-        $this->rangeEnds[$key] = $value !== null && $value !== '' ? (string) $value : null;
+
+        $this->rangeEnds[$key] = $value !== null && $value !== ''
+            ? (string) $value
+            : null;
 
         if ($this->rangeEnds[$key] !== null) {
             $this->mapping[$key] = null;
         }
 
-        // Prevent a range that would cross a column mapped to another field.
-        if ($this->rangeCrossesMappedColumn($key)) {
+        // A range is allowed to contain columns already mapped to another
+        // field. Those columns will be ignored when the range is processed.
+        //
+        // We only need to prevent overlap with another range.
+        if ($this->rangeOverlapsAnotherRange($key)) {
             $this->rangeEnds[$key] = $previous;
         }
     }
@@ -296,29 +311,40 @@ class VendorCatalogUpload extends Component
     }
 
     /**
-     * Whether the current range for a field crosses a column that is mapped
-     * to another field. Used to prevent a range from spanning columns that
-     * belong to other fields.
+     * Determines whether the current range overlaps another field's range.
+     *
+     * Directly mapped columns are intentionally NOT considered a conflict here.
+     * If a directly mapped column falls inside this range, the range will simply
+     * skip that column when it is persisted.
      */
-    private function rangeCrossesMappedColumn(string $fieldKey): bool
+    private function rangeOverlapsAnotherRange(string $fieldKey): bool
     {
         $range = $this->rangeColumnsFor($fieldKey);
+
         if (empty($range)) {
             return false;
         }
 
-        $taken = $this->mappedColumnIndexes();
+        $rangeIndexes = collect($range)
+            ->map(fn($index) => (string) $index);
 
-        // Columns occupied by OTHER fields' ranges are also taken, preventing
-        // overlapping ranges from one field's perspective.
-        $otherRangeTaken = collect($this->rangeStarts)
-            ->reject(fn($start, $key) => $key === $fieldKey)
-            ->flatMap(fn($start, $key) => $this->rangeColumnsFor($key))
-            ->map(fn($i) => (string) $i);
+        foreach ($this->rangeStarts as $otherFieldKey => $start) {
+            if ($otherFieldKey === $fieldKey) {
+                continue;
+            }
 
-        foreach ($range as $colIndex) {
-            if ($taken->contains((string) $colIndex) || $otherRangeTaken->contains((string) $colIndex)) {
-                return true;
+            $otherEnd = $this->rangeEnds[$otherFieldKey] ?? null;
+
+            if ($start === null || $start === '' || $otherEnd === null || $otherEnd === '') {
+                continue;
+            }
+
+            $otherRange = $this->rangeColumnsFor($otherFieldKey);
+
+            foreach ($otherRange as $otherColumnIndex) {
+                if ($rangeIndexes->contains((string) $otherColumnIndex)) {
+                    return true;
+                }
             }
         }
 
@@ -334,16 +360,34 @@ class VendorCatalogUpload extends Component
                 continue;
             }
 
-            $mapping = $this->mapping[$field->field_key] ?? null;
+            $fieldKey = $field->field_key;
+
+            // Range mappings do not use a source separator. Their values
+            // come from multiple source columns, so skip separator
+            // validation when this field has an active range.
+            $hasActiveRange =
+                isset($this->rangeStarts[$fieldKey]) &&
+                $this->rangeStarts[$fieldKey] !== null &&
+                $this->rangeStarts[$fieldKey] !== '' &&
+                isset($this->rangeEnds[$fieldKey]) &&
+                $this->rangeEnds[$fieldKey] !== null &&
+                $this->rangeEnds[$fieldKey] !== '';
+
+            if ($hasActiveRange) {
+                continue;
+            }
+
+            $mapping = $this->mapping[$fieldKey] ?? null;
 
             if ($mapping === null || $mapping === '') {
                 continue;
             }
 
-            $separator = $this->separators[$field->field_key] ?? null;
+            $separator = $this->separators[$fieldKey] ?? null;
 
             if ($separator === null || $separator === '') {
-                $this->separatorValidationErrors[$field->field_key] = "Please select a separator for {$field->web_app_label} before continuing.";
+                $this->separatorValidationErrors[$fieldKey] =
+                    "Please select a separator for {$field->web_app_label} before continuing.";
             }
         }
 
@@ -354,9 +398,11 @@ class VendorCatalogUpload extends Component
         $upload = CatalogUpload::findOrFail($this->catalogUploadId);
 
         // ---------- Server-side mapping availability validation ----------
-        // The UI prevents conflicts via availableColumnsFor()/availableRangeColumnsFor(),
-        // but the server must be authoritative: reject overlapping assignments even
-        // if a crafted Livewire request tries to bypass the frontend.
+        // The UI prevents range-vs-range conflicts via availableRangeColumnsFor(),
+        // but the server must be authoritative: reject overlapping range
+        // assignments even if a crafted Livewire request tries to bypass the
+        // frontend. A range touching a directly-mapped column is allowed; that
+        // column is simply excluded from the range at persist time below.
 
         // 1. Active range mappings (field_key => list of column index strings).
         $rangeMappings = [];
@@ -375,7 +421,7 @@ class VendorCatalogUpload extends Component
 
         // 2. Normal single-column mappings (field_key => column index string).
         // Range fields' own single-column mapping entries are ignored at persist
-        // time, so exclude them here to avoid false duplicate/overlap reports.
+        // time, so exclude them here to avoid false duplicate reports.
         $normalMappings = collect($this->mapping)
             ->filter(fn($index) => $index !== null && $index !== '')
             ->reject(fn($index, $key) => in_array($key, $rangeFieldKeys, true))
@@ -397,31 +443,28 @@ class VendorCatalogUpload extends Component
             return;
         }
 
-        // 4. Reject a range that overlaps a normal mapping or another range.
+        // 4. Reject a range that overlaps another range. Overlap with a normal
+        // mapping is allowed (that column is excluded from the range on persist).
         foreach ($rangeMappings as $fieldKey => $rangeCols) {
             $label = VitFieldDefinition::find($fieldKey)?->web_app_label ?? $fieldKey;
 
-            foreach ($rangeCols as $rangeColStr) {
-                // Overlap with a normal mapping?
-                if (in_array($rangeColStr, $normalMappings, true)) {
-                    $this->separatorValidationErrors = [];
-                    $badColumnName = $this->columns[$rangeColStr] ?? $rangeColStr;
-                    $this->separatorValidationErrors['__range_conflict'] = "Column '{$badColumnName}' is inside the range for '{$label}' and is also mapped to another field. Each source column can only be used once.";
-                    return;
+            foreach ($rangeMappings as $otherKey => $otherRangeCols) {
+                if ($otherKey === $fieldKey) {
+                    continue;
                 }
 
-                // Overlap with another field's range?
-                foreach ($rangeMappings as $otherKey => $otherRangeCols) {
-                    if ($otherKey === $fieldKey) {
-                        continue;
-                    }
-                    if (in_array($rangeColStr, $otherRangeCols, true)) {
-                        $this->separatorValidationErrors = [];
-                        $badColumnName = $this->columns[$rangeColStr] ?? $rangeColStr;
-                        $otherLabel = VitFieldDefinition::find($otherKey)?->web_app_label ?? $otherKey;
-                        $this->separatorValidationErrors['__range_conflict'] = "Column '{$badColumnName}' is inside the ranges for both '{$label}' and '{$otherLabel}'. Ranges cannot overlap.";
-                        return;
-                    }
+                $overlap = array_intersect($rangeCols, $otherRangeCols);
+
+                if (!empty($overlap)) {
+                    $badIndex = array_values($overlap)[0];
+                    $badColumnName = $this->columns[$badIndex] ?? $badIndex;
+                    $otherLabel = VitFieldDefinition::find($otherKey)?->web_app_label ?? $otherKey;
+
+                    $this->separatorValidationErrors = [];
+                    $this->separatorValidationErrors['__range_conflict'] =
+                        "Column '{$badColumnName}' is inside the ranges for both '{$label}' and '{$otherLabel}'. Ranges cannot overlap.";
+
+                    return;
                 }
             }
         }
@@ -467,10 +510,25 @@ class VendorCatalogUpload extends Component
                     ]);
                 }
 
+                // Columns already claimed by a normal/direct mapping. Allowed
+                // to fall inside a range, but the range must skip them when
+                // creating its own mapping rows so we don't insert the same
+                // column_index twice.
+                $takenByNormalMappings = collect($this->mapping)
+                    ->filter(
+                        fn($index, $key) =>
+                        $index !== null &&
+                            $index !== '' &&
+                            !in_array($key, $rangeFieldKeys, true)
+                    )
+                    ->map(fn($index) => (string) $index)
+                    ->values();
+
                 // Attribute-range mode: a multi-value field mapped to a contiguous
                 // range of source columns. Each column in the range becomes its own
                 // mapping row (same field_key) so the column header is preserved as
-                // the attribute key.
+                // the attribute key, except columns already claimed by a direct
+                // mapping, which are silently skipped.
                 foreach ($this->rangeStarts as $fieldKey => $start) {
                     $end = $this->rangeEnds[$fieldKey] ?? null;
                     if ($start === null || $end === null) {
@@ -483,7 +541,12 @@ class VendorCatalogUpload extends Component
                     }
 
                     foreach ($this->rangeColumnsFor($fieldKey) as $columnIndex) {
+                        if ($takenByNormalMappings->contains((string) $columnIndex)) {
+                            continue;
+                        }
+
                         $columnName = $this->columns[$columnIndex] ?? null;
+
                         if ($columnName === null) {
                             continue;
                         }
@@ -577,7 +640,7 @@ class VendorCatalogUpload extends Component
 
     public function startOver(): void
     {
-        $this->reset(['file', 'catalogUploadId', 'columns', 'sampleRows', 'mapping', 'suggestedIndexes', 'suggestionsFinalized', 'currentFileSignature', 'rangeStarts', 'rangeEnds', 'columnSearch', 'separators']);
+        $this->reset(['file', 'catalogUploadId', 'columns', 'sampleRows', 'mapping', 'suggestedIndexes', 'suggestionsFinalized', 'currentFileSignature', 'rangeStarts', 'rangeEnds', 'separators']);
         $this->progress = ['status' => null, 'total_rows' => 0, 'success_rows' => 0, 'created_rows' => 0, 'updated_rows' => 0, 'unchanged_rows' => 0, 'invalid_rows' => 0, 'failure_reason' => null];
         $this->step = 'upload';
     }
@@ -592,7 +655,6 @@ class VendorCatalogUpload extends Component
         $this->rangeEnds = [];
         $this->separators = [];
         $this->suggestedIndexes = [];
-        $this->columnSearch = [];
     }
 
     private function applySuggestedTemplate(int $vendorId): void

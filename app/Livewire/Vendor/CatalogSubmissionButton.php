@@ -34,12 +34,15 @@ class CatalogSubmissionButton extends Component
             return null;
         }
 
+        // catalog_items.hierarchy stores product_hierarchies.id (not hierarchy_number).
+        // Join on the primary key so a missing/invalid hierarchy correctly leaves
+        // the joined row null.
         $canSubmit = CatalogItem::leftJoin('commodity_types', 'catalog_items.category', '=', 'commodity_types.id')
-            ->leftJoin('product_hierarchies', 'catalog_items.hierarchy', '=', 'product_hierarchies.hierarchy_number')
+            ->leftJoin('product_hierarchies', 'catalog_items.hierarchy', '=', 'product_hierarchies.id')
             ->where('commodity_types.approved', false)
-            ->whereNull('product_hierarchies.hierarchy_number')
+            ->whereNull('product_hierarchies.id')
             ->count();
-// dd($canSubmit);
+
         $total = CatalogItem::where('vendor_id', $client->vendor_id)->count();
         $complete = CatalogItem::where('vendor_id', $client->vendor_id)
             ->whereIn('status', ['acceptable', 'excellent'])
@@ -131,15 +134,10 @@ class CatalogSubmissionButton extends Component
                 return;
             }
 
-            $completeItems = CatalogItem::where('vendor_id', $vendorId)
-                ->whereIn('status', ['acceptable', 'excellent'])
-                ->count();
-
-            $incompleteItems = $totalItems - $completeItems;
 
             $submission = null;
 
-            DB::transaction(function () use ($client, $vendorId, $totalItems, $completeItems, $incompleteItems, &$submission) {
+            DB::transaction(function () use ($client, $vendorId, $totalItems, &$submission) {
                 $submission = CatalogSubmission::create([
                     'vendor_id'              => $vendorId,
                     'requested_by_client_id' => $client->id,
@@ -152,11 +150,6 @@ class CatalogSubmissionButton extends Component
             if ($submission) {
                 try {
                     GenerateCatalogExportJob::dispatch($submission->id);
-
-                    $vendorName = 'Unknown Vendor';
-                    if ($client->vendor && is_object($client->vendor) && is_string($client->vendor->name)) {
-                        $vendorName = $client->vendor->name;
-                    }
 
                     $adminEmail = config('vit.admin_email');
 
@@ -179,7 +172,6 @@ class CatalogSubmissionButton extends Component
             $this->loadPendingSubmission();
 
             $this->dispatch('notify', type: 'success', message: 'Your catalog has been submitted.');
-            // $this->dispatch('review-requested');
         } catch (\Throwable $e) {
             \Illuminate\Support\Facades\Log::error('Catalog submission failed', [
                 'vendor_id' => $vendorId,
@@ -218,7 +210,6 @@ class CatalogSubmissionButton extends Component
             $this->loadPendingSubmission();
 
             $this->dispatch('notify', type: 'success', message: 'Submission withdrawn.');
-            // $this->dispatch('review-withdrawn');
         } catch (\Throwable $e) {
             $this->dispatch('notify', type: 'error', message: 'Failed to withdraw submission: ' . $e->getMessage());
         }

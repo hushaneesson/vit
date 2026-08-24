@@ -66,9 +66,40 @@
         @if ($step === 'upload')
             <div class="p-4 bg-white border rounded-xl sm:p-8 border-slate-200">
                 <h2 class="text-lg font-semibold sm:text-xl text-slate-900">Upload your product catalog</h2>
-                <p class="mt-1 text-sm text-slate-500">
-                    Upload your file exactly as it is. We'll help you match the columns in the next step.
-                </p>
+                {{-- <p class="mt-1 text-sm text-slate-500">
+                    Please Upload your file and We'll help you match the columns in the next step.
+                </p> --}}
+
+                {{-- Upload requirements notice --}}
+                <div class="flex gap-3 p-4 mt-4 border rounded-lg border-rose-200">
+                    <div class="flex items-center justify-center flex-shrink-0 rounded-full w-9 h-9">
+                        <svg class="w-5 h-5 text-rose-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                            stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                d="M12 9v3.75m0 3.75h.008v.008H12v-.008ZM21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                        </svg>
+                    </div>
+                    <div class="text-sm text-slate-700">
+                        <p class="font-semibold text-slate-900">Please review before uploading</p>
+                        <ul class="pl-4 mt-2 space-y-1.5 list-disc">
+                            <li>
+                                We only accept files in <span class="font-medium">CSV, XLS, or XLSX</span> format.
+                            </li>
+                            <li>
+                                If a product attribute spans multiple columns (for example, several specification
+                                columns), those columns must be positioned consecutively, in a single block. You
+                                will select this block as a range in the mapping step.
+                            </li>
+                            <li>
+                                If your file is in a different format, such as PDF or Word, please convert it to
+                                CSV or XLSX first. <a href="https://cloudconvert.com" target="_blank"
+                                    rel="noopener noreferrer"
+                                    class="font-medium underline hover:text-slate-900">CloudConvert</a> is a free
+                                online tool that can perform this conversion.
+                            </li>
+                        </ul>
+                    </div>
+                </div>
 
                 {{-- Drop zone --}}
                 <label for="catalog-file" @class([
@@ -138,16 +169,13 @@
                         <h2 class="text-lg font-semibold sm:text-xl text-slate-900">Match your columns</h2>
                         <p class="py-2 mt-1 text-sm text-slate-500">
                             <span class="block">
-                                Map the columns from your file to the VIT fields below. Only map the
-                                columns that exist in your file — anything missing can be completed later from the
-                                Catalog Item List.
+                                Match your file columns to the VIT fields below. Only map fields available in your file.
+                                Missing fields can be completed later in the Catalog Item List.
                             </span>
-                            <span class="block">
-                                Fields marked with
-                                <span class="font-medium text-red-600">*</span>
-
-                                are recommended for VIT submission. Mapping more fields now will reduce manual editing
-                                later.
+                            <span class="block mt-1">
+                                Fields marked with <span class="font-medium text-red-600">*</span> are recommended for
+                                VIT submission.
+                                Mapping more fields now means less manual editing later.
                             </span>
                         </p>
                     </div>
@@ -166,7 +194,9 @@
 
                 {{-- Mapping progress --}}
                 @php
-                    $totalRecommended = $this->catalogFields->where('requirement_type', 'required')->count();
+                    $totalRecommended = $this->catalogFields
+                        ->whereIn('requirement_type', ['required', 'recommended'])
+                        ->count();
                     $mappedRecommended = $totalRecommended - $this->unmappedRequiredFields()->count();
                     $progressPercent =
                         $totalRecommended > 0 ? round(($mappedRecommended / $totalRecommended) * 100) : 0;
@@ -219,8 +249,8 @@
                                             </span>
 
                                             @if ($field->requirement_type === 'required')
-                                                <span class="font-medium text-red-600"
-                                                    title="Recommended for VIT submission" aria-label="Recommended">
+                                                <span class="text-lg font-medium text-red-600"
+                                                    title="Required for VIT submission" aria-label="Required">
                                                     *
                                                 </span>
                                             @endif
@@ -577,17 +607,23 @@
                     <div
                         class="flex items-start gap-2 p-3 mt-4 text-sm border rounded-lg bg-sky-50 text-sky-800 border-sky-200">
                         <svg class="w-5 h-5 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24"
-                            stroke="currentColor" stroke-width="1.5">
+                            stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                             <path stroke-linecap="round" stroke-linejoin="round"
-                                d="m11.25 11.25.04-.02a.75.75 0 0 1 1.063.452l.255.766a.75.75 0 0 0 1.063.452l.04-.02a.75.75 0 0 1 1.063.452l.255.766a.75.75 0 0 0 1.063.452l.04-.02a.75.75 0 0 1 1.063.452l.255.766a.75.75 0 0 1 1.063.452l.255.766M21 12a9 9 0 1 1-18 3.7" />
+                                d="M11.25 11.25h.008v.008h-.008v-.008ZM12 9.75v.008h.008V9.75H12Zm0 3.75v5.25m0-15a9 9 0 1 1 0 18 9 9 0 0 1 0-18Z" />
                         </svg>
 
-                        <span>
-                            <strong>Not in this file:</strong>
-                            {{ $this->unmappedRequiredFields()->join(', ') }}.
-                            You can continue without these — they can be completed later from the Catalog Item List
-                            before requesting review.
-                        </span>
+                        <div>
+                            <strong class="block">Not in this file:</strong>
+
+                            <span class="block mt-1">
+                                {{ $this->unmappedRequiredFields()->join(', ') }}.
+                            </span>
+
+                            <span class="block mt-1 text-sm text-slate-600">
+                                You can continue without these. They can be completed later by Editing the Catalog Item
+                                before requesting review.
+                            </span>
+                        </div>
                     </div>
                 @endif
 
@@ -595,11 +631,11 @@
                     <p class="mt-4 text-sm text-rose-600">{{ $message }}</p>
                 @enderror
 
-                @if (!empty($this->separatorValidationErrors))
+                {{-- @if (!empty($this->separatorValidationErrors))
                     @foreach ($this->separatorValidationErrors as $error)
                         <p class="mt-2 text-sm text-rose-600">{{ $error }}</p>
                     @endforeach
-                @endif
+                @endif --}}
 
                 <div class="flex flex-col-reverse gap-3 mt-6 sm:flex-row sm:items-center sm:justify-between">
                     <button wire:click="startOver" wire:loading.attr="disabled"
