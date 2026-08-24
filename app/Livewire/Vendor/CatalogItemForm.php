@@ -3,6 +3,7 @@
 namespace App\Livewire\Vendor;
 
 use App\Mail\NewCommodityTypeMail;
+use App\Models\Catalog;
 use App\Models\CatalogItem;
 use App\Models\CatalogItemImage;
 use App\Models\ClassificationType;
@@ -26,6 +27,7 @@ class CatalogItemForm extends Component
     use WithFileUploads;
 
     public ?string $catalogItemId = null;
+    public ?int $catalogId = null;
 
     // Identification
     public string $name = '';
@@ -63,11 +65,9 @@ class CatalogItemForm extends Component
 
     public array $specifications = [['key' => '', 'value' => '']];
     public array $classifications = [['type' => '', 'value' => '']];
-    public string $unspscCode = '';
-    public string $msdsLink = '';
 
 
-    public function mount(?CatalogItem $catalogItem = null): void
+    public function mount(?CatalogItem $catalogItem = null, ?int $catalogId = null): void
     {
         if ($catalogItem && $catalogItem->exists) {
             $this->authorizeVendorOwnership($catalogItem);
@@ -75,6 +75,8 @@ class CatalogItemForm extends Component
 
             return;
         }
+
+        $this->catalogId = $catalogId;
 
         $this->classifications = $this->ensureRequiredClassificationRows($this->classifications);
     }
@@ -88,6 +90,7 @@ class CatalogItemForm extends Component
     protected function fillFromModel(CatalogItem $catalogItem): void
     {
         $this->catalogItemId = $catalogItem->id;
+        $this->catalogId = $catalogItem->catalog_id;
 
         $this->name = $catalogItem->name;
         $this->sellerSku = $catalogItem->dealer_sku;
@@ -108,8 +111,6 @@ class CatalogItemForm extends Component
         $this->multiples = $catalogItem->multiples;
         $this->listPrice = $catalogItem->list_price;
         $this->sellingPricePerUnit = $catalogItem->selling_price;
-        $this->unspscCode = $catalogItem->unspsc_code ?? '';
-        $this->msdsLink = $catalogItem->msds_link ?? '';
 
         $this->searchTerms = ! empty($catalogItem->search_terms) ? $catalogItem->search_terms : [''];
         $this->sellingPoints = ! empty($catalogItem->selling_points) ? $catalogItem->selling_points : [''];
@@ -122,6 +123,17 @@ class CatalogItemForm extends Component
         //     'id' => $image->id,
         //     'url' => route('vendor.catalog-images.show', $image),
         // ])->all();
+    }
+
+    #[Computed]
+    public function catalogOptions()
+    {
+        $client = Auth::guard('client')->user();
+
+        return Catalog::query()
+            ->where('vendor_id', $client->vendor_id)
+            ->orderBy('name')
+            ->get();
     }
 
     #[Computed]
@@ -247,6 +259,10 @@ class CatalogItemForm extends Component
         $client = Auth::guard('client')->user();
 
         return [
+            'catalogId' => [
+                'required',
+                Rule::exists('catalogs', 'id')->where('vendor_id', $client->vendor_id),
+            ],
             'name' => ['required', 'string', 'max:255'],
             'sellerSku' => [
                 'required',
@@ -288,10 +304,6 @@ class CatalogItemForm extends Component
             'specifications' => ['required', 'array', 'min:1'],
             'specifications.*.key' => ['nullable', 'string'],
             'specifications.*.value' => ['nullable', 'string'],
-
-            'unspscCode' => ['required', 'string', 'max:255'],
-            'msdsLink' => ['nullable', 'url', 'max:300'],
-
             'classifications' => ['nullable', 'array'],
             'classifications.*.type' => ['nullable', 'required_with:classifications.*.value',],
             'classifications.*.value' => ['nullable', 'required_with:classifications.*.type',],
@@ -365,6 +377,7 @@ class CatalogItemForm extends Component
 
         $catalogItem = DB::transaction(function () use ($vendor, $searchTermsClean, $replacementSkusClean, $sellingPointsClean, $specPairs, $classificationsClean) {
             $attrs = [
+                'catalog_id' => $this->catalogId,
                 'name' => $this->name,
                 'dealer_sku' => $this->sellerSku,
                 'replacement_sku' => $replacementSkusClean !== [] ? $replacementSkusClean : null,
@@ -385,8 +398,6 @@ class CatalogItemForm extends Component
                 'search_terms' => $searchTermsClean,
                 'selling_points' => $sellingPointsClean,
                 'specifications' => $specPairs,
-                'unspsc_code' => $this->unspscCode,
-                'msds_link' => $this->msdsLink,
                 'classifications' => $classificationsClean,
                 'list_price' => number_format((float) $this->listPrice, 2, '.', ''),
                 'selling_price' => number_format((float) $this->sellingPricePerUnit, 2, '.', ''),
@@ -426,7 +437,7 @@ class CatalogItemForm extends Component
             ? 'Catalog item updated successfully.'
             : 'Catalog item added successfully.');
 
-        return redirect()->route('vendor.catalog.index', ['catalog' => $catalogItem->name]);
+        return redirect()->route('vendor.catalog.items', ['catalog' => $catalogItem->catalog_id]);
     }
 
     public function render()

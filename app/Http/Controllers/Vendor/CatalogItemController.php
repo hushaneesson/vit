@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Vendor;
 
 use App\Http\Controllers\Controller;
+use App\Models\Catalog;
 use App\Models\CatalogItem;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -13,13 +14,14 @@ class CatalogItemController extends Controller
     /**
      * List all catalogs items.
      */
-    public function index(Request $request)
+    public function index(Catalog $catalog, Request $request)
     {
         $client = Auth::guard('client')->user();
-        $vendor = $client->vendor;
+        abort_unless($client->vendor_id === $catalog->vendor_id, 403);
 
         $items = CatalogItem::query()
-            ->where('vendor_id', $vendor->id)
+            ->where('vendor_id', $client->vendor_id)
+            ->where('catalog_id', $catalog->id)
             ->when($request->filled('search'), function ($query) use ($request) {
                 // search name, dealer_sku, manufacturer_sku
                 $query->where(function ($query) use ($request) {
@@ -34,8 +36,11 @@ class CatalogItemController extends Controller
             ->orderBy('name')
             ->paginate(25);
 
+        $items->appends($request->only(['search', 'status']));
+
         return view('vendor.catalog.index', [
-            'vendor' => $vendor,
+            'vendor' => $client->vendor,
+            'catalog' => $catalog,
             'items' => $items,
         ]);
     }
@@ -46,9 +51,15 @@ class CatalogItemController extends Controller
         return view('vendor.catalog.upload');
     }
 
-    public function create()
+    public function create(Catalog $catalog)
     {
-        return view('vendor.catalog.create');
+        $client = Auth::guard('client')->user();
+        abort_unless($client->vendor_id === $catalog->vendor_id, 403);
+
+        return view('vendor.catalog.create', [
+            'catalogId' => (int) $catalog->id,
+            'catalog' => $catalog,
+        ]);
     }
 
     public function edit(CatalogItem $catalogItem)
@@ -65,7 +76,7 @@ class CatalogItemController extends Controller
         $client = Auth::guard('client')->user();
         abort_unless($client->vendor_id === $catalogItem->vendor_id, 403);
 
-        $catalogName = $catalogItem->name;
+        $catalogId = $catalogItem->catalog_id;
 
         foreach ($catalogItem->images as $image) {
             \Illuminate\Support\Facades\Storage::disk($image->disk)->delete($image->path);
@@ -74,7 +85,7 @@ class CatalogItemController extends Controller
         $catalogItem->delete();
 
         return redirect()
-            ->route('vendor.catalog.index', ['catalog' => $catalogName])
+            ->route('vendor.catalog.items', ['catalog' => $catalogId])
             ->with('status', 'Catalog item deleted.');
     }
 }

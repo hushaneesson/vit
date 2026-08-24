@@ -28,7 +28,6 @@ return new class extends Migration
             ['name' => 'AbilityOne', 'approved' => true],
             ['name' => 'Abrasives', 'approved' => true],
             ['name' => 'Adhesives, Sealants and Tape', 'approved' => true],
-            ['name' => 'All Other', 'approved' => true],
             ['name' => 'Binding, Filing, Labeling', 'approved' => true],
             ['name' => 'Breakroom', 'approved' => true],
             ['name' => 'Breakroom/Janitorial/Maintenance', 'approved' => true],

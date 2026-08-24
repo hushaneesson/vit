@@ -11,6 +11,7 @@ return new class extends Migration
         Schema::create('catalog_items', function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->foreignId('vendor_id')->constrained('vendors')->cascadeOnDelete();
+            $table->foreignId('catalog_id');
 
             $table->string('dealer_sku', 255);
             $table->json('replacement_sku')->nullable();
@@ -27,8 +28,6 @@ return new class extends Migration
             $table->foreignId('category')->nullable();
 
             $table->json('classifications')->nullable();
-            $table->string('unspsc_code')->nullable();
-            $table->string('msds_link', 300)->nullable();
 
             $table->json('search_terms')->nullable();
             $table->json('specifications')->nullable();

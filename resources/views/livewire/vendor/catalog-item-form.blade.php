@@ -141,9 +141,7 @@
                     </div>
                     <div>
                         <label>Hierarchy <span class="text-red-600">*</span></label>
-                        <x-searchable-select wire-model="hierarchy" :options="$this->hierarchyOptions->map(
-                            fn($h) => ['value' => $h->id, 'label' => $h->name],
-                        )" :allow-create="false"
+                        <x-searchable-select wire-model="hierarchy" :options="$this->hierarchyOptions->map(fn($h) => ['value' => $h->id, 'label' => $h->name])" :allow-create="false"
                             placeholder="Select a product hierarchy..." />
 
                         <p class="text-sm text-gray-500 mt-1.5">Choose the most specific category path for this item.
@@ -453,33 +451,9 @@
                 <h2 class="font-semibold text-gray-900">Classifications</h2>
             </div>
             <div class="p-6 space-y-6">
-                <div class="grid gap-8 md:grid-cols-2">
-                    <div>
-                        <label>UNSPSC Code <span class="text-red-600">*</span></label>
-                        <input type="text" wire:model="unspscCode"
-                            class="mt-1.5 block w-full rounded-lg border-gray-300 shadow-sm text-sm focus:border-sky-500 focus:ring-sky-500 focus:ring-1" />
-                        <p class="text-sm text-gray-500 mt-1.5">
-                            Don't know it? <a href="https://www.ungm.org/public/unspsc" target="_blank"
-                                class="underline text-sky-600 hover:text-sky-700">Look it up here</a>.
-                        </p>
-                        @error('unspscCode')
-                            <p class="text-sm text-red-600 mt-1.5">{{ $message }}</p>
-                        @enderror
-                    </div>
-                    <div>
-                        <label>MSDS Link (Hazmat)</label>
-                        <input type="url" wire:model="msdsLink"
-                            class="mt-1.5 block w-full rounded-lg border-gray-300 shadow-sm text-sm focus:border-sky-500 focus:ring-sky-500 focus:ring-1" />
-                        <p class="text-sm text-gray-500 mt-1.5">Provide a public safety data sheet URL when applicable.
-                        </p>
-                        @error('msdsLink')
-                            <p class="text-sm text-red-600 mt-1.5">{{ $message }}</p>
-                        @enderror
-                    </div>
-                </div>
 
                 <div>
-                    <label>Additional Classifications <span class="font-normal text-gray-400">(optional)</span></label>
+
                     <p class="text-sm text-gray-500 mt-1.5">Select a classification type, then provide its value.
                         Example: UPC_RTL = 012345678905.</p>
                     <div class="space-y-2 mt-1.5">

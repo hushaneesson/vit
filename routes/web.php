@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Vendor\AppointmentController;
 use App\Http\Controllers\CatalogUploadController;
+use App\Http\Controllers\Vendor\CatalogController;
 use App\Http\Controllers\Vendor\CatalogItemController;
 use App\Http\Controllers\Vendor\CatalogItemImageController;
 use App\Http\Controllers\Vendor\ClientAuthController;
@@ -45,8 +46,12 @@ Route::prefix('vendor')->name('vendor.')->group(function () {
         Route::patch('appointments/{appointment}/cancel', [AppointmentController::class, 'cancel'])
             ->name('appointments.cancel');
 
-        Route::get('catalog', [CatalogItemController::class, 'index'])->name('catalog.index');
-        Route::get('catalog/create', [CatalogItemController::class, 'create'])->name('catalog.create');
+        Route::get('catalog', [CatalogController::class, 'index'])->name('catalog.index');
+        Route::get('catalogs/create', [CatalogController::class, 'create'])->name('catalogs.create');
+        Route::post('catalogs', [CatalogController::class, 'store'])->name('catalogs.store');
+
+        Route::get('catalog/{catalog}/items', [CatalogItemController::class, 'index'])->name('catalog.items');
+        Route::get('catalog/{catalog}/items/create', [CatalogItemController::class, 'create'])->name('catalog.create');
 
         Route::get('/catalog-upload', [CatalogItemController::class, 'renderUpload'])->name('catalog-upload');
         Route::post('/', [CatalogUploadController::class, 'store']);

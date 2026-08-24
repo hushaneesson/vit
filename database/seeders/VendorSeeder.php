@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Models\Catalog;
 use App\Models\CatalogItem;
 use App\Models\Client;
 use App\Models\Vendor;
@@ -119,8 +120,11 @@ class VendorSeeder extends Seeder
                 );
             }
 
+            // create general catalog for vendor
+            $catalog = Catalog::create(['name' => 'General Catalog', 'vendor_id' => $vendor->id]);
+
             // catalog items for this vendor
-            CatalogItem::factory(30)->create(['vendor_id' => $vendor->id]);
+            CatalogItem::factory(30)->create(['vendor_id' => $vendor->id, 'catalog_id' => $catalog->id]);
         }
     }
 }

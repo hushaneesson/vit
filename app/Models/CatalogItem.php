@@ -14,6 +14,7 @@ class CatalogItem extends Model
 
     protected $fillable = [
         'vendor_id',
+        'catalog_id',
         'name',
         'description',
         'manufacturer_sku',
@@ -23,7 +24,6 @@ class CatalogItem extends Model
         'replacement_sku',
         'images',
         'hierarchy',
-        'unspsc_code',
         'category',
         'unit_of_measure',
         'quantity_per_unit',
@@ -37,7 +37,6 @@ class CatalogItem extends Model
         'classifications',
         'specifications',
         'selling_points',
-        'msds_link',
         'list_price',
         'selling_price',
         'is_discontinued',
@@ -58,6 +57,11 @@ class CatalogItem extends Model
     public function vendor()
     {
         return $this->belongsTo(Vendor::class);
+    }
+
+    public function catalog()
+    {
+        return $this->belongsTo(Catalog::class);
     }
 
     public function images(): HasMany
@@ -133,7 +137,6 @@ class CatalogItem extends Model
         'manufacturer_sku',
         'manufacturer',
         'hierarchy',
-        'unspsc_code',
         'category',
         'specifications',
         'selling_points',
@@ -147,7 +150,6 @@ class CatalogItem extends Model
         'images',
         'search_terms',
         'classifications',
-        'msds_link',
         'min_qty_per_order',
         'max_qty_per_order',
         'multiples',
