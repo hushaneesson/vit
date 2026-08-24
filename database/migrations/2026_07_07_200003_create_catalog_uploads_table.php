@@ -18,6 +18,7 @@ return new class extends Migration
 
             $table->foreignId('client_id')->constrained('clients')->cascadeOnDelete();
             $table->foreignId('vendor_id')->constrained('vendors')->cascadeOnDelete();
+            $table->foreignId('catalog_id')->constrained('catalogs')->cascadeOnDelete();
 
             $table->string('original_filename');
 
