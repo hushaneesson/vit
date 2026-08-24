@@ -158,8 +158,18 @@ class ProcessValidatedRowsJob implements ShouldQueue
                         }
 
                         if ($definition->is_key_value) {
-                            // Specifications: normalize to key/value objects
-                            $attrs[$modelAttribute] = $this->normalizeKeyValueMultiValue($parts);
+                            // Specifications are normalized eagerly. Classifications,
+                            // by contrast, collect contributions from Country of
+                            // Origin, UNSPSC, and MSDS processing below, so their raw
+                            // mapped entries must be preserved here rather than
+                            // converted now. The one FINAL normalization pass happens
+                            // only after every classification source has contributed.
+                            if ($modelAttribute === 'classifications') {
+                                $attrs[$modelAttribute] = $parts;
+                            } else {
+                                // Specifications: normalize to key/value objects
+                                $attrs[$modelAttribute] = $this->normalizeKeyValueMultiValue($parts);
+                            }
                         } else {
                             // Normal array fields: just clean and preserve as simple array
                             $cleaned = [];
@@ -330,6 +340,16 @@ class ProcessValidatedRowsJob implements ShouldQueue
                     }
                 }
 
+                // FINAL classifications normalization. classifications now holds
+                // every contributor's entry — the mapper's own classifications plus
+                // Country of Origin, UNSPSC, and MSDS. Only after all of those
+                // sources have finished flushing do we normalize the complete value
+                // into the canonical key/value object array (the same structure
+                // used for specifications) that is persisted to
+                // CatalogItem.classifications.
+                if (array_key_exists('classifications', $attrs)) {
+                    $attrs['classifications'] = $this->normalizeClassifications($attrs['classifications']);
+                }
                 // Build the update payload — only fields that have non-blank
                 // values in the CSV. This ensures we never overwrite existing
                 // data with blank CSV values.
@@ -533,6 +553,88 @@ class ProcessValidatedRowsJob implements ShouldQueue
         }
 
         return $normalized;
+    }
+
+    /**
+     * Normalize the FINAL classifications value into the canonical key/value
+     * object structure: [{"key": "...", "value": "..."}, ...] — matching how
+     * specifications are stored.
+     *
+     * This MUST run only after every classification source has contributed to
+     * $attrs['classifications']: the mapper's own classifications plus the
+     * Country of Origin, UNSPSC, and MSDS processing above.
+     *
+     * The incoming value may already be any of:
+     *   - an empty/null value
+     *   - an array of "KEY=value" strings
+     *   - an array of key/value objects ({"key": ..., "value": ...})
+     *   - an associative array (["Color" => "Silver"])
+     *   - a JSON-encoded representation of any of the above
+     *   - a mixture produced by the existing processing flow
+     *
+     * No fixed classification key list is assumed. Case-insensitive duplicate
+     * keys collapse into the first-seen position with the LAST value winning,
+     * so a later Country of Origin / UNSPSC / MSDS entry replaces an earlier
+     * entry for the same key instead of duplicating it.
+     *
+     * @param  mixed  $value
+     * @return array<int, array{key: string, value: string}>|null
+     */
+    private function normalizeClassifications(mixed $value): ?array
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (is_string($value)) {
+            $decoded = json_decode($value, true);
+            $parts = (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) ? $decoded : [$value];
+        } else {
+            $parts = is_array($value) ? $value : [];
+        }
+
+        $normalized = [];
+        $seenKeys = []; // uppercased key => index in $normalized
+
+        foreach ($parts as $entry) {
+            $key = null;
+            $entryValue = null;
+
+            if (is_array($entry) && isset($entry['key']) && isset($entry['value'])) {
+                // Already canonical key/value object
+                $key = trim((string) $entry['key']);
+                $entryValue = trim((string) $entry['value']);
+            } elseif (is_array($entry) && array_keys($entry) !== range(0, count($entry) - 1)) {
+                // Associative array: ['Color' => 'Silver'] — take the first pair
+                foreach ($entry as $assocKey => $assocValue) {
+                    $key = trim((string) $assocKey);
+                    $entryValue = trim((string) $assocValue);
+                    break;
+                }
+            } elseif (is_string($entry) && str_contains($entry, '=')) {
+                // Indexed string: "Color=Silver" — split on the first '=' only
+                $equalsPos = strpos($entry, '=');
+                $key = trim(substr($entry, 0, $equalsPos));
+                $entryValue = trim(substr($entry, $equalsPos + 1));
+            }
+
+            if ($key === '' || $entryValue === '') {
+                continue;
+            }
+
+            $lookupKey = strtoupper($key);
+
+            if (array_key_exists($lookupKey, $seenKeys)) {
+                // Duplicate classification key: keep the first-seen position but
+                // let the LAST processed value win (replaces the older entry).
+                $normalized[$seenKeys[$lookupKey]]['value'] = $entryValue;
+            } else {
+                $seenKeys[$lookupKey] = count($normalized);
+                $normalized[] = ['key' => $key, 'value' => $entryValue];
+            }
+        }
+
+        return $normalized === [] ? null : $normalized;
     }
 
     /**
