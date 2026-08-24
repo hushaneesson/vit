@@ -15,17 +15,17 @@
                     <div class="items-center hidden space-x-8 lg:flex">
 
                         <a href="{{ route('vendor.dashboard') }}"
-                            class="font-medium text-gray-500 transition hover:text-sky-600">
+                            class="font-medium text-gray-500 transition hover:text-sky-600 {{ request()->routeIs('*dashboard*') ? 'text-sky-600' : '' }}">
                             Dashboard
                         </a>
 
                         <a href="{{ route('vendor.catalog.index') }}"
-                            class="font-medium text-gray-500 transition hover:text-sky-600">
+                            class="font-medium text-gray-500 transition hover:text-sky-600 {{ request()->routeIs('*catalog*') ? 'text-sky-600' : '' }}">
                             Catalog
                         </a>
 
                         <a href="{{ route('vendor.appointments.index') }}"
-                            class="font-medium text-gray-500 transition hover:text-sky-600">
+                            class="font-medium text-gray-500 transition hover:text-sky-600 {{ request()->routeIs('*appointments*') ? 'text-sky-600' : '' }}">
                             Appointments
                         </a>
                     </div>
@@ -76,16 +76,16 @@
 
                 <div class="px-4 py-4 space-y-1">
 
-                    <a href="{{ route('vendor.dashboard') }}" class="block px-3 py-2 rounded-lg hover:bg-gray-100">
+                    <a href="{{ route('vendor.dashboard') }}" class="block px-3 py-2 rounded-lg hover:bg-gray-100 {{ request()->routeIs('*dashboard*') ? 'bg-gray-100' : '' }}">
                         Dashboard
                     </a>
 
-                    <a href="{{ route('vendor.catalog.index') }}" class="block px-3 py-2 rounded-lg hover:bg-gray-100">
+                    <a href="{{ route('vendor.catalog.index') }}" class="block px-3 py-2 rounded-lg hover:bg-gray-100 {{ request()->routeIs('*catalog*') ? 'bg-gray-100' : '' }}">
                         Catalog
                     </a>
 
                     <a href="{{ route('vendor.appointments.index') }}"
-                        class="block px-3 py-2 rounded-lg hover:bg-gray-100">
+                        class="block px-3 py-2 rounded-lg hover:bg-gray-100 {{ request()->routeIs('*appointment*') ? 'bg-gray-100' : '' }}">
                         Appointments
                     </a>
 
