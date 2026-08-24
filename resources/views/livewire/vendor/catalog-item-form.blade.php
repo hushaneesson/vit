@@ -185,7 +185,8 @@
                 </h2>
             </div>
             <div class="p-6 space-y-4">
-                <p class="text-xs text-gray-500">Choose one option: enter up to five image names or URLs, or upload up to five image files.</p>
+                <p class="text-xs text-gray-500">Choose one option: enter up to five image names or URLs, or upload up
+                    to five image files.</p>
 
                 <div class="grid gap-3 md:grid-cols-2">
                     <button type="button" wire:click="setImageInputMode('url')"
@@ -246,7 +247,8 @@
                     <label
                         class="flex flex-col items-center justify-center gap-2 px-6 py-8 text-center transition-colors border-2 border-gray-300 border-dashed rounded-lg cursor-pointer hover:border-sky-400 hover:bg-sky-50/40">
                         <i class="text-3xl text-gray-400 fas fa-cloud-upload-alt"></i>
-                        <span class="text-sm text-gray-600"><span class="font-medium text-sky-600">Click to upload</span>
+                        <span class="text-sm text-gray-600"><span class="font-medium text-sky-600">Click to
+                                upload</span>
                             or drag and drop images</span>
                         <span class="text-xs text-gray-500">Up to 5 images</span>
                         <input type="file" wire:model="newImages" multiple accept="image/*" class="hidden" />
