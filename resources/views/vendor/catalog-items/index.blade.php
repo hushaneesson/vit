@@ -23,7 +23,7 @@
         </div>
 
         {{-- Catalog submission status and button --}}
-        @livewire('vendor.catalog-submission-button')
+        @livewire('vendor.catalog-submission-button', ['catalogId' => $catalog->id])
 
         <div class="p-2 bg-white rounded-lg shadow-lg">
             <form method="GET" action="{{ route('vendor.catalog.items', ['catalog' => $catalog->id]) }}"

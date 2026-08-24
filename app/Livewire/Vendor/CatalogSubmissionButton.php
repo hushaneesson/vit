@@ -23,7 +23,14 @@ use Livewire\Component;
 class CatalogSubmissionButton extends Component
 {
     /**
-     * Catalog item stats scoped to the authenticated vendor.
+     * The ID of the catalog currently being viewed. All counts and the
+     * relevance of a vendor-level submission are scoped to this catalog so
+     * that a vendor with multiple catalogs never sees another catalog's data.
+     */
+    public ?int $catalogId = null;
+
+    /**
+     * Catalog item stats scoped to the authenticated vendor's current catalog.
      */
     #[Computed]
     public function catalogItemStats(): ?array
@@ -39,12 +46,16 @@ class CatalogSubmissionButton extends Component
         // the joined row null.
         $canSubmit = CatalogItem::leftJoin('commodity_types', 'catalog_items.category', '=', 'commodity_types.id')
             ->leftJoin('product_hierarchies', 'catalog_items.hierarchy', '=', 'product_hierarchies.id')
+            ->when($this->catalogId, fn ($q) => $q->where('catalog_items.catalog_id', $this->catalogId))
             ->where('commodity_types.approved', false)
             ->whereNull('product_hierarchies.id')
             ->count();
 
-        $total = CatalogItem::where('vendor_id', $client->vendor_id)->count();
+        $total = CatalogItem::where('vendor_id', $client->vendor_id)
+            ->when($this->catalogId, fn ($q) => $q->where('catalog_id', $this->catalogId))
+            ->count();
         $complete = CatalogItem::where('vendor_id', $client->vendor_id)
+            ->when($this->catalogId, fn ($q) => $q->where('catalog_id', $this->catalogId))
             ->whereIn('status', ['acceptable', 'excellent'])
             ->count();
         $incomplete = $total - $complete;
@@ -70,8 +81,12 @@ class CatalogSubmissionButton extends Component
      */
     public ?CatalogSubmission $existingPendingSubmission = null;
 
-    public function mount(): void
+    public function mount(?int $catalogId = null): void
     {
+        // The current catalog ID is supplied by the Catalog Items route
+        // ($catalog->id) and is already ownership-checked by the controller.
+        $this->catalogId = $catalogId;
+
         $this->loadPendingSubmission();
     }
 
@@ -84,13 +99,31 @@ class CatalogSubmissionButton extends Component
             return;
         }
 
-        $this->existingPendingSubmission = CatalogSubmission::where('vendor_id', $client->vendor_id)
+        $pending = CatalogSubmission::where('vendor_id', $client->vendor_id)
             ->whereIn('status', [
                 CatalogSubmissionStatus::ReviewRequested,
                 CatalogSubmissionStatus::ReadyForReview,
             ])
             ->latest()
             ->first();
+
+        // CatalogSubmission is vendor-level: the schema has no per-catalog
+        // foreign key (there is no catalog_id on catalog_submissions), so a
+        // pending submission spans every catalog a vendor owns. A catalog with
+        // no items cannot have been or currently be part of a submission, so we
+        // never surface another (empty) catalog's vendor-level submission state.
+        // For a non-empty catalog the vendor-level pending submission is
+        // relevant and is shown as before.
+        if ($pending && $this->catalogId) {
+            $hasItems = CatalogItem::where('vendor_id', $client->vendor_id)
+                ->where('catalog_id', $this->catalogId)
+                ->exists();
+
+            $this->existingPendingSubmission = $hasItems ? $pending : null;
+            return;
+        }
+
+        $this->existingPendingSubmission = $pending;
     }
 
     /**
