@@ -185,48 +185,87 @@
                 </h2>
             </div>
             <div class="p-6 space-y-4">
-                <p class="text-xs text-gray-500">Upload actual image files (Primary first). These are embedded directly
-                    into the delivered Excel file.</p>
+                <p class="text-xs text-gray-500">Choose one option: enter up to five image names or URLs, or upload up to five image files.</p>
 
-                @if (count($existingImages))
-                    <div class="flex flex-wrap gap-3">
-                        @foreach ($existingImages as $image)
-                            <div class="relative group">
-                                <img src="{{ $image['url'] }}"
-                                    class="object-cover w-24 h-24 border border-gray-200 rounded-lg">
-                                <button type="button" wire:click="removeExistingImage({{ $image['id'] }})"
-                                    class="absolute w-5 h-5 text-xs leading-5 text-white transition-colors bg-red-600 rounded-full shadow-sm -top-2 -right-2 hover:bg-red-700">&times;</button>
+                <div class="grid gap-3 md:grid-cols-2">
+                    <button type="button" wire:click="setImageInputMode('url')"
+                        class="p-4 text-sm text-left border rounded-lg transition-colors {{ $imageInputMode === 'url' ? 'border-sky-500 bg-sky-50 text-sky-700' : 'border-gray-200 hover:border-sky-300' }}">
+                        <div class="font-semibold">Image names / URLs</div>
+                        <div class="mt-1 text-xs text-gray-500">Paste up to 5 image names or hosted links.</div>
+                    </button>
+                    <button type="button" wire:click="setImageInputMode('upload')"
+                        class="p-4 text-sm text-left border rounded-lg transition-colors {{ $imageInputMode === 'upload' ? 'border-sky-500 bg-sky-50 text-sky-700' : 'border-gray-200 hover:border-sky-300' }}">
+                        <div class="font-semibold">Upload image files</div>
+                        <div class="mt-1 text-xs text-gray-500">Upload up to 5 images from your computer.</div>
+                    </button>
+                </div>
+
+                @if ($imageInputMode === 'url')
+                    <div class="space-y-2">
+                        @foreach ($imageUrls as $index => $imageUrl)
+                            <div class="flex gap-2">
+                                <input type="text" wire:model="imageUrls.{{ $index }}"
+                                    placeholder="Image name or https://example.com/image.jpg"
+                                    class="block w-full text-sm border-gray-300 rounded-lg shadow-sm focus:border-sky-500 focus:ring-sky-500 focus:ring-1">
+                                @if (count($imageUrls) > 1)
+                                    <button type="button" wire:click="removeImageUrl({{ $index }})"
+                                        class="flex-shrink-0 px-3 text-sm text-red-600 transition-colors rounded-lg hover:bg-red-50">Remove</button>
+                                @endif
                             </div>
                         @endforeach
                     </div>
-                @endif
 
-                <label
-                    class="flex flex-col items-center justify-center gap-2 px-6 py-8 text-center transition-colors border-2 border-gray-300 border-dashed rounded-lg cursor-pointer hover:border-sky-400 hover:bg-sky-50/40">
-                    <svg class="w-8 h-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"
-                        stroke-width="1.5">
-                        <path stroke-linecap="round" stroke-linejoin="round"
-                            d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-                    </svg>
-                    <span class="text-sm text-gray-600"><span class="font-medium text-sky-600">Click to upload</span>
-                        or
-                        drag and drop images</span>
-                    <input type="file" wire:model="newImages" multiple accept="image/*" class="hidden" />
-                </label>
-                @error('newImages')
-                    <p class="text-sm text-red-600">{{ $message }}</p>
-                @enderror
-                @error('newImages.*')
-                    <p class="text-sm text-red-600">{{ $message }}</p>
-                @enderror
+                    @if (count($imageUrls) < 5)
+                        <button type="button" wire:click="addImageUrl"
+                            class="inline-flex items-center gap-1 mt-2 text-sm font-medium text-sky-600 hover:text-sky-700">
+                            <i class="fas fa-plus"></i>
+                            Add another
+                        </button>
+                    @endif
 
-                @if ($newImages)
-                    <div class="flex flex-wrap gap-3">
-                        @foreach ($newImages as $upload)
-                            <img src="{{ $upload->temporaryUrl() }}"
-                                class="object-cover w-24 h-24 border border-gray-200 rounded-lg">
-                        @endforeach
-                    </div>
+                    @error('imageUrls')
+                        <p class="text-sm text-red-600">{{ $message }}</p>
+                    @enderror
+                    @error('imageUrls.*')
+                        <p class="text-sm text-red-600">{{ $message }}</p>
+                    @enderror
+                @else
+                    @if (count($existingImages))
+                        <div class="flex flex-wrap gap-3">
+                            @foreach ($existingImages as $image)
+                                <div class="relative group">
+                                    <img src="{{ $image['url'] }}"
+                                        class="object-cover w-24 h-24 border border-gray-200 rounded-lg">
+                                    <button type="button" wire:click="removeExistingImage({{ $image['id'] }})"
+                                        class="absolute w-5 h-5 text-xs leading-5 text-white transition-colors bg-red-600 rounded-full shadow-sm -top-2 -right-2 hover:bg-red-700">&times;</button>
+                                </div>
+                            @endforeach
+                        </div>
+                    @endif
+
+                    <label
+                        class="flex flex-col items-center justify-center gap-2 px-6 py-8 text-center transition-colors border-2 border-gray-300 border-dashed rounded-lg cursor-pointer hover:border-sky-400 hover:bg-sky-50/40">
+                        <i class="text-3xl text-gray-400 fas fa-cloud-upload-alt"></i>
+                        <span class="text-sm text-gray-600"><span class="font-medium text-sky-600">Click to upload</span>
+                            or drag and drop images</span>
+                        <span class="text-xs text-gray-500">Up to 5 images</span>
+                        <input type="file" wire:model="newImages" multiple accept="image/*" class="hidden" />
+                    </label>
+                    @error('newImages')
+                        <p class="text-sm text-red-600">{{ $message }}</p>
+                    @enderror
+                    @error('newImages.*')
+                        <p class="text-sm text-red-600">{{ $message }}</p>
+                    @enderror
+
+                    @if ($newImages)
+                        <div class="flex flex-wrap gap-3">
+                            @foreach ($newImages as $upload)
+                                <img src="{{ $upload->temporaryUrl() }}"
+                                    class="object-cover w-24 h-24 border border-gray-200 rounded-lg">
+                            @endforeach
+                        </div>
+                    @endif
                 @endif
             </div>
         </section>

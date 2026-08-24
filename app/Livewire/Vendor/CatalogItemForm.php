@@ -65,8 +65,10 @@ class CatalogItemForm extends Component
     public array $sellingPoints = [''];
 
     // Images
+    public string $imageInputMode = 'url';
     public array $newImages = [];
     public array $existingImages = [];
+    public array $imageUrls = [''];
 
     public array $specifications = [['key' => '', 'value' => '']];
     public array $classifications = [['type' => '', 'value' => '']];
@@ -124,10 +126,20 @@ class CatalogItemForm extends Component
             $this->mapStoredClassificationsToRows($catalogItem->classifications)
         );
 
-        // $this->existingImages = $catalogItem->images->map(fn(CatalogItemImage $image) => [
-        //     'id' => $image->id,
-        //     'url' => route('vendor.catalog-images.show', $image),
-        // ])->all();
+        $this->existingImages = $catalogItem->images()->get()->map(fn(CatalogItemImage $image) => [
+            'id' => $image->id,
+            'url' => route('vendor.catalog-images.show', $image),
+        ])->all();
+
+        $this->imageUrls = is_array($catalogItem->images) && $catalogItem->images !== []
+            ? array_values($catalogItem->images)
+            : [''];
+
+        if ($this->existingImages !== []) {
+            $this->imageInputMode = 'upload';
+        } elseif ($this->normalizedImageUrls() !== []) {
+            $this->imageInputMode = 'url';
+        }
     }
 
     #[Computed]
@@ -259,6 +271,46 @@ class CatalogItemForm extends Component
         $this->existingImages = collect($this->existingImages)->reject(fn($i) => $i['id'] === $imageId)->values()->all();
     }
 
+    public function setImageInputMode(string $mode): void
+    {
+        if (! in_array($mode, ['upload', 'url'], true)) {
+            return;
+        }
+
+        $this->imageInputMode = $mode;
+
+        if ($mode === 'upload') {
+            $this->imageUrls = [''];
+            $this->resetValidation(['imageUrls', 'imageUrls.*']);
+
+            return;
+        }
+
+        $this->newImages = [];
+        $this->resetValidation(['newImages', 'newImages.*']);
+    }
+
+    public function addImageUrl(): void
+    {
+        if (count($this->imageUrls) < 5) {
+            $this->imageUrls[] = '';
+        }
+    }
+
+    public function removeImageUrl(int $index): void
+    {
+        if (! array_key_exists($index, $this->imageUrls)) {
+            return;
+        }
+
+        unset($this->imageUrls[$index]);
+        $this->imageUrls = array_values($this->imageUrls);
+
+        if ($this->imageUrls === []) {
+            $this->imageUrls = [''];
+        }
+    }
+
     public function openAddUnitOfMeasureModal(): void
     {
         $this->resetValidation([
@@ -339,8 +391,11 @@ class CatalogItemForm extends Component
             'unitOfMeasure' => ['required'],
             'quantityPerUnit' => ['nullable', 'integer', 'min:1'],
 
-            'newImages' => [$this->catalogItemId || count($this->existingImages) ? 'nullable' : 'array'],
-            'newImages.*' => ['image', 'max:8192'],
+            'imageInputMode' => ['required', Rule::in(['upload', 'url'])],
+            'newImages' => [$this->imageInputMode === 'upload' && ! $this->catalogItemId && count($this->existingImages) === 0 ? 'required' : 'nullable', 'array', 'max:5'],
+            'newImages.*' => [$this->imageInputMode === 'upload' ? 'image' : 'nullable', 'max:8192'],
+            'imageUrls' => [$this->imageInputMode === 'url' ? 'required' : 'nullable', 'array', 'max:5'],
+            'imageUrls.*' => ['nullable', 'string', 'max:2048'],
 
             'manufacturer' => ['nullable', 'string', 'max:255'],
             'brandName' => ['nullable', 'string', 'max:255'],
@@ -402,6 +457,29 @@ class CatalogItemForm extends Component
         $searchTermsClean = array_values(array_filter(array_map('trim', $this->searchTerms)));
         $replacementSkusClean = array_values(array_filter(array_map('trim', $this->replacementSkus)));
         $sellingPointsClean = array_values(array_filter(array_map('trim', $this->sellingPoints)));
+        $imageUrlsClean = $this->normalizedImageUrls();
+
+        if ($this->imageInputMode === 'url' && $imageUrlsClean === []) {
+            $this->addError('imageUrls', 'Add at least one image name or URL.');
+            $this->dispatch('scroll-to-first-error');
+
+            return;
+        }
+
+        if ($this->imageInputMode === 'upload' && count($this->existingImages) === 0 && count($this->newImages) === 0) {
+            $this->addError('newImages', 'Upload at least one image.');
+            $this->dispatch('scroll-to-first-error');
+
+            return;
+        }
+
+        if ($this->imageInputMode === 'upload' && (count($this->existingImages) + count($this->newImages)) > 5) {
+            $this->addError('newImages', 'You can only attach up to 5 images.');
+            $this->dispatch('scroll-to-first-error');
+
+            return;
+        }
+
         $classificationsClean = [];
         foreach ($this->classifications as $classification) {
             $type = trim((string) ($classification['type'] ?? ''));
@@ -431,7 +509,7 @@ class CatalogItemForm extends Component
                 ->send(new NewCommodityTypeMail($commodityType->name));
         }
 
-        $catalogItem = DB::transaction(function () use ($vendor, $searchTermsClean, $replacementSkusClean, $sellingPointsClean, $specPairs, $classificationsClean) {
+        $catalogItem = DB::transaction(function () use ($vendor, $searchTermsClean, $replacementSkusClean, $sellingPointsClean, $imageUrlsClean, $specPairs, $classificationsClean) {
             $attrs = [
                 'catalog_id' => $this->catalogId,
                 'name' => $this->name,
@@ -452,6 +530,7 @@ class CatalogItemForm extends Component
                 'max_qty_per_order' => $this->maxQtyPerOrder !== null && $this->maxQtyPerOrder !== '' ? (int) $this->maxQtyPerOrder : null,
                 'multiples' => $this->multiples !== null && $this->multiples !== '' ? (int) $this->multiples : null,
                 'search_terms' => $searchTermsClean,
+                'images' => $this->imageInputMode === 'url' ? $imageUrlsClean : null,
                 'selling_points' => $sellingPointsClean,
                 'specifications' => $specPairs,
                 'classifications' => $classificationsClean,
@@ -475,15 +554,25 @@ class CatalogItemForm extends Component
                 $item = CatalogItem::create(array_merge(['vendor_id' => $vendor->id], $attrs));
             }
 
-            foreach ($this->newImages as $index => $upload) {
-                $path = $upload->store('catalog-images/vendor-' . $vendor->id, 'local');
+            if ($this->imageInputMode === 'url') {
+                foreach ($item->images()->get() as $image) {
+                    Storage::disk($image->disk)->delete($image->path);
+                    $image->delete();
+                }
+            } else {
+                $item->forceFill(['images' => null])->saveQuietly();
+                $existingImageCount = $item->images()->count();
 
-                CatalogItemImage::create([
-                    'catalog_item_id' => $item->id,
-                    'disk' => 'local',
-                    'path' => $path,
-                    'sort_order' => $item->images()->count() + $index,
-                ]);
+                foreach ($this->newImages as $index => $upload) {
+                    $path = $upload->store('catalog-images/vendor-' . $vendor->id, 'local');
+
+                    CatalogItemImage::create([
+                        'catalog_item_id' => $item->id,
+                        'disk' => 'local',
+                        'path' => $path,
+                        'sort_order' => $existingImageCount + $index,
+                    ]);
+                }
             }
 
             return $item;
@@ -557,6 +646,17 @@ class CatalogItemForm extends Component
             ->values();
 
         return $types->count() !== $types->unique()->count();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function normalizedImageUrls(): array
+    {
+        return array_values(array_filter(array_map(
+            fn($url) => trim((string) $url),
+            $this->imageUrls,
+        ), fn($url) => $url !== ''));
     }
 
     /**

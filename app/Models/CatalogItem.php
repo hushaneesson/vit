@@ -48,6 +48,7 @@ class CatalogItem extends Model
     ];
 
     protected $casts = [
+        'images' => 'array',
         'search_terms' => 'array',
         'specifications' => 'array',
         'selling_points' => 'array',

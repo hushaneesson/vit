@@ -78,7 +78,7 @@ class CatalogItemController extends Controller
 
         $catalogId = $catalogItem->catalog_id;
 
-        foreach ($catalogItem->images as $image) {
+        foreach ($catalogItem->images()->get() as $image) {
             \Illuminate\Support\Facades\Storage::disk($image->disk)->delete($image->path);
         }
 
