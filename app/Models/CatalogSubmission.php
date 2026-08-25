@@ -30,6 +30,7 @@ class CatalogSubmission extends Model
 
     protected $fillable = [
         'vendor_id',
+        'catalog_id',
         'requested_by_client_id',
         'status',
         'total_items',
@@ -70,6 +71,11 @@ class CatalogSubmission extends Model
     public function vendor(): BelongsTo
     {
         return $this->belongsTo(Vendor::class);
+    }
+
+    public function catalog(): BelongsTo
+    {
+        return $this->belongsTo(Catalog::class);
     }
 
     public function catalogUpload(): BelongsTo

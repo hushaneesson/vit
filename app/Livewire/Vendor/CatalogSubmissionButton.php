@@ -9,16 +9,14 @@ use App\Models\CatalogSubmission;
 use App\Notifications\CatalogReadyForReviewNotification;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Notification;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 
 /**
  * Dedicated Livewire component for the "Request VIT Upload" button
  * on the catalog items index page.
- *
- * Creates a CatalogSubmission and attaches the selected CatalogItems
- * through a simple pivot relationship. The Excel file is generated
- * from the CatalogItems directly.
  */
 class CatalogSubmissionButton extends Component
 {
@@ -70,14 +68,7 @@ class CatalogSubmissionButton extends Component
     }
 
     /**
-     * Check if there is already an active (pending) submission for this vendor.
-     *
-     * A submission is considered "active" while the vendor is waiting for
-     * admin review. This covers both ReviewRequested (just submitted, Excel
-     * generation may be in progress) and ReadyForReview (Excel generated,
-     * awaiting admin action). In both states the vendor should see the
-     * "Review Requested" panel and the "Withdraw Review Request" button
-     * instead of the "Request Review" button.
+     * The most recent pending submission for the current catalog.
      */
     public ?CatalogSubmission $existingPendingSubmission = null;
 
@@ -99,42 +90,31 @@ class CatalogSubmissionButton extends Component
             return;
         }
 
-        $pending = CatalogSubmission::where('vendor_id', $client->vendor_id)
+        $query = CatalogSubmission::where('vendor_id', $client->vendor_id)
             ->whereIn('status', [
                 CatalogSubmissionStatus::ReviewRequested,
                 CatalogSubmissionStatus::ReadyForReview,
             ])
-            ->latest()
-            ->first();
+            ->latest();
 
-        // CatalogSubmission is vendor-level: the schema has no per-catalog
-        // foreign key (there is no catalog_id on catalog_submissions), so a
-        // pending submission spans every catalog a vendor owns. A catalog with
-        // no items cannot have been or currently be part of a submission, so we
-        // never surface another (empty) catalog's vendor-level submission state.
-        // For a non-empty catalog the vendor-level pending submission is
-        // relevant and is shown as before.
-        if ($pending && $this->catalogId) {
-            $hasItems = CatalogItem::where('vendor_id', $client->vendor_id)
-                ->where('catalog_id', $this->catalogId)
-                ->exists();
-
-            $this->existingPendingSubmission = $hasItems ? $pending : null;
-            return;
+        // Scope to the catalog currently being viewed. catalog_id is now the
+        // source of truth for which submission belongs to this catalog — a
+        // submission for Catalog A must never surface on Catalog B. The
+        // vendor_id constraint above is retained for ownership/authorization.
+        if ($this->catalogId) {
+            $query->where('catalog_id', $this->catalogId);
         }
 
-        $this->existingPendingSubmission = $pending;
+        $this->existingPendingSubmission = $query->first();
     }
-
     /**
      * Vendor requests admin review of their catalog.
      *
-     * Creates a CatalogSubmission for ALL current CatalogItems belonging to this vendor.
-     * There is no item selection — the entire vendor catalog is always submitted.
-     * The generated Excel file is the submission artifact.
+     * Creates a CatalogSubmission for all current CatalogItems belonging to
+     * this catalog. The generated Excel file is the submission artifact.
      *
-     * Dispatches GenerateCatalogExportJob to build the Excel file from
-     * all current CatalogItems for this vendor.
+     * Dispatches GenerateCatalogExportJob to build the Excel file from the
+     * current CatalogItems for this catalog.
      */
     public function submitCatalog(): void
     {
@@ -148,14 +128,20 @@ class CatalogSubmissionButton extends Component
         $vendorId = $client->vendor_id;
 
         try {
-            $totalItems = CatalogItem::where('vendor_id', $vendorId)->count();
+            // Count only this catalog's items (not the whole vendor).
+            $totalItems = CatalogItem::where('vendor_id', $vendorId)
+                ->when($this->catalogId, fn ($q) => $q->where('catalog_id', $this->catalogId))
+                ->count();
 
             if ($totalItems === 0) {
                 $this->dispatch('notify', type: 'error', message: 'Your catalog is empty. Please upload catalog items before submitting.');
                 return;
             }
 
+            // Pending check is scoped to the current catalog so a pending
+            // submission for another catalog does not block this one.
             $pending = CatalogSubmission::where('vendor_id', $vendorId)
+                ->when($this->catalogId, fn ($q) => $q->where('catalog_id', $this->catalogId))
                 ->whereIn('status', [
                     CatalogSubmissionStatus::ReviewRequested,
                     CatalogSubmissionStatus::ReadyForReview,
@@ -167,12 +153,12 @@ class CatalogSubmissionButton extends Component
                 return;
             }
 
-
             $submission = null;
 
             DB::transaction(function () use ($client, $vendorId, $totalItems, &$submission) {
                 $submission = CatalogSubmission::create([
                     'vendor_id'              => $vendorId,
+                    'catalog_id'             => $this->catalogId,
                     'requested_by_client_id' => $client->id,
                     'status'                 => CatalogSubmissionStatus::ReviewRequested,
                     'total_items'            => $totalItems,
@@ -187,13 +173,13 @@ class CatalogSubmissionButton extends Component
                     $adminEmail = config('vit.admin_email');
 
                     if (is_string($adminEmail) && $adminEmail !== '') {
-                        \Illuminate\Support\Facades\Notification::route('mail', $adminEmail)
+                        Notification::route('mail', $adminEmail)
                             ->notify(new CatalogReadyForReviewNotification(
                                 vendorId: $vendorId,
                             ));
                     }
                 } catch (\Throwable $e) {
-                    \Illuminate\Support\Facades\Log::error('Catalog admin notification failed', [
+                    Log::error('Catalog admin notification failed', [
                         'submission_id' => $submission->id,
                         'vendor_id' => $vendorId,
                         'error' => $e->getMessage(),
@@ -206,7 +192,7 @@ class CatalogSubmissionButton extends Component
 
             $this->dispatch('notify', type: 'success', message: 'Your catalog has been submitted.');
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::error('Catalog submission failed', [
+            Log::error('Catalog submission failed', [
                 'vendor_id' => $vendorId,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
@@ -215,7 +201,6 @@ class CatalogSubmissionButton extends Component
             $this->dispatch('notify', type: 'error', message: 'Unable to submit catalog. Our team has been notified.');
         }
     }
-
     public function withdrawSubmission(CatalogSubmission $submission): void
     {
         $client = Auth::guard('client')->user();
@@ -230,8 +215,12 @@ class CatalogSubmissionButton extends Component
             return;
         }
 
-        if (! in_array($submission->status, [CatalogSubmissionStatus::ReviewRequested, CatalogSubmissionStatus::ReadyForReview], true)) {
-            $this->dispatch('notify', type: 'error', message: 'This submission cannot be withdrawn in its current state.');
+        // Prevent withdrawing another catalog's submission: the submission must
+        // belong to the catalog currently being viewed (legacy NULL-catalog
+        // submissions remain withdrawable for backward compatibility). The
+        // vendor check above remains for authorization.
+        if ($this->catalogId && $submission->catalog_id !== null && (int) $submission->catalog_id !== (int) $this->catalogId) {
+            $this->dispatch('notify', type: 'error', message: 'You do not have permission to withdraw this submission.');
             return;
         }
 
@@ -244,11 +233,14 @@ class CatalogSubmissionButton extends Component
 
             $this->dispatch('notify', type: 'success', message: 'Submission withdrawn.');
         } catch (\Throwable $e) {
-            $this->dispatch('notify', type: 'error', message: 'Failed to withdraw submission: ' . $e->getMessage());
+            Log::error('Catalog withdrawal failed', [
+                'submission_id' => $submission->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            $this->dispatch('notify', type: 'error', message: 'Unable to withdraw the submission. Our team has been notified.');
         }
     }
-
-
 
     public function render()
     {

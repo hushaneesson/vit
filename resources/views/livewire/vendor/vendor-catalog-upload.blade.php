@@ -988,7 +988,7 @@
                 </div>
                 <h2 class="mt-4 text-lg font-semibold sm:text-xl text-rose-600">Something went wrong</h2>
                 <p class="max-w-sm mx-auto mt-1 text-sm text-slate-600">
-                    {{ $progress['failure_reason'] ?? 'Please try again or contact support.' }}
+                    Catalog import failed due to an unexpected error. Please review your file and try again.
                 </p>
                 <button wire:click="startOver" wire:loading.attr="disabled"
                     class="inline-flex items-center justify-center w-full gap-2 px-5 py-2.5 mt-6 text-sm font-semibold text-slate-900 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition disabled:opacity-50 disabled:cursor-not-allowed sm:w-auto">

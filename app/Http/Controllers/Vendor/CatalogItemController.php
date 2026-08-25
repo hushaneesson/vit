@@ -46,9 +46,11 @@ class CatalogItemController extends Controller
     }
 
 
-    public function renderUpload()
+    public function renderUpload(int $catalogId)
     {
-        return view('vendor.catalog-items.upload');
+        return view('vendor.catalog-items.upload', [
+            'catalogId' => $catalogId,
+        ]);
     }
 
     public function create(Catalog $catalog)

@@ -59,10 +59,5 @@ Route::prefix('vendor')->name('vendor.')->group(function () {
             ->name('catalog-images.show');
 
         Route::get('catalog/{catalogId}/upload', [CatalogItemController::class, 'renderUpload'])->name('catalog-upload');
-        Route::post('/', [CatalogUploadController::class, 'store']);
-        Route::post('/{catalogUpload}/mapping', [CatalogUploadController::class, 'saveMapping']);
-        Route::post('/{catalogUpload}/process', [CatalogUploadController::class, 'process']);
-        Route::get('/{catalogUpload}/status', [CatalogUploadController::class, 'status']);
-        Route::get('/{catalogUpload}/error-rows', [CatalogUploadController::class, 'errorRows']);
     });
 });

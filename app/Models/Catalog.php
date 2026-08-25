@@ -22,4 +22,9 @@ class Catalog extends Model
     {
         return $this->hasMany(CatalogItem::class);
     }
+
+    public function submissions(): HasMany
+    {
+        return $this->hasMany(CatalogSubmission::class);
+    }
 }
