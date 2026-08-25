@@ -45,7 +45,9 @@ class CatalogItemFactory extends Factory
             'search_terms' => $this->faker->words($this->faker->numberBetween(2, 6)),
             'selling_points' => $this->faker->sentences($this->faker->numberBetween(1, 4)),
 
-            'classifications' => [$this->faker->optional()->randomElements(
+            'classifications' => [
+                ['key' => 'UNSPSC', 'value' => $this->faker->numerify('########')],
+                $this->faker->optional()->randomElements(
                 [
                     ['key' => 'Green_Indicator', 'value' => 'Y'],
                     ['key' => 'Hazmat', 'value' => 'Y'],
@@ -54,8 +56,6 @@ class CatalogItemFactory extends Factory
                     ['key' => 'Women Owned', 'value' => 'Y']
                 ]
             )],
-            'unspsc_code' => $this->faker->numerify('########'),
-            'msds_link' => $this->faker->optional()->url(),
 
             'specifications' => [
                 [

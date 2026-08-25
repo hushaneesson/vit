@@ -23,6 +23,11 @@ class ProductHierarchyResource extends Resource
 
     protected static string|UnitEnum|null $navigationGroup = 'Catalog Management';
 
+    public static function getNavigationBadge(): ?string
+    {
+        return (string) ProductHierarchy::whereNull('hierarchy_number')
+            ->count();
+    }
 
     public static function form(Schema $schema): Schema
     {

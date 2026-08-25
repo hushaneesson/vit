@@ -542,7 +542,7 @@
 
 
 
-                                @if ($classification['type'] === 'COUNTRY_OF_ORIGIN')
+                                @if ($classification['type'] === 'Country of Origin')
                                     <x-searchable-select wire-model="classifications.{{ $index }}.value"
                                         class="flex-1" :options="$this->countries
                                             ->map(fn($t) => ['value' => $t->code, 'label' => $t->name])

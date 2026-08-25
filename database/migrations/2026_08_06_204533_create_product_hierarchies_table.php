@@ -14,7 +14,7 @@ return new class extends Migration
     {
         Schema::create('product_hierarchies', function (Blueprint $table) {
             $table->id();
-            $table->string('hierarchy_number')->unique();
+            $table->string('hierarchy_number')->unique()->nullable();
             $table->string('parent_id')->nullable();
             $table->string('name', 100);
             $table->integer('level');
