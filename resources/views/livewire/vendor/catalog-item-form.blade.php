@@ -136,7 +136,10 @@
                                 Add New
                             </button>
                         </div>
-                        <x-searchable-select wire:key="product-category-select-{{ $productCategorySelectKey }}" wire-model="productCategory" :options="$this->commodityTypeOptions->map(fn($o) => ['value' => $o->id, 'label' => $o->name])" :allow-create="false"
+                        <x-searchable-select wire:key="product-category-select-{{ $productCategorySelectKey }}"
+                            wire-model="productCategory" :options="$this->commodityTypeOptions->map(
+                                fn($o) => ['value' => $o->id, 'label' => $o->name],
+                            )" :allow-create="false"
                             placeholder="Select a product type..." />
 
                         <p class="text-sm text-gray-500 mt-1.5">Pick the broad commodity group for reporting and search.
@@ -146,8 +149,15 @@
                         @enderror
                     </div>
                     <div>
-                        <label>Hierarchy <span class="text-red-600">*</span></label>
-                        <x-searchable-select wire-model="hierarchy" :options="$this->hierarchyOptions->map(fn($h) => ['value' => $h->id, 'label' => $h->name])" :allow-create="false"
+                        <div class="flex items-center justify-between gap-3">
+                            <label>Hierarchy <span class="text-red-600">*</span></label>
+                            <button type="button" wire:click="openAddHierarchyModal"
+                                class="text-sm font-medium text-sky-600 hover:text-sky-700">
+                                Add New
+                            </button>
+                        </div>
+                        <x-searchable-select wire:key="hierarchy-select-{{ $hierarchySelectKey }}"
+                            wire-model="hierarchy" :options="$this->hierarchyOptions->map(fn($h) => ['value' => $h->id, 'label' => $h->path])" :allow-create="false"
                             placeholder="Select a product hierarchy..." />
 
                         <p class="text-sm text-gray-500 mt-1.5">Choose the most specific category path for this item.
@@ -681,7 +691,8 @@
             <div class="flex items-start justify-between mb-4">
                 <div>
                     <h3 class="text-base font-semibold text-gray-900">Add Product Category</h3>
-                    <p class="mt-1 text-sm text-gray-500">Create a new category and use it on this item immediately.</p>
+                    <p class="mt-1 text-sm text-gray-500">Create a new category and use it on this item immediately.
+                    </p>
                 </div>
 
                 <button type="button" wire:click="closeAddProductCategoryModal"
@@ -710,6 +721,77 @@
                     wire:target="saveProductCategory" class="btn btn-primary">
                     <span wire:loading.remove wire:target="saveProductCategory">Save Category</span>
                     <span wire:loading wire:target="saveProductCategory">Saving...</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div x-data x-show="$wire.showAddHierarchyModal" x-cloak
+        x-on:keydown.escape.window="$wire.closeAddHierarchyModal()"
+        class="fixed inset-0 z-50 flex items-center justify-center px-4">
+        <div class="fixed inset-0 transition-opacity bg-gray-900/50" x-on:click="$wire.closeAddHierarchyModal()"
+            x-show="$wire.showAddHierarchyModal" x-transition.opacity></div>
+
+        <div class="relative w-full max-w-2xl p-6 bg-white shadow-xl rounded-xl" x-show="$wire.showAddHierarchyModal"
+            x-transition>
+            <div class="flex items-start justify-between mb-4">
+                <div>
+                    <h3 class="text-base font-semibold text-gray-900">Add Product Hierarchy</h3>
+                    <p class="mt-1 text-sm text-gray-500">Provide all three levels. You can select existing values or
+                        type new ones.</p>
+                </div>
+
+                <button type="button" wire:click="closeAddHierarchyModal" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <div class="grid gap-4">
+                <div>
+                    <label>Category Level 1</label>
+                    <x-searchable-select wire:key="new-hierarchy-level1" wire-model="newHierarchyLevel1"
+                        :options="$this->hierarchyLevel1NameOptions
+                            ->map(fn($name) => ['value' => $name, 'label' => $name])
+                            ->toArray()" :allow-create="true" placeholder="Select or type level 1" />
+                    @error('newHierarchyLevel1')
+                        <p class="mt-1.5 text-sm text-red-600">{{ $message }}</p>
+                    @enderror
+                </div>
+
+                <div>
+                    <label>Category Level 2</label>
+                    <x-searchable-select wire:key="new-hierarchy-level2-{{ md5($newHierarchyLevel1) }}"
+                        wire-model="newHierarchyLevel2" :options="$this->hierarchyLevel2NameOptions
+                            ->map(fn($name) => ['value' => $name, 'label' => $name])
+                            ->toArray()" :allow-create="true"
+                        placeholder="Select or type level 2" />
+                    @error('newHierarchyLevel2')
+                        <p class="mt-1.5 text-sm text-red-600">{{ $message }}</p>
+                    @enderror
+                </div>
+
+                <div>
+                    <label>Category Level 3</label>
+                    <x-searchable-select
+                        wire:key="new-hierarchy-level3-{{ md5($newHierarchyLevel1 . '|' . $newHierarchyLevel2) }}"
+                        wire-model="newHierarchyLevel3" :options="$this->hierarchyLevel3NameOptions
+                            ->map(fn($name) => ['value' => $name, 'label' => $name])
+                            ->toArray()" :allow-create="true"
+                        placeholder="Select or type level 3" />
+                    @error('newHierarchyLevel3')
+                        <p class="mt-1.5 text-sm text-red-600">{{ $message }}</p>
+                    @enderror
+                </div>
+            </div>
+
+            <div class="flex justify-end gap-2 mt-6">
+                <button type="button" wire:click="closeAddHierarchyModal" class="btn btn-gray">
+                    Cancel
+                </button>
+                <button type="button" wire:click="saveHierarchy" wire:loading.attr="disabled"
+                    wire:target="saveHierarchy" class="btn btn-primary">
+                    <span wire:loading.remove wire:target="saveHierarchy">Save Hierarchy</span>
+                    <span wire:loading wire:target="saveHierarchy">Saving...</span>
                 </button>
             </div>
         </div>

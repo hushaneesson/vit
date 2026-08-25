@@ -32,6 +32,11 @@ class CatalogItemForm extends Component
     public bool $showAddProductCategoryModal = false;
     public int $productCategorySelectKey = 0;
     public string $newProductCategoryName = '';
+    public bool $showAddHierarchyModal = false;
+    public int $hierarchySelectKey = 0;
+    public string $newHierarchyLevel1 = '';
+    public string $newHierarchyLevel2 = '';
+    public string $newHierarchyLevel3 = '';
     public bool $showAddUnitOfMeasureModal = false;
     public int $unitOfMeasureSelectKey = 0;
     public string $newUnitOfMeasureCode = '';
@@ -176,6 +181,71 @@ class CatalogItemForm extends Component
             ->where('level', 3)
             ->orderBy('name')
             ->get();
+    }
+
+    #[Computed]
+    public function hierarchyLevel1NameOptions()
+    {
+        return ProductHierarchy::query()
+            ->where('level', 1)
+            ->orderBy('name')
+            ->pluck('name')
+            ->unique()
+            ->values();
+    }
+
+    #[Computed]
+    public function hierarchyLevel2NameOptions()
+    {
+        $query = ProductHierarchy::query()
+            ->where('level', 2)
+            ->orderBy('name');
+
+        if ($this->newHierarchyLevel1 !== '') {
+            $level1HierarchyNumbers = ProductHierarchy::query()
+                ->where('level', 1)
+                ->where('name', $this->newHierarchyLevel1)
+                ->pluck('hierarchy_number');
+
+            if ($level1HierarchyNumbers->isNotEmpty()) {
+                $query->whereIn('parent_id', $level1HierarchyNumbers);
+            }
+        }
+
+        return $query->pluck('name')->unique()->values();
+    }
+
+    #[Computed]
+    public function hierarchyLevel3NameOptions()
+    {
+        $query = ProductHierarchy::query()
+            ->where('level', 3)
+            ->orderBy('name');
+
+        if ($this->newHierarchyLevel2 !== '') {
+            $level2Query = ProductHierarchy::query()
+                ->where('level', 2)
+                ->where('name', $this->newHierarchyLevel2);
+
+            if ($this->newHierarchyLevel1 !== '') {
+                $level1HierarchyNumbers = ProductHierarchy::query()
+                    ->where('level', 1)
+                    ->where('name', $this->newHierarchyLevel1)
+                    ->pluck('hierarchy_number');
+
+                if ($level1HierarchyNumbers->isNotEmpty()) {
+                    $level2Query->whereIn('parent_id', $level1HierarchyNumbers);
+                }
+            }
+
+            $level2HierarchyNumbers = $level2Query->pluck('hierarchy_number');
+
+            if ($level2HierarchyNumbers->isNotEmpty()) {
+                $query->whereIn('parent_id', $level2HierarchyNumbers);
+            }
+        }
+
+        return $query->pluck('name')->unique()->values();
     }
 
     #[Computed]
@@ -365,6 +435,117 @@ class CatalogItemForm extends Component
         ]);
     }
 
+    public function openAddHierarchyModal(): void
+    {
+        $this->resetValidation([
+            'newHierarchyLevel1',
+            'newHierarchyLevel2',
+            'newHierarchyLevel3',
+        ]);
+        $this->newHierarchyLevel1 = '';
+        $this->newHierarchyLevel2 = '';
+        $this->newHierarchyLevel3 = '';
+        $this->showAddHierarchyModal = true;
+    }
+
+    public function closeAddHierarchyModal(): void
+    {
+        $this->showAddHierarchyModal = false;
+    }
+
+    public function updatedNewHierarchyLevel1(string $value): void
+    {
+        if ($value === '') {
+            $this->newHierarchyLevel2 = '';
+            $this->newHierarchyLevel3 = '';
+        }
+    }
+
+    public function updatedNewHierarchyLevel2(string $value): void
+    {
+        if ($value === '') {
+            $this->newHierarchyLevel3 = '';
+        }
+    }
+
+    public function saveHierarchy(): void
+    {
+        $validated = $this->validate([
+            'newHierarchyLevel1' => ['required', 'string', 'max:100'],
+            'newHierarchyLevel2' => ['required', 'string', 'max:100'],
+            'newHierarchyLevel3' => ['required', 'string', 'max:100'],
+        ], [], [
+            'newHierarchyLevel1' => 'category level 1',
+            'newHierarchyLevel2' => 'category level 2',
+            'newHierarchyLevel3' => 'category level 3',
+        ]);
+
+        $level1Name = trim($validated['newHierarchyLevel1']);
+        $level2Name = trim($validated['newHierarchyLevel2']);
+        $level3Name = trim($validated['newHierarchyLevel3']);
+
+        $level3 = DB::transaction(function () use ($level1Name, $level2Name, $level3Name) {
+            $level1 = ProductHierarchy::query()
+                ->where('level', 1)
+                ->where('name', $level1Name)
+                ->first();
+
+            if (! $level1) {
+                $level1 = ProductHierarchy::create([
+                    'hierarchy_number' => $this->generateHierarchyNumber(1),
+                    'parent_id' => null,
+                    'level' => 1,
+                    'name' => $level1Name,
+                ]);
+            }
+
+            $level2 = ProductHierarchy::query()
+                ->where('level', 2)
+                ->where('name', $level2Name)
+                ->where('parent_id', $level1->hierarchy_number)
+                ->first();
+
+            if (! $level2) {
+                $level2 = ProductHierarchy::create([
+                    'hierarchy_number' => $this->generateHierarchyNumber(2),
+                    'parent_id' => $level1->hierarchy_number,
+                    'level' => 2,
+                    'name' => $level2Name,
+                ]);
+            }
+
+            $level3 = ProductHierarchy::query()
+                ->where('level', 3)
+                ->where('name', $level3Name)
+                ->where('parent_id', $level2->hierarchy_number)
+                ->first();
+
+            if (! $level3) {
+                $level3 = ProductHierarchy::create([
+                    'hierarchy_number' => $this->generateHierarchyNumber(3),
+                    'parent_id' => $level2->hierarchy_number,
+                    'level' => 3,
+                    'name' => $level3Name,
+                ]);
+            }
+
+            return $level3;
+        });
+
+        $this->hierarchy = (string) $level3->id;
+        $this->hierarchySelectKey++;
+        $this->showAddHierarchyModal = false;
+        $this->newHierarchyLevel1 = '';
+        $this->newHierarchyLevel2 = '';
+        $this->newHierarchyLevel3 = '';
+        $this->resetValidation([
+            'newHierarchyLevel1',
+            'newHierarchyLevel2',
+            'newHierarchyLevel3',
+            'hierarchy',
+        ]);
+    }
+
     public function closeAddUnitOfMeasureModal(): void
     {
         $this->showAddUnitOfMeasureModal = false;
@@ -428,7 +609,7 @@ class CatalogItemForm extends Component
             'manufacturerSku' => ['nullable', 'string', 'max:255'],
 
             'productCategory' => ['required', Rule::exists('commodity_types', 'id')],
-            'hierarchy' => ['required', 'string', 'max:255'],
+            'hierarchy' => ['required', Rule::exists('product_hierarchies', 'id')->where('level', 3)],
 
             'description' => ['required', 'string', 'max:4000'],
             'unitOfMeasure' => ['required'],
@@ -690,6 +871,15 @@ class CatalogItemForm extends Component
             fn($url) => trim((string) $url),
             $this->imageUrls,
         ), fn($url) => $url !== ''));
+    }
+
+    protected function generateHierarchyNumber(int $level): string
+    {
+        do {
+            $candidate = 'CUS-L' . $level . '-' . Str::upper(Str::random(8));
+        } while (ProductHierarchy::query()->where('hierarchy_number', $candidate)->exists());
+
+        return $candidate;
     }
 
     /**
