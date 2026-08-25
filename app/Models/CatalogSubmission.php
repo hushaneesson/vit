@@ -97,4 +97,12 @@ class CatalogSubmission extends Model
     {
         return $this->belongsTo(User::class, 'rejected_by');
     }
+
+    public function isDownloadable(): bool
+    {
+        return in_array($this->status, [
+            CatalogSubmissionStatus::ReviewRequested,
+            CatalogSubmissionStatus::ReadyForReview,
+        ], true);
+    }
 }
