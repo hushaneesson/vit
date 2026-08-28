@@ -48,7 +48,7 @@ return new class extends Migration
             $table->timestamp('rejected_at')->nullable();
             $table->text('rejection_reason')->nullable();
 
-            $table->string('file_path')->nullable();
+            $table->string('file_path', 500)->nullable();
             $table->string('disk')->default('local');
             $table->unsignedBigInteger('file_size')->nullable();
             $table->unsignedInteger('product_count')->default(0);

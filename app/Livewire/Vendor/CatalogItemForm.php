@@ -201,13 +201,13 @@ class CatalogItemForm extends Component
             ->orderBy('name');
 
         if ($this->newHierarchyLevel1 !== '') {
-            $level1HierarchyNumbers = ProductHierarchy::query()
+            $level1Ids = ProductHierarchy::query()
                 ->where('level', 1)
                 ->where('name', $this->newHierarchyLevel1)
-                ->pluck('hierarchy_number');
+                ->pluck('id');
 
-            if ($level1HierarchyNumbers->isNotEmpty()) {
-                $query->whereIn('parent_id', $level1HierarchyNumbers);
+            if ($level1Ids->isNotEmpty()) {
+                $query->whereIn('parent_id', $level1Ids);
             } else {
                 return collect();
             }
@@ -229,22 +229,22 @@ class CatalogItemForm extends Component
                 ->where('name', $this->newHierarchyLevel2);
 
             if ($this->newHierarchyLevel1 !== '') {
-                $level1HierarchyNumbers = ProductHierarchy::query()
+                $level1Ids = ProductHierarchy::query()
                     ->where('level', 1)
                     ->where('name', $this->newHierarchyLevel1)
-                    ->pluck('hierarchy_number');
+                    ->pluck('id');
 
-                if ($level1HierarchyNumbers->isNotEmpty()) {
-                    $level2Query->whereIn('parent_id', $level1HierarchyNumbers);
+                if ($level1Ids->isNotEmpty()) {
+                    $level2Query->whereIn('parent_id', $level1Ids);
                 } else {
                     return collect();
                 }
             }
 
-            $level2HierarchyNumbers = $level2Query->pluck('hierarchy_number');
+            $level2Ids = $level2Query->pluck('id');
 
-            if ($level2HierarchyNumbers->isNotEmpty()) {
-                $query->whereIn('parent_id', $level2HierarchyNumbers);
+            if ($level2Ids->isNotEmpty()) {
+                $query->whereIn('parent_id', $level2Ids);
             } else {
                 return collect();
             }
@@ -497,48 +497,42 @@ class CatalogItemForm extends Component
 
             if (! $level1) {
                 $level1 = ProductHierarchy::create([
-                    'hierarchy_number' => $this->generateHierarchyNumber(1),
+                    'hierarchy_number' => null,
                     'parent_id' => null,
                     'level' => 1,
                     'name' => $level1Name,
                 ]);
-            } elseif (! $level1->hierarchy_number) {
-                $level1->hierarchy_number = $this->generateHierarchyNumber(1);
-                $level1->save();
             }
 
-            $level1ParentKey = $level1->hierarchy_number;
+            $level1ParentId = $level1->id;
 
             $level2 = ProductHierarchy::query()
                 ->where('level', 2)
                 ->where('name', $level2Name)
-                ->where('parent_id', $level1ParentKey)
+                ->where('parent_id', $level1ParentId)
                 ->first();
 
             if (! $level2) {
                 $level2 = ProductHierarchy::create([
-                    'hierarchy_number' => $this->generateHierarchyNumber(2),
-                    'parent_id' => $level1ParentKey,
+                    'hierarchy_number' => null,
+                    'parent_id' => $level1ParentId,
                     'level' => 2,
                     'name' => $level2Name,
                 ]);
-            } elseif (! $level2->hierarchy_number) {
-                $level2->hierarchy_number = $this->generateHierarchyNumber(2);
-                $level2->save();
             }
 
-            $level2ParentKey = $level2->hierarchy_number;
+            $level2ParentId = $level2->id;
 
             $level3 = ProductHierarchy::query()
                 ->where('level', 3)
                 ->where('name', $level3Name)
-                ->where('parent_id', $level2ParentKey)
+                ->where('parent_id', $level2ParentId)
                 ->first();
 
             if (! $level3) {
                 $level3 = ProductHierarchy::create([
                     'hierarchy_number' => null,
-                    'parent_id' => $level2ParentKey,
+                    'parent_id' => $level2ParentId,
                     'level' => 3,
                     'name' => $level3Name,
                 ]);
@@ -559,15 +553,6 @@ class CatalogItemForm extends Component
             'newHierarchyLevel3',
             'hierarchy',
         ]);
-    }
-
-    protected function generateHierarchyNumber(int $level): string
-    {
-        do {
-            $candidate = 'CUS-L' . $level . '-' . Str::upper(Str::random(8));
-        } while (ProductHierarchy::query()->where('hierarchy_number', $candidate)->exists());
-
-        return $candidate;
     }
 
     public function closeAddUnitOfMeasureModal(): void
@@ -640,7 +625,7 @@ class CatalogItemForm extends Component
             'quantityPerUnit' => ['nullable', 'integer', 'min:1'],
 
             'imageInputMode' => ['required', Rule::in(['upload', 'url'])],
-            'newImages' => [$this->imageInputMode === 'upload' && ! $this->catalogItemId && count($this->existingImages) === 0 ? 'required' : 'nullable', 'array', 'max:5'],
+            'newImages' => ['nullable', 'array', 'max:5'],
             'newImages.*' => [$this->imageInputMode === 'upload' ? 'image' : 'nullable', 'max:8192'],
             'imageUrls' => [$this->imageInputMode === 'url' ? 'required' : 'nullable', 'array', 'max:5'],
             'imageUrls.*' => ['nullable', 'string', 'max:2048'],
@@ -801,12 +786,14 @@ class CatalogItemForm extends Component
                 $item->forceFill(['images' => null])->saveQuietly();
                 $existingImageCount = $item->images()->count();
 
+                $disk = config('filesystems.default');
+
                 foreach ($this->newImages as $index => $upload) {
-                    $path = $upload->store('catalog-images/vendor-' . $vendor->id, 'local');
+                    $path = $upload->store('tmp-images/' . $vendor->name, $disk);
 
                     CatalogItemImage::create([
                         'catalog_item_id' => $item->id,
-                        'disk' => 'local',
+                        'disk' => $disk,
                         'path' => $path,
                         'sort_order' => $existingImageCount + $index,
                     ]);

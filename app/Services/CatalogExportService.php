@@ -130,12 +130,13 @@ class CatalogExportService
         CatalogSubmission $submission
     ): string {
         $vendor = $submission->vendor;
+        $catalog = $submission->catalog;
 
         $vendorName = is_string($vendor->name)
             ? $vendor->name
             : 'Unknown';
 
-        $catalogName = $vendorName;
+        $catalogName = $vendorName . '-' . $catalog->name;
         $disk = $submission->disk ?? 'local';
 
         $itemsQuery = CatalogItem::with([
@@ -238,7 +239,7 @@ class CatalogExportService
         Vendor $vendor,
         string $catalogName
     ): string {
-        return "exports/vendor-{$vendor->id}/"
+        return "exports/{$vendor->name}/"
             . "{$catalogName}-"
             . now()->format('Ymd-His')
             . '.xlsx';

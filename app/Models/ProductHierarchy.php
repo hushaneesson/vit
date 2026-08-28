@@ -32,7 +32,7 @@ class ProductHierarchy extends Model
 
     public function parent(): BelongsTo
     {
-        return $this->belongsTo(self::class, 'parent_id', 'hierarchy_number');
+        return $this->belongsTo(self::class, 'parent_id', 'id');
     }
 
     public function getPathAttribute()
@@ -45,6 +45,6 @@ class ProductHierarchy extends Model
             $category = $category->parent;
         }
 
-        return  implode('! ', $path);
+        return  implode(' > ', $path);
     }
 }
