@@ -16,60 +16,76 @@ namespace App\Services;
  *   field_key            – unique string identifier
  *   web_app_label        – human-readable label shown in the UI
  *   description          – help text / tooltip
- *   requirement_type     – 'required' | 'optional' | 'conditional' | 'system_derived'
- *   field_type           – 'text' | 'number' | 'decimal' | 'boolean'
+ *   requirement_type     – 'required' | 'recommended' | 'optional' | 'conditional' | 'system_derived'
+ *   field_type            – 'text' | 'number' | 'decimal' | 'boolean'
  *   is_system_derived    – true if value comes from vendor account, not file
  *   system_source        – Eloquent dot-notation for system-derived fields
- *   is_multi_value       – true if field accepts multiple values (array)
- *   join_separator       – separator used when splitting/joining multi-value strings
- *   max_length           – max string length (null = no limit)
- *   conditional_on_field – field_key this field depends on
- *   conditional_on_value – value that triggers the requirement
- *   shown_on_frontend    – whether this field is exposed to the vendor in the
- *                          web app's mapping UI. False for the handful of
- *                          fields the VIT spec marks "Do not expose in the
- *                          Web App" (these are system/derived values that
- *                          still need a row here for csv generation).
- *   vit_csv_column       – the exact column header text required by the VIT
- *                          spec for the generated Excel/CSV file. Null when
- *                          the field does not get its own output column,
- *                          either because it packs into another column
- *                          (see packs_into_field) or appends onto another
- *                          field's value (see append_to_field), or because
- *                          it isn't part of the VIT spec at all (category,
- *                          lead_time, availability). THIS is the header
- *                          value the export writer should use — not
- *                          web_app_label, which is UI-facing only and does
- *                          not always match the spec's required header text
- *                          (e.g. web_app_label "Brand Name" vs. required
- *                          header "brandName").
- *   model_attribute      – the Eloquent attribute or dot-notation path on
- *                          CatalogItem this value should be read from
- *                          (e.g. "commodityType.name",
- *                          "hierarchyInfo.hierarchy_number",
- *                          "unitOfMeasure.code", "item_weight",
- *                          "countryOfOrigin"). Null means "use field_key as
- *                          the attribute name" (the common case).
- *   packs_into_field     – if set, this field's value does not get its own
- *                          output CSV column. Instead, at csv-generation
- *                          time it is serialized into the named field
- *                          (see packs_into_key for the sub-key/prefix used).
- *                          Per VIT spec: UNSPSC, MSDS link, and Country of
- *                          Origin are collected as distinct fields in the
- *                          mapping UI (so they can be validated/required on
- *                          their own) but are written into the
- *                          "classifications" CSV column as
- *                          "KEY=value" pairs, not as their own columns.
- *   packs_into_key       – the "name=" prefix used when packing this value
- *                          into the target field (e.g. "UNSPSC", "MSDS URL",
- *                          "Country of Origin").
- *   append_to_field      – if set, this field's value is not written as its
- *                          own column either; it's appended to the end of
- *                          the named field's value (used for
- *                          quantity_per_unit, which VIT wants concatenated
- *                          onto the short description, e.g.
- *                          "..., 10 Reams/CS").
- *   sort_order           – display order in the mapping UI
+ *   is_multi_value        – true if field accepts multiple values (array)
+ *   join_separator        – separator used when splitting/joining multi-value strings
+ *   max_length            – max string length (null = no limit)
+ *   conditional_on_field  – field_key this field depends on
+ *   conditional_on_value  – value that triggers the requirement
+ *   shown_on_frontend     – whether this field is exposed to the vendor in the
+ *                           web app's mapping UI. False for the handful of
+ *                           fields the VIT spec marks "Do not expose in the
+ *                           Web App" (these are system/derived values that
+ *                           still need a row here for csv generation).
+ *   vit_csv_column        – the exact column header text required by the VIT
+ *                           spec for the generated Excel/CSV file. Null when
+ *                           the field does not get its own output column,
+ *                           either because it packs into another column
+ *                           (see packs_into_field) or appends onto another
+ *                           field's value (see append_to_field), or because
+ *                           it isn't part of the VIT spec at all (category,
+ *                           lead_time, availability). THIS is the header
+ *                           value the export writer should use — not
+ *                           web_app_label, which is UI-facing only and does
+ *                           not always match the spec's required header text
+ *                           (e.g. web_app_label "Brand Name" vs. required
+ *                           header "brandName").
+ *   model_attribute       – the Eloquent attribute or dot-notation path on
+ *                           CatalogItem this value should be read from
+ *                           (e.g. "commodityType.name",
+ *                           "hierarchyInfo.hierarchy_number",
+ *                           "unitOfMeasure.code", "item_weight",
+ *                           "countryOfOrigin"). Null means "use field_key as
+ *                           the attribute name" (the common case).
+ *   packs_into_field      – if set, this field's value does not get its own
+ *                           output CSV column. Instead, at csv-generation
+ *                           time it is serialized into the named field
+ *                           (see packs_into_key for the sub-key/prefix used).
+ *                           Per VIT spec: UNSPSC, MSDS link, and Country of
+ *                           Origin are collected as distinct fields in the
+ *                           mapping UI (so they can be validated/required on
+ *                           their own) but are written into the
+ *                           "classifications" CSV column as
+ *                           "KEY=value" pairs, not as their own columns.
+ *   packs_into_key        – the "name=" prefix used when packing this value
+ *                           into the target field (e.g. "UNSPSC", "MSDS URL",
+ *                           "Country of Origin").
+ *   append_to_field       – if set, this field's value is not written as its
+ *                           own column either; it's appended to the end of
+ *                           the named field's value (used for
+ *                           quantity_per_unit, which VIT wants concatenated
+ *                           onto the short description, e.g.
+ *                           "..., 10 Reams/CS").
+ *   is_key_value           – true if the multi-value field is a set of
+ *                           name=value pairs rather than a plain list.
+ *   sort_order            – display order in the mapping UI
+ *
+ * Special-case fields worth knowing before editing this list:
+ *   - unspsc_code, country_of_origin: stored only inside the
+ *     `classifications` JSON array (as "UNSPSC=..." / "COUNTRY_OF_ORIGIN=...").
+ *     They have no standalone DB column and no packs_into_field/packs_into_key
+ *     here, because ProcessValidatedRowsJob already writes them into
+ *     classifications directly — setting packs_into_field would re-pack and
+ *     duplicate the value at export time.
+ *   - msds_link: also packs into `classifications` (as "MSDS URL=..."), but
+ *     unlike the two above it DOES use packs_into_field/packs_into_key,
+ *     since it isn't pre-written into classifications elsewhere.
+ *   - quantity_per_unit + unit_word: combine with unit_of_measure to build a
+ *     string appended onto short_description (e.g. "10 Reams/CS"). Neither
+ *     gets its own csv column.
  */
 class VitFieldDefinition
 {
@@ -89,81 +105,488 @@ class VitFieldDefinition
      * @var array<int, array<string, mixed>>
      */
     private const DEFINITIONS = [
-        ['field_key' => 'vendor_name', 'web_app_label' => 'Vendor', 'description' => 'Vendor name', 'requirement_type' => 'recommended', 'field_type' => 'text', 'is_system_derived' => true, 'system_source' => 'vendor.name', 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 255, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'vendor', 'model_attribute' => null, 'sort_order' => 10],
 
-        // The catalog is the vendor's full catalog — the only catalog name in
-        // the export flow is the vendor's name (see CatalogExportService::generateFromSubmission()).
-        ['field_key' => 'catalog_name', 'web_app_label' => 'Catalog', 'description' => 'Catalog name', 'requirement_type' => 'recommended', 'field_type' => 'text', 'is_system_derived' => true, 'system_source' => 'vendor.name', 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 255, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'catalog', 'model_attribute' => null, 'sort_order' => 15],
+        [
+            'field_key' => 'vendor_name',
+            'web_app_label' => 'Vendor',
+            'description' => 'Vendor name',
+            'requirement_type' => 'recommended',
+            'field_type' => 'text',
+            'is_system_derived' => true,
+            'system_source' => 'vendor.name',
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => 255,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => false,
+            'vit_csv_column' => 'vendor',
+            'model_attribute' => null,
+            'sort_order' => 10,
+        ],
 
-        ['field_key' => 'dealer_sku', 'web_app_label' => 'Seller SKU', 'description' => 'Your unique SKU for this item', 'requirement_type' => 'recommended', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 255, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => true, 'vit_csv_column' => 'dealer sku', 'model_attribute' => null, 'sort_order' => 20],
+        [
+            'field_key' => 'catalog_name',
+            'web_app_label' => 'Catalog',
+            'description' => 'Catalog name',
+            'requirement_type' => 'recommended',
+            'field_type' => 'text',
+            'is_system_derived' => true,
+            'system_source' => 'vendor.name',
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => 255,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => false,
+            'vit_csv_column' => 'catalog',
+            'model_attribute' => null,
+            'sort_order' => 15,
+        ],
 
-        // not to be exposed in the mapping but used to generate the excel file
-        // customer sku - system derived from dealer sku
-        ['field_key' => 'customer_sku', 'web_app_label' => 'Customer SKU', 'description' => 'Customer SKU derived from the Seller SKU', 'requirement_type' => 'system_derived', 'field_type' => 'text', 'is_system_derived' => true, 'system_source' => 'dealer_sku', 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 255, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'customer sku', 'model_attribute' => null, 'sort_order' => 21],
+        [
+            'field_key' => 'dealer_sku',
+            'web_app_label' => 'Seller SKU',
+            'description' => 'Your unique SKU for this item',
+            'requirement_type' => 'recommended',
+            'field_type' => 'text',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => 255,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => true,
+            'vit_csv_column' => 'dealer sku',
+            'model_attribute' => null,
+            'sort_order' => 20,
+        ],
 
-        // vendor sku - system derived from dealer sku
-        ['field_key' => 'vendor_sku', 'web_app_label' => 'Vendor SKU', 'description' => 'Vendor SKU derived from the Seller SKU', 'requirement_type' => 'system_derived', 'field_type' => 'text', 'is_system_derived' => true, 'system_source' => 'dealer_sku', 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 255, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'vendor sku', 'model_attribute' => null, 'sort_order' => 22],
+        [
+            'field_key' => 'customer_sku',
+            'web_app_label' => 'Customer SKU',
+            'description' => 'Customer SKU derived from the Seller SKU',
+            'requirement_type' => 'system_derived',
+            'field_type' => 'text',
+            'is_system_derived' => true,
+            'system_source' => 'dealer_sku',
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => 255,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => false,
+            'vit_csv_column' => 'customer sku',
+            'model_attribute' => null,
+            'sort_order' => 21,
+        ],
 
-        // search sku - system derived from dealer sku
-        ['field_key' => 'search_sku', 'web_app_label' => 'Search SKU', 'description' => 'Search SKU derived from the Seller SKU', 'requirement_type' => 'system_derived', 'field_type' => 'text', 'is_system_derived' => true, 'system_source' => 'dealer_sku', 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 255, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'search sku', 'model_attribute' => null, 'sort_order' => 23],
+        [
+            'field_key' => 'vendor_sku',
+            'web_app_label' => 'Vendor SKU',
+            'description' => 'Vendor SKU derived from the Seller SKU',
+            'requirement_type' => 'system_derived',
+            'field_type' => 'text',
+            'is_system_derived' => true,
+            'system_source' => 'dealer_sku',
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => 255,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => false,
+            'vit_csv_column' => 'vendor sku',
+            'model_attribute' => null,
+            'sort_order' => 22,
+        ],
 
-        // FIXED: spec marks Manufacturer's Part Number as required, was 'optional'
-        ['field_key' => 'manufacturer_sku', 'web_app_label' => 'Manufacturer SKU', 'description' => "Manufacturer's part number", 'requirement_type' => 'recommended', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 255, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => true, 'vit_csv_column' => 'manufacturer sku', 'model_attribute' => null, 'sort_order' => 40],
+        [
+            'field_key' => 'search_sku',
+            'web_app_label' => 'Search SKU',
+            'description' => 'Search SKU derived from the Seller SKU',
+            'requirement_type' => 'system_derived',
+            'field_type' => 'text',
+            'is_system_derived' => true,
+            'system_source' => 'dealer_sku',
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => 255,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => false,
+            'vit_csv_column' => 'search sku',
+            'model_attribute' => null,
+            'sort_order' => 23,
+        ],
 
-        // not to be exposed in the mapping but used to generate the excel file
-        ['field_key' => 'type', 'web_app_label' => 'Type', 'description' => 'eLink', 'requirement_type' => 'system_derived', 'field_type' => 'text', 'is_system_derived' => true, 'system_source' => 'elink', 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 255, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'type', 'model_attribute' => null, 'sort_order' => 24],
+        [
+            'field_key' => 'manufacturer_sku',
+            'web_app_label' => 'Manufacturer SKU',
+            'description' => "Manufacturer's part number",
+            'requirement_type' => 'recommended',
+            'field_type' => 'text',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => 255,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => true,
+            'vit_csv_column' => 'manufacturer sku',
+            'model_attribute' => null,
+            'sort_order' => 40,
+        ],
 
-        // FIXED: spec marks Manufacturer's Name as required, was 'optional'
-        ['field_key' => 'manufacturer', 'web_app_label' => 'Manufacturer', 'description' => "Manufacturer's name", 'requirement_type' => 'recommended', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 255, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => true, 'vit_csv_column' => 'manufacturer', 'model_attribute' => null, 'sort_order' => 50],
+        [
+            'field_key' => 'type',
+            'web_app_label' => 'Type',
+            'description' => 'eLink',
+            'requirement_type' => 'system_derived',
+            'field_type' => 'text',
+            'is_system_derived' => true,
+            'system_source' => 'elink',
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => 255,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => false,
+            'vit_csv_column' => 'type',
+            'model_attribute' => null,
+            'sort_order' => 24,
+        ],
 
-        ['field_key' => 'short_description', 'web_app_label' => 'Item Name', 'description' => 'Item name or short description', 'requirement_type' => 'required', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 255, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => true, 'vit_csv_column' => 'name', 'model_attribute' => 'name', 'sort_order' => 60],
+        [
+            'field_key' => 'manufacturer',
+            'web_app_label' => 'Manufacturer',
+            'description' => "Manufacturer's name",
+            'requirement_type' => 'recommended',
+            'field_type' => 'text',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => 255,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => true,
+            'vit_csv_column' => 'manufacturer',
+            'model_attribute' => null,
+            'sort_order' => 50,
+        ],
 
-        ['field_key' => 'long_description', 'web_app_label' => 'Description', 'description' => 'Full product description', 'requirement_type' => 'recommended', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 4000, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => true, 'vit_csv_column' => 'description', 'model_attribute' => 'description', 'sort_order' => 70],
+        [
+            'field_key' => 'short_description',
+            'web_app_label' => 'Item Name',
+            'description' => 'Item name or short description',
+            'requirement_type' => 'required',
+            'field_type' => 'text',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => 255,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => true,
+            'vit_csv_column' => 'name',
+            'model_attribute' => 'name',
+            'sort_order' => 60,
+        ],
 
-        // FIXED: spec marks Search Terms as required, was 'optional'
-        ['field_key' => 'search_terms', 'web_app_label' => 'Search Terms', 'description' => 'Keywords for finding the item', 'requirement_type' => 'recommended', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => true, 'join_separator' => ',', 'max_length' => 2000, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => true, 'vit_csv_column' => 'search terms', 'model_attribute' => null, 'sort_order' => 80, 'is_key_value' => false],
+        [
+            'field_key' => 'long_description',
+            'web_app_label' => 'Description',
+            'description' => 'Full product description',
+            'requirement_type' => 'recommended',
+            'field_type' => 'text',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => 4000,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => true,
+            'vit_csv_column' => 'description',
+            'model_attribute' => 'description',
+            'sort_order' => 70,
+        ],
 
-        ['field_key' => 'hierarchy', 'web_app_label' => 'Hierarchy', 'description' => 'Product category path, up to 3 levels. Example: Cleaning/Paper Products/Toilet Paper', 'requirement_type' => 'recommended', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 255, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'hierarchy', 'model_attribute' => 'hierarchyInfo.hierarchy_number', 'sort_order' => 90],
+        [
+            'field_key' => 'search_terms',
+            'web_app_label' => 'Search Terms',
+            'description' => 'Keywords for finding the item',
+            'requirement_type' => 'recommended',
+            'field_type' => 'text',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => true,
+            'join_separator' => ',',
+            'max_length' => 2000,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => true,
+            'vit_csv_column' => 'search terms',
+            'model_attribute' => null,
+            'sort_order' => 80,
+            'is_key_value' => false,
+        ],
 
-        // NOTE: csv column for this per spec is "brandName" — check csv writer mapping.
-        ['field_key' => 'brand_name', 'web_app_label' => 'Brand Name', 'description' => 'Brand name. Example: 3M', 'requirement_type' => 'recommended', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 255, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => true, 'vit_csv_column' => 'brandName', 'model_attribute' => null, 'sort_order' => 100],
+        [
+            'field_key' => 'hierarchy',
+            'web_app_label' => 'Hierarchy',
+            'description' => 'Product category path, up to 3 levels. Example: Cleaning/Paper Products/Toilet Paper',
+            'requirement_type' => 'recommended',
+            'field_type' => 'text',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => 255,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => false,
+            'vit_csv_column' => 'hierarchy',
+            'model_attribute' => 'hierarchyInfo.hierarchy_number',
+            'sort_order' => 90,
+        ],
 
-        ['field_key' => 'list_price', 'web_app_label' => 'List Price', 'description' => "Manufacturer's suggested retail price (MSRP)", 'requirement_type' => 'recommended', 'field_type' => 'decimal', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => null, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => true, 'vit_csv_column' => 'list price', 'model_attribute' => null, 'sort_order' => 120],
+        [
+            'field_key' => 'brand_name',
+            'web_app_label' => 'Brand Name',
+            'description' => 'Brand name. Example: 3M',
+            'requirement_type' => 'recommended',
+            'field_type' => 'text',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => 255,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => true,
+            'vit_csv_column' => 'brandName',
+            'model_attribute' => null,
+            'sort_order' => 100,
+        ],
 
-        // NOTE: csv column for this per spec is "APDcost" — check csv writer mapping.
-        ['field_key' => 'selling_price', 'web_app_label' => 'Selling Price per Unit', 'description' => 'Price the buyer pays per unit', 'requirement_type' => 'recommended', 'field_type' => 'decimal', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => null, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => true, 'vit_csv_column' => 'APDcost', 'model_attribute' => null, 'sort_order' => 130],
+        [
+            'field_key' => 'list_price',
+            'web_app_label' => 'List Price',
+            'description' => "Manufacturer's suggested retail price (MSRP)",
+            'requirement_type' => 'recommended',
+            'field_type' => 'decimal',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => null,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => true,
+            'vit_csv_column' => 'list price',
+            'model_attribute' => null,
+            'sort_order' => 120,
+        ],
 
-        ['field_key' => 'unit_of_measure', 'web_app_label' => 'Unit of Measure', 'description' => 'Unit the item is sold in. Example: EA (Each), BX (Box)', 'requirement_type' => 'recommended', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 255, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => true, 'vit_csv_column' => 'unit of measure', 'model_attribute' => 'unitOfMeasure.code', 'sort_order' => 140],
+        [
+            // csv column per spec is "APDcost"
+            'field_key' => 'selling_price',
+            'web_app_label' => 'Selling Price per Unit',
+            'description' => 'Price the buyer pays per unit',
+            'requirement_type' => 'recommended',
+            'field_type' => 'decimal',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => null,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => true,
+            'vit_csv_column' => 'APDcost',
+            'model_attribute' => null,
+            'sort_order' => 130,
+        ],
 
-        // FIXED: spec marks Product Attribute (specifications) as required, was 'optional'
-        ['field_key' => 'specifications', 'web_app_label' => 'Specifications', 'description' => 'Product details in name=value format. Example: Color=Red, Material=Aluminum', 'requirement_type' => 'recommended', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => true, 'join_separator' => '|', 'max_length' => 4000, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => true, 'vit_csv_column' => 'specifications', 'model_attribute' => null, 'sort_order' => 150, 'is_key_value' => true],
+        [
+            'field_key' => 'unit_of_measure',
+            'web_app_label' => 'Unit of Measure',
+            'description' => 'Unit the item is sold in. Example: EA (Each), BX (Box)',
+            'requirement_type' => 'recommended',
+            'field_type' => 'text',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => 255,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => true,
+            'vit_csv_column' => 'unit of measure',
+            'model_attribute' => 'unitOfMeasure.code',
+            'sort_order' => 140,
+        ],
 
-        // Classifications is a generic KEY=value array stored directly on
-        // CatalogItem.classifications (cast to array). The processing pipeline
-        // writes entries like "UNSPSC=39111508", "MSDS_URL=https://...",
-        // "COUNTRY_OF_ORIGIN=US", or any other vendor-supplied classification
-        // into this array. The exporter reads the array as-is and joins the
-        // entries with the join_separator — it must NOT know about or filter
-        // specific classification keys.
-        ['field_key' => 'classifications', 'web_app_label' => 'Classifications', 'description' => 'Product classifications in KEY=value format', 'requirement_type' => 'optional', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => true, 'join_separator' => '|', 'max_length' => null, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'classifications', 'model_attribute' => 'classifications', 'sort_order' => 155, 'is_key_value' => true],
+        [
+            'field_key' => 'specifications',
+            'web_app_label' => 'Specifications',
+            'description' => 'Product details in name=value format. Example: Color=Red, Material=Aluminum',
+            'requirement_type' => 'recommended',
+            'field_type' => 'text',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => true,
+            'join_separator' => '|',
+            'max_length' => 4000,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => true,
+            'vit_csv_column' => 'specifications',
+            'model_attribute' => null,
+            'sort_order' => 150,
+            'is_key_value' => true,
+        ],
 
-        // STRUCTURAL: per spec, UNSPSC does not get its own csv column — it's always-required
-        // but delivered as "UNSPSC=value" packed into the "classifications" column.
-        // Kept as its own field here so the mapping UI can validate/require it independently.
-        // The processing pipeline (ProcessValidatedRowsJob) converts unspsc_code into
-        // "UNSPSC=value" and stores it in the classifications JSON array, making
-        // classifications the source of truth for the exported UNSPSC value. No
-        // packs_into_field / packs_into_key are set here so the exporter does not
-        // re-pack unspsc_code (which would duplicate the value already stored in
-        // classifications). The unspsc_code column remains for the edit form and
-        // completeness scoring.
-        ['field_key' => 'unspsc_code', 'web_app_label' => 'UNSPSC Code', 'description' => '8-digit UNSPSC commodity code', 'requirement_type' => 'recommended', 'field_type' => 'number', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => null, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => true, 'vit_csv_column' => null, 'model_attribute' => null, 'sort_order' => 160],
+        [
+            // Generic KEY=value array stored directly on CatalogItem.classifications
+            // (cast to array). The pipeline writes entries such as
+            // "UNSPSC=39111508", "MSDS_URL=https://...", "COUNTRY_OF_ORIGIN=US",
+            // or any other vendor-supplied classification into this array. The
+            // exporter reads it as-is and joins entries with join_separator — it
+            // must NOT know about or filter specific classification keys.
+            'field_key' => 'classifications',
+            'web_app_label' => 'Classifications',
+            'description' => 'Product classifications in KEY=value format',
+            'requirement_type' => 'optional',
+            'field_type' => 'text',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => true,
+            'join_separator' => '|',
+            'max_length' => null,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => false,
+            'vit_csv_column' => 'classifications',
+            'model_attribute' => 'classifications',
+            'sort_order' => 155,
+            'is_key_value' => true,
+        ],
 
-        // Country of Origin is stored in the classifications JSON as
-        // "COUNTRY_OF_ORIGIN=XX". The classification JSON is the single source
-        // of truth — it must NOT be re-packed at export time, so no
-        // packs_into_field / packs_into_key are set here.
-        ['field_key' => 'country_of_origin', 'web_app_label' => 'Country of Origin', 'description' => '2-letter country code for the country of origin', 'requirement_type' => 'recommended', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 255, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => true, 'vit_csv_column' => null, 'model_attribute' => 'countryOfOrigin', 'sort_order' => 175],
+        [
+            // Per spec, UNSPSC has no csv column of its own — it's always required
+            // but delivered as "UNSPSC=value" packed into "classifications". Kept
+            // as its own field here only so the mapping UI can validate/require it
+            // independently. ProcessValidatedRowsJob writes it into the
+            // classifications JSON array directly, so no packs_into_field /
+            // packs_into_key are set here (that would duplicate the value at
+            // export time). unspsc_code has no standalone DB column.
+            'field_key' => 'unspsc_code',
+            'web_app_label' => 'UNSPSC Code',
+            'description' => '8-digit UNSPSC commodity code',
+            'requirement_type' => 'recommended',
+            'field_type' => 'number',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => null,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => true,
+            'vit_csv_column' => null,
+            'model_attribute' => null,
+            'sort_order' => 160,
+        ],
+
+        [
+            // Stored in the classifications JSON as "COUNTRY_OF_ORIGIN=XX", which
+            // is the single source of truth — not re-packed at export time, so no
+            // packs_into_field / packs_into_key are set here.
+            'field_key' => 'country_of_origin',
+            'web_app_label' => 'Country of Origin',
+            'description' => '2-letter country code for the country of origin',
+            'requirement_type' => 'recommended',
+            'field_type' => 'text',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => 255,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => true,
+            'vit_csv_column' => null,
+            'model_attribute' => 'countryOfOrigin',
+            'sort_order' => 175,
+        ],
 
         [
             'field_key' => 'product_commodity_type',
@@ -184,51 +607,332 @@ class VitFieldDefinition
             'shown_on_frontend' => true,
             'vit_csv_column' => 'product commodity type',
             'model_attribute' => 'commodityType.name',
-            'sort_order' => 180
+            'sort_order' => 180,
         ],
 
-        ['field_key' => 'item_weight_in_pounds', 'web_app_label' => 'Item Weight in Pounds', 'description' => 'Product weight in pounds', 'requirement_type' => 'recommended', 'field_type' => 'decimal', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => null, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => true, 'vit_csv_column' => 'item weight', 'model_attribute' => 'item_weight', 'sort_order' => 190],
+        [
+            'field_key' => 'item_weight_in_pounds',
+            'web_app_label' => 'Item Weight in Pounds',
+            'description' => 'Product weight in pounds',
+            'requirement_type' => 'recommended',
+            'field_type' => 'decimal',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => null,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => true,
+            'vit_csv_column' => 'item weight',
+            'model_attribute' => 'item_weight',
+            'sort_order' => 190,
+        ],
 
-        // FIXED: spec marks Selling Point as required, was 'optional'
-        ['field_key' => 'selling_points', 'web_app_label' => 'Selling Points', 'description' => 'Key product features or benefits', 'requirement_type' => 'recommended', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => true, 'join_separator' => '|', 'max_length' => 4000, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => true, 'vit_csv_column' => 'selling points', 'model_attribute' => null, 'sort_order' => 200, 'is_key_value' => false],
+        [
+            'field_key' => 'selling_points',
+            'web_app_label' => 'Selling Points',
+            'description' => 'Key product features or benefits',
+            'requirement_type' => 'recommended',
+            'field_type' => 'text',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => true,
+            'join_separator' => '|',
+            'max_length' => 4000,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => true,
+            'vit_csv_column' => 'selling points',
+            'model_attribute' => null,
+            'sort_order' => 200,
+            'is_key_value' => false,
+        ],
 
-        // FIXED: spec marks Quantity contained in Unit of Measure as required, was 'optional'.
-        // STRUCTURAL: per spec this is NOT its own csv column — it's appended to the end of
-        // "name" (shortdescription), e.g. "..., 10 Reams/CS". Kept as its own field for
-        // vendor entry/validation; append_to_field tells the pipeline where it lands.
-        ['field_key' => 'quantity_per_unit', 'web_app_label' => 'Quantity per Unit', 'description' => 'Number of items in each unit. Example: 4 per pack', 'requirement_type' => 'recommended', 'field_type' => 'number', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => null, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => 'short_description', 'shown_on_frontend' => false, 'vit_csv_column' => null, 'model_attribute' => null, 'sort_order' => 210],
+        [
+            // Not its own csv column — per spec it's appended to the end of "name"
+            // (short_description), e.g. "..., 10 Reams/CS". Kept as its own field
+            // for vendor entry/validation; append_to_field tells the pipeline
+            // where it lands.
+            'field_key' => 'quantity_per_unit',
+            'web_app_label' => 'Quantity per Unit',
+            'description' => 'Number of items in each unit. Example: 4 per pack',
+            'requirement_type' => 'recommended',
+            'field_type' => 'number',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => null,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => 'short_description',
+            'shown_on_frontend' => false,
+            'vit_csv_column' => null,
+            'model_attribute' => null,
+            'sort_order' => 210,
+        ],
 
-        // NEW: was missing entirely. Spec requires the vendor enter this alongside
-        // quantity_per_unit — distinct from unit_of_measure's abbreviation (e.g. "CS").
-        // Combines with quantity_per_unit + unit_of_measure to build the string appended
-        // onto shortdescription, e.g. "10" + "Reams" + "/" + "CS" -> "10 Reams/CS".
-        // Consumed by the quantity_per_unit append logic — doesn't get its own csv column.
-        ['field_key' => 'unit_word', 'web_app_label' => 'Quantity Unit Type', 'description' => 'Name of the unit being counted. Example: Reams, Sheets, Each', 'requirement_type' => 'recommended', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 255, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => null, 'model_attribute' => null, 'sort_order' => 211],
+        [
+            // Name of the unit being counted (distinct from unit_of_measure's
+            // abbreviation, e.g. "CS"). Combines with quantity_per_unit +
+            // unit_of_measure to build the string appended onto
+            // short_description, e.g. "10" + "Reams" + "/" + "CS" -> "10 Reams/CS".
+            // Consumed by the quantity_per_unit append logic — no csv column.
+            'field_key' => 'unit_word',
+            'web_app_label' => 'Quantity Unit Type',
+            'description' => 'Name of the unit being counted. Example: Reams, Sheets, Each',
+            'requirement_type' => 'recommended',
+            'field_type' => 'text',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => 255,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => false,
+            'vit_csv_column' => null,
+            'model_attribute' => null,
+            'sort_order' => 211,
+        ],
 
-        ['field_key' => 'min_qty_per_order', 'web_app_label' => 'Minimum Qty per Order', 'description' => 'Minimum quantity allowed per order', 'requirement_type' => 'optional', 'field_type' => 'number', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 11, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'minimum', 'model_attribute' => null, 'sort_order' => 220],
+        [
+            'field_key' => 'min_qty_per_order',
+            'web_app_label' => 'Minimum Qty per Order',
+            'description' => 'Minimum quantity allowed per order',
+            'requirement_type' => 'optional',
+            'field_type' => 'number',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => 11,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => false,
+            'vit_csv_column' => 'minimum',
+            'model_attribute' => null,
+            'sort_order' => 220,
+        ],
 
-        ['field_key' => 'multiples', 'web_app_label' => 'Order Multiples', 'description' => 'Order quantity must be a multiple of this number. Example: 2', 'requirement_type' => 'optional', 'field_type' => 'number', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 11, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'multiples', 'model_attribute' => null, 'sort_order' => 230],
+        [
+            'field_key' => 'multiples',
+            'web_app_label' => 'Order Multiples',
+            'description' => 'Order quantity must be a multiple of this number. Example: 2',
+            'requirement_type' => 'optional',
+            'field_type' => 'number',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => 11,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => false,
+            'vit_csv_column' => 'multiples',
+            'model_attribute' => null,
+            'sort_order' => 230,
+        ],
 
-        ['field_key' => 'max_qty_per_order', 'web_app_label' => 'Maximum Qty per Order', 'description' => 'Maximum quantity allowed per order', 'requirement_type' => 'optional', 'field_type' => 'number', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 11, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'maximum', 'model_attribute' => null, 'sort_order' => 240],
+        [
+            'field_key' => 'max_qty_per_order',
+            'web_app_label' => 'Maximum Qty per Order',
+            'description' => 'Maximum quantity allowed per order',
+            'requirement_type' => 'optional',
+            'field_type' => 'number',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => 11,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => false,
+            'vit_csv_column' => 'maximum',
+            'model_attribute' => null,
+            'sort_order' => 240,
+        ],
 
-        // STRUCTURAL: per spec, MSDS link is only required if the vendor selects Hazmat, and
-        // is delivered as "MSDS URL=value" packed into "classifications", not its own column.
-        ['field_key' => 'msds_link', 'web_app_label' => 'MSDS Link', 'description' => 'Link to the product Material Safety Data Sheet (MSDS)', 'requirement_type' => 'conditional', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => null, 'conditional_on_field' => 'classifications', 'conditional_on_value' => 'Hazmat', 'packs_into_field' => 'classifications', 'packs_into_key' => 'MSDS URL', 'append_to_field' => null, 'shown_on_frontend' => true, 'vit_csv_column' => null, 'model_attribute' => null, 'sort_order' => 250],
+        [
+            // Required only if the vendor selects Hazmat; delivered as
+            // "MSDS URL=value" packed into "classifications", not its own column.
+            'field_key' => 'msds_link',
+            'web_app_label' => 'MSDS Link',
+            'description' => 'Link to the product Material Safety Data Sheet (MSDS)',
+            'requirement_type' => 'conditional',
+            'field_type' => 'text',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => null,
+            'conditional_on_field' => 'classifications',
+            'conditional_on_value' => 'Hazmat',
+            'packs_into_field' => 'classifications',
+            'packs_into_key' => 'MSDS URL',
+            'append_to_field' => null,
+            'shown_on_frontend' => true,
+            'vit_csv_column' => null,
+            'model_attribute' => null,
+            'sort_order' => 250,
+        ],
 
-        ['field_key' => 'image_urls', 'web_app_label' => 'Image / Video URLs', 'description' => 'Image or video URLs, starting with the primary image', 'requirement_type' => 'recommended', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => true, 'join_separator' => '|', 'max_length' => null, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'image URLs', 'model_attribute' => 'images', 'sort_order' => 255, 'is_key_value' => false],
+        [
+            'field_key' => 'image_urls',
+            'web_app_label' => 'Image / Video URLs',
+            'description' => 'Image or video URLs, starting with the primary image',
+            'requirement_type' => 'recommended',
+            'field_type' => 'text',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => true,
+            'join_separator' => '|',
+            'max_length' => null,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => false,
+            'vit_csv_column' => 'image URLs',
+            'model_attribute' => 'images',
+            'sort_order' => 255,
+            'is_key_value' => false,
+        ],
 
-        // NEW: was missing entirely. "As applicable" per spec — treated as optional.
-        ['field_key' => 'discontinued', 'web_app_label' => 'Item Discontinued', 'description' => 'Enter TRUE if the item is discontinued, otherwise FALSE', 'requirement_type' => 'optional', 'field_type' => 'boolean', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 255, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'discontinued', 'model_attribute' => 'is_discontinued', 'sort_order' => 260],
+        [
+            // "As applicable" per spec — treated as optional.
+            'field_key' => 'discontinued',
+            'web_app_label' => 'Item Discontinued',
+            'description' => 'Enter TRUE if the item is discontinued, otherwise FALSE',
+            'requirement_type' => 'optional',
+            'field_type' => 'boolean',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => 255,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => false,
+            'vit_csv_column' => 'discontinued',
+            'model_attribute' => 'is_discontinued',
+            'sort_order' => 260,
+        ],
 
-        // NEW: was missing entirely. Conditional on discontinued = TRUE.
-        ['field_key' => 'discontinued_date', 'web_app_label' => 'Discontinued Date', 'description' => 'Date the item was discontinued. Format: YYYY-MM-DD', 'requirement_type' => 'conditional', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 255, 'conditional_on_field' => 'discontinued', 'conditional_on_value' => 'TRUE', 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'discontinuedDate', 'model_attribute' => 'discontinue_date', 'sort_order' => 270],
+        [
+            // Conditional on discontinued = TRUE.
+            'field_key' => 'discontinued_date',
+            'web_app_label' => 'Discontinued Date',
+            'description' => 'Date the item was discontinued. Format: YYYY-MM-DD',
+            'requirement_type' => 'conditional',
+            'field_type' => 'text',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => 255,
+            'conditional_on_field' => 'discontinued',
+            'conditional_on_value' => 'TRUE',
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => false,
+            'vit_csv_column' => 'discontinuedDate',
+            'model_attribute' => 'discontinue_date',
+            'sort_order' => 270,
+        ],
 
-        // NEW: was missing entirely. Single SKU value, "as applicable".
-        ['field_key' => 'replacement_sku', 'web_app_label' => 'Replacement Part Number', 'description' => 'SKU of the replacement product, if available', 'requirement_type' => 'optional', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => true, 'join_separator' => ',', 'max_length' => 255, 'conditional_on_field' => 'discontinued', 'conditional_on_value' => 'TRUE', 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'replacement Sku', 'model_attribute' => null, 'sort_order' => 280],
+        [
+            // Single SKU value, "as applicable".
+            'field_key' => 'replacement_sku',
+            'web_app_label' => 'Replacement Part Number',
+            'description' => 'SKU of the replacement product, if available',
+            'requirement_type' => 'optional',
+            'field_type' => 'text',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => true,
+            'join_separator' => ',',
+            'max_length' => 255,
+            'conditional_on_field' => 'discontinued',
+            'conditional_on_value' => 'TRUE',
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => false,
+            'vit_csv_column' => 'replacement Sku',
+            'model_attribute' => null,
+            'sort_order' => 280,
+        ],
 
-        ['field_key' => 'lead_time', 'web_app_label' => 'Shipping Lead Time', 'description' => 'Number of days needed to fulfill and ship the order', 'requirement_type' => 'optional', 'field_type' => 'number', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => null, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'lead_time', 'model_attribute' => 'lead_time', 'sort_order' => 290],
+        [
+            'field_key' => 'lead_time',
+            'web_app_label' => 'Shipping Lead Time',
+            'description' => 'Number of days needed to fulfill and ship the order',
+            'requirement_type' => 'optional',
+            'field_type' => 'number',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => null,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => false,
+            'vit_csv_column' => 'lead_time',
+            'model_attribute' => 'lead_time',
+            'sort_order' => 290,
+        ],
 
-        ['field_key' => 'availability', 'web_app_label' => 'Availability', 'description' => 'Current stock status, such as In Stock or Out of Stock', 'requirement_type' => 'optional', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 255, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => true, 'vit_csv_column' => 'availability', 'model_attribute' => 'availability', 'sort_order' => 300],
+        [
+            'field_key' => 'availability',
+            'web_app_label' => 'Availability',
+            'description' => 'Availability status code as a number (e.g. 999 = Default)',
+            'requirement_type' => 'optional',
+            'field_type' => 'number',
+            'is_system_derived' => false,
+            'system_source' => null,
+            'is_multi_value' => false,
+            'join_separator' => null,
+            'max_length' => null,
+            'conditional_on_field' => null,
+            'conditional_on_value' => null,
+            'packs_into_field' => null,
+            'packs_into_key' => null,
+            'append_to_field' => null,
+            'shown_on_frontend' => true,
+            'vit_csv_column' => 'availability',
+            'model_attribute' => 'availability',
+            'sort_order' => 300,
+        ],
     ];
 
     /**

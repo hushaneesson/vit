@@ -377,6 +377,13 @@ class ProcessValidatedRowsJob implements ShouldQueue
             return true;
         }
 
+        // CatalogItem.availability is INTEGER NOT NULL DEFAULT 0
+        if ($fieldKey === 'availability') {
+            $attrs[$modelAttribute] = 0;
+
+            return true;
+        }
+
         $attrs[$modelAttribute] = null;
 
         return true;
@@ -484,6 +491,14 @@ class ProcessValidatedRowsJob implements ShouldQueue
                 : 0.01;
         }
 
+        // availability is stored in an INTEGER NOT NULL column; coerce numeric
+        // input to an integer and fall back to the column default .
+        if ($fieldKey === 'availability') {
+            $cast = is_numeric($rawValue)
+                ? (int) $rawValue
+                : 0;
+        }
+
         return $cast;
     }
 
@@ -562,6 +577,10 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
         $unspsc = $attrs['unspsc_code'];
 
+        // unspsc_code has no standalone database column; the persisted value
+        // lives only inside classifications.
+        unset($attrs['unspsc_code']);
+
         if ($unspsc === null || $unspsc === '') {
             return;
         }
@@ -606,8 +625,8 @@ class ProcessValidatedRowsJob implements ShouldQueue
     /**
      * Add MSDS URL to classifications.
      *
-     * The standalone msds_link database column remains populated.
-     * classifications additionally receives:
+     * msds_link has no standalone database column; the value is persisted
+     * only in classifications as:
      *
      * MSDS_URL=<value>
      */
@@ -618,6 +637,10 @@ class ProcessValidatedRowsJob implements ShouldQueue
         }
 
         $msdsLink = $attrs['msds_link'];
+
+        // msds_link has no standalone database column; the persisted value
+        // lives only inside classifications.
+        unset($attrs['msds_link']);
 
         if ($msdsLink === null || $msdsLink === '') {
             return;
