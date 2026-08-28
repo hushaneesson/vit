@@ -39,7 +39,7 @@ class AppointmentForm extends Component
         $this->month = now()->month;
         $this->year = now()->year;
 
-        $this->user = User::first();
+        $this->user = User::where('has_appointments', true)->first();
 
         $this->schedules = $this->user->schedules()
             ->where('schedule_type', 'availability')

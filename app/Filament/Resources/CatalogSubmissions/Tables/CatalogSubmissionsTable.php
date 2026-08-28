@@ -71,7 +71,7 @@ class CatalogSubmissionsTable
             ->defaultSort('requested_at', 'desc')
             ->recordActions([
                 Action::make('approve')
-                    ->label('Upload to VIT')
+                    ->label('Mark as Uploaded')
                     ->icon('heroicon-o-check-circle')
                     ->color('success')
                     ->visible(fn(CatalogSubmission $record) => $record->status === CatalogSubmissionStatus::ReadyForReview)
@@ -150,68 +150,7 @@ class CatalogSubmissionsTable
                                 ->send();
                         }
                     }),
-                Action::make('reject')
-                    ->label('Reject')
-                    ->icon('heroicon-o-x-circle')
-                    ->color('danger')
-                    ->visible(fn(CatalogSubmission $record) => in_array($record->status, [
-                        CatalogSubmissionStatus::ReviewRequested,
-                        CatalogSubmissionStatus::ReadyForReview,
-                    ]))
-                    ->requiresConfirmation()
-                    ->modalHeading('Reject catalog submission')
-                    ->modalDescription('Enter the reason for rejection. The vendor will be notified.')
-                    ->form([
-                        \Filament\Forms\Components\Textarea::make('rejection_reason')
-                            ->label('Rejection reason')
-                            ->required()
-                            ->placeholder('Explain why the submission was rejected...'),
-                    ])
-                    ->action(function (CatalogSubmission $record, array $data) {
-                        if (!in_array($record->status, [
-                            CatalogSubmissionStatus::ReviewRequested,
-                            CatalogSubmissionStatus::ReadyForReview,
-                        ])) {
-                            Notification::make()
-                                ->title('Cannot reject')
-                                ->body('This submission cannot be rejected in its current state.')
-                                ->danger()
-                                ->send();
-                            return;
-                        }
 
-                        try {
-                            $record->update([
-                                'status' => CatalogSubmissionStatus::Rejected,
-                                'rejected_by' => auth()->id(),
-                                'rejected_at' => now(),
-                                'rejection_reason' => $data['rejection_reason'],
-                            ]);
-
-                            // Notify the requesting client
-                            $client = $record->requestedByClient;
-                            if ($client && $client->email) {
-                                \Illuminate\Support\Facades\Notification::route('mail', $client->email)
-                                    ->notify(new CatalogSubmissionReviewedNotification(
-                                        vendorName: $record->vendor->name,
-                                        status: 'rejected',
-                                        rejectionReason: $data['rejection_reason'],
-                                    ));
-                            }
-
-                            Notification::make()
-                                ->title('Submission rejected')
-                                ->body('The vendor has been notified.')
-                                ->success()
-                                ->send();
-                        } catch (\Throwable $e) {
-                            Notification::make()
-                                ->title('Rejection failed')
-                                ->body($e->getMessage())
-                                ->danger()
-                                ->send();
-                        }
-                    }),
                 Action::make('downloadExcel')
                     ->label('Download File')
                     ->icon('heroicon-o-arrow-down-on-square')

@@ -22,6 +22,7 @@ class DatabaseSeeder extends Seeder
             [
                 'name' => 'Onboarding Manager',
                 'password' => bcrypt('password'),
+                'has_appointments' => true,
             ]
         );
 
