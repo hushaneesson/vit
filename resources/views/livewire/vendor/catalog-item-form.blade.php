@@ -197,8 +197,7 @@
             <div class="flex items-center gap-3 px-6 py-4 border-b border-gray-100 bg-gray-50/60">
                 <span
                     class="flex items-center justify-center flex-shrink-0 text-xs font-semibold text-white rounded-full w-7 h-7 bg-sky-600">4</span>
-                <h2 class="font-semibold text-gray-900">Product Images <span class="font-normal text-red-600">*</span>
-                </h2>
+                <h2 class="font-semibold text-gray-900">Product Images</h2>
             </div>
             <div class="p-6 space-y-4">
                 <p class="text-xs text-gray-500">Choose one option: enter up to five image names or URLs, or upload up
@@ -516,7 +515,7 @@
                     <div class="space-y-2 mt-1.5">
                         @foreach ($classifications as $index => $classification)
                             @php
-                                $selectedType = $classification['type'] ?? '';
+                                $selectedType = $classification['key'] ?? '';
                                 $isRequiredType =
                                     $selectedType !== '' &&
                                     $this->classificationTypeOptions
@@ -524,31 +523,40 @@
                                         ->where('is_always_required', true)
                                         ->isNotEmpty();
                                 $selectedTypesInOtherRows = collect($classifications)
-                                    ->map(fn($row, $i) => $i === $index ? null : $row['type'] ?? null)
+                                    ->map(fn($row, $i) => $i === $index ? null : $row['key'] ?? null)
                                     ->filter();
                             @endphp
                             <div class="flex items-center gap-2">
-                                <x-searchable-select wire-model="classifications.{{ $index }}.type"
+                                <x-searchable-select wire-model="classifications.{{ $index }}.key"
                                     class="flex-1" :options="$this->classificationTypeOptions
                                         ->filter(
                                             fn($t) => !$selectedTypesInOtherRows->contains($t->key) ||
                                                 $selectedType === $t->key,
                                         )
-                                        ->map(fn($t) => ['value' => $t->key, 'label' => $t->label])
+                                        ->map(
+                                            fn($t) => [
+                                                'value' => $t->key,
+                                                'label' => $t->label,
+                                                'default_value' => $t->default_value,
+                                                'index' => $index,
+                                            ],
+                                        )
                                         ->values()
                                         ->toArray()" :allow-create="false" :disabled="$isRequiredType"
                                     placeholder="Select an option..." />
 
 
-
-
-                                @if ($classification['type'] === 'Country of Origin')
+                                @if ($classification['key'] === 'Country of Origin')
                                     <x-searchable-select wire-model="classifications.{{ $index }}.value"
                                         class="flex-1" :options="$this->countries
                                             ->map(fn($t) => ['value' => $t->code, 'label' => $t->name])
                                             ->values()
                                             ->toArray()" :allow-create="false" :disabled="$isRequiredType"
                                         placeholder="Select an option..." />
+                                @elseif($this->classificationTypeOptions->firstWhere('key', $classification['key'])?->default_value)
+                                    <p class="w-1/2 text-xs text-gray-500">Default value applied from classification
+                                        type.
+                                    </p>
                                 @else
                                     <input type="text" wire:model="classifications.{{ $index }}.value"
                                         placeholder="Enter value"
@@ -563,7 +571,7 @@
                             </div>
                         @endforeach
                     </div>
-                    @error('classifications.*.type')
+                    @error('classifications.*.key')
                         <p class="text-sm text-red-600 mt-1.5">{{ $message }}</p>
                     @enderror
                     @error('classifications.*.value')

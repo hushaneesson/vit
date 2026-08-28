@@ -20,6 +20,7 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\On;
 use Livewire\Component;
 use Livewire\WithFileUploads;
 
@@ -79,7 +80,7 @@ class CatalogItemForm extends Component
     public array $imageUrls = [''];
 
     public array $specifications = [['key' => '', 'value' => '']];
-    public array $classifications = [['type' => '', 'value' => '']];
+    public array $classifications = [];
 
 
     public function mount(?CatalogItem $catalogItem = null, ?int $catalogId = null): void
@@ -94,6 +95,7 @@ class CatalogItemForm extends Component
         $this->catalogId = $catalogId;
 
         $this->classifications = $this->ensureRequiredClassificationRows($this->classifications);
+        $this->applyClassificationDefaults();
     }
 
     protected function authorizeVendorOwnership(CatalogItem $catalogItem): void
@@ -133,6 +135,7 @@ class CatalogItemForm extends Component
         $this->classifications = $this->ensureRequiredClassificationRows(
             $this->mapStoredClassificationsToRows($catalogItem->classifications)
         );
+        $this->applyClassificationDefaults();
 
         $this->existingImages = $catalogItem->images()->get()->map(fn(CatalogItemImage $image) => [
             'id' => $image->id,
@@ -269,6 +272,14 @@ class CatalogItemForm extends Component
             ->get();
     }
 
+    #[On('option-selected')]
+    public function optionSelected($option)
+    {
+        if (isset($option['default_value']) && isset($option['index'])) {
+            $this->classifications[$option['index']][$option['value']] = $option['default_value'];
+        }
+    }
+
     public function addSearchTerm(): void
     {
         $this->searchTerms[] = '';
@@ -317,7 +328,16 @@ class CatalogItemForm extends Component
 
     public function addClassification(): void
     {
-        $this->classifications[] = ['type' => '', 'value' => ''];
+        $this->classifications[] = ['key' => '', 'value' => ''];
+    }
+
+    public function updatedClassifications($value, $key): void
+    {
+        if (! is_string($key) || ! str_ends_with($key, '.key')) {
+            return;
+        }
+
+        $this->applyClassificationDefaults();
     }
 
     public function removeClassification(int $index): void
@@ -326,7 +346,7 @@ class CatalogItemForm extends Component
             return;
         }
 
-        $type = trim((string) ($this->classifications[$index]['type'] ?? ''));
+        $type = trim((string) ($this->classifications[$index]['key'] ?? ''));
 
         if ($type !== '' && in_array($type, $this->requiredClassificationTypeKeys(), true)) {
             return;
@@ -649,8 +669,8 @@ class CatalogItemForm extends Component
             'specifications.*.key' => ['nullable', 'string'],
             'specifications.*.value' => ['nullable', 'string'],
             'classifications' => ['nullable', 'array'],
-            'classifications.*.type' => ['nullable', 'required_with:classifications.*.value',],
-            'classifications.*.value' => ['nullable', 'required_with:classifications.*.type',],
+            'classifications.*.key' => ['nullable', 'required_with:classifications.*.value',],
+            'classifications.*.value' => ['nullable', 'required_with:classifications.*.key',],
 
             'minQtyPerOrder' => ['nullable', 'integer', 'min:0'],
             'maxQtyPerOrder' => ['nullable', 'integer', 'min:0'],
@@ -661,7 +681,7 @@ class CatalogItemForm extends Component
     public function messages(): array
     {
         return [
-            'classifications.*.type.required_with' => 'All classification rows must include both a type and a value.',
+            'classifications.*.key.required_with' => 'All classification rows must include both a type and a value.',
             'classifications.*.value.required_with' => 'All classification rows must include both a type and a value.',
         ];
     }
@@ -671,6 +691,7 @@ class CatalogItemForm extends Component
         $client = Auth::guard('client')->user();
         $vendor = $client->vendor;
         $this->classifications = $this->ensureRequiredClassificationRows($this->classifications);
+        $this->applyClassificationDefaults();
 
         try {
             $this->validate();
@@ -715,7 +736,7 @@ class CatalogItemForm extends Component
 
         $classificationsClean = [];
         foreach ($this->classifications as $classification) {
-            $type = trim((string) ($classification['type'] ?? ''));
+            $type = trim((string) ($classification['key'] ?? ''));
             $value = trim((string) ($classification['value'] ?? ''));
 
             if ($type !== '' && $value !== '') {
@@ -784,12 +805,20 @@ class CatalogItemForm extends Component
                 }
             } else {
                 $item->forceFill(['images' => null])->saveQuietly();
+
+                // Seller SKU must exist before we can store an image since it must match the item sku.
+                if ($this->sellerSku == '') {
+                    throw ValidationException::withMessages([
+                        'sellerSku' => 'Seller SKU is required before uploading images.',
+                    ]);
+                }
+
                 $existingImageCount = $item->images()->count();
 
                 $disk = config('filesystems.default');
 
                 foreach ($this->newImages as $index => $upload) {
-                    $path = $upload->store('tmp-images/' . $vendor->name, $disk);
+                    $path = $upload->store('tmp-images/' . $vendor->name . '/' . $this->sellerSku, $disk);
 
                     CatalogItemImage::create([
                         'catalog_item_id' => $item->id,
@@ -822,7 +851,7 @@ class CatalogItemForm extends Component
     protected function mapStoredClassificationsToRows($stored): array
     {
         if (! is_array($stored) || empty($stored)) {
-            return [['type' => '', 'value' => '']];
+            return [['key' => '', 'value' => '']];
         }
 
         $rows = [];
@@ -830,7 +859,7 @@ class CatalogItemForm extends Component
         foreach ($stored as $entry) {
             if (is_array($entry)) {
                 $rows[] = [
-                    'type' => (string) ($entry['type'] ?? $entry['key'] ?? ''),
+                    'key' => (string) ($entry['key'] ?? $entry['key'] ?? ''),
                     'value' => (string) ($entry['value'] ?? ''),
                 ];
 
@@ -847,7 +876,7 @@ class CatalogItemForm extends Component
                 [$type, $value] = explode('=', $text, 2);
 
                 $rows[] = [
-                    'type' => trim($type),
+                    'key' => trim($type),
                     'value' => trim($value),
                 ];
 
@@ -855,18 +884,18 @@ class CatalogItemForm extends Component
             }
 
             $rows[] = [
-                'type' => '',
+                'key' => '',
                 'value' => $text,
             ];
         }
 
-        return $rows !== [] ? $rows : [['type' => '', 'value' => '']];
+        return $rows !== [] ? $rows : [['key' => '', 'value' => '']];
     }
 
     protected function hasDuplicateClassificationTypes(): bool
     {
         $types = collect($this->classifications)
-            ->map(fn(array $row) => trim((string) ($row['type'] ?? '')))
+            ->map(fn(array $row) => trim((string) ($row['key'] ?? '')))
             ->filter()
             ->values();
 
@@ -899,6 +928,42 @@ class CatalogItemForm extends Component
     }
 
     /**
+     * @return array<string, string>
+     */
+    protected function classificationDefaultValuesByKey(): array
+    {
+        return ClassificationType::query()
+            ->whereNotNull('default_value')
+            ->pluck('default_value', 'key')
+            ->mapWithKeys(fn($value, $key) => [trim((string) $key) => trim((string) $value)])
+            ->filter(fn($value, $key) => $key !== '' && $value !== '')
+            ->all();
+    }
+
+    protected function applyClassificationDefaults(): void
+    {
+        $defaults = $this->classificationDefaultValuesByKey();
+
+        if ($defaults === []) {
+            return;
+        }
+
+        $this->classifications = array_values(array_map(function (array $row) use ($defaults): array {
+            $key = trim((string) ($row['key'] ?? ''));
+            $value = trim((string) ($row['value'] ?? ''));
+
+            if ($key !== '' && array_key_exists($key, $defaults)) {
+                $value = $defaults[$key];
+            }
+
+            return [
+                'key' => $key,
+                'value' => $value,
+            ];
+        }, $this->classifications));
+    }
+
+    /**
      * @param  array<int, array<string, mixed>>  $rows
      * @return array<int, array{type:string, value:string}>
      */
@@ -906,7 +971,7 @@ class CatalogItemForm extends Component
     {
         $normalized = array_values(array_map(
             fn(array $row) => [
-                'type' => trim((string) ($row['type'] ?? '')),
+                'key' => trim((string) ($row['key'] ?? '')),
                 'value' => trim((string) ($row['value'] ?? '')),
             ],
             $rows,
@@ -915,19 +980,19 @@ class CatalogItemForm extends Component
         $requiredKeys = $this->requiredClassificationTypeKeys();
 
         if ($requiredKeys === []) {
-            return $normalized !== [] ? $normalized : [['type' => '', 'value' => '']];
+            return $normalized !== [] ? $normalized : [['key' => '', 'value' => '']];
         }
 
         $rowsByType = collect($normalized)
-            ->filter(fn(array $row) => $row['type'] !== '')
-            ->keyBy('type');
+            ->filter(fn(array $row) => $row['key'] !== '')
+            ->keyBy('key');
 
         $requiredRows = collect($requiredKeys)
             ->map(function (string $key) use ($rowsByType): array {
                 $row = $rowsByType->get($key);
 
                 return [
-                    'type' => $key,
+                    'key' => $key,
                     'value' => trim((string) ($row['value'] ?? '')),
                 ];
             })
@@ -935,7 +1000,7 @@ class CatalogItemForm extends Component
             ->all();
 
         $nonRequiredRows = collect($normalized)
-            ->filter(fn(array $row) => ! in_array($row['type'], $requiredKeys, true))
+            ->filter(fn(array $row) => ! in_array($row['key'], $requiredKeys, true))
             ->values()
             ->all();
 
