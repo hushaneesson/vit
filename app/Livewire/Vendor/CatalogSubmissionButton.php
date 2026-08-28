@@ -163,6 +163,7 @@ class CatalogSubmissionButton extends Component
                     'status'                 => CatalogSubmissionStatus::ReviewRequested,
                     'total_items'            => $totalItems,
                     'requested_at'           => now(),
+                    'disk'                   => config('filesystems.default'),
                 ]);
             });
 

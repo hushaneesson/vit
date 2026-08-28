@@ -277,9 +277,16 @@
 
                     @if ($newImages)
                         <div class="flex flex-wrap gap-3">
-                            @foreach ($newImages as $upload)
-                                <img src="{{ $upload->temporaryUrl() }}"
-                                    class="object-cover w-24 h-24 border border-gray-200 rounded-lg">
+                            @foreach ($newImages as $index => $upload)
+                                <div class="relative">
+                                    <img src="{{ $upload->temporaryUrl() }}"
+                                        class="object-cover w-24 h-24 border border-gray-200 rounded-lg">
+
+                                    <button type="button" wire:click="removeNewImage({{ $index }})"
+                                        class="absolute flex items-center justify-center w-6 h-6 text-white bg-red-600 rounded-full -top-2 -right-2 hover:bg-red-700">
+                                        &times;
+                                    </button>
+                                </div>
                             @endforeach
                         </div>
                     @endif
@@ -780,12 +787,10 @@
 
                 <div>
                     <label>Category Level 3</label>
-                    <x-searchable-select
-                        wire:key="new-hierarchy-level3-{{ md5($newHierarchyLevel1 . '|' . $newHierarchyLevel2) }}"
-                        wire-model="newHierarchyLevel3" :options="$this->hierarchyLevel3NameOptions
-                            ->map(fn($name) => ['value' => $name, 'label' => $name])
-                            ->toArray()" :allow-create="true"
-                        placeholder="Select or type level 3" />
+                    <input type="text" wire:model.defer="newHierarchyLevel3"
+                        class="mt-1.5 block w-full rounded-lg border-gray-300 shadow-sm text-sm focus:border-sky-500 focus:ring-sky-500 focus:ring-1"
+                        placeholder="Example: Janitorial Supplies" />
+
                     @error('newHierarchyLevel3')
                         <p class="mt-1.5 text-sm text-red-600">{{ $message }}</p>
                     @enderror

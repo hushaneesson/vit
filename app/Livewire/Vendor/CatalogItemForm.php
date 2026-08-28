@@ -220,43 +220,6 @@ class CatalogItemForm extends Component
     }
 
     #[Computed]
-    public function hierarchyLevel3NameOptions()
-    {
-        $query = ProductHierarchy::query()
-            ->where('level', 3)
-            ->orderBy('name');
-
-        if ($this->newHierarchyLevel2 !== '') {
-            $level2Query = ProductHierarchy::query()
-                ->where('level', 2)
-                ->where('name', $this->newHierarchyLevel2);
-
-            if ($this->newHierarchyLevel1 !== '') {
-                $level1Ids = ProductHierarchy::query()
-                    ->where('level', 1)
-                    ->where('name', $this->newHierarchyLevel1)
-                    ->pluck('id');
-
-                if ($level1Ids->isNotEmpty()) {
-                    $level2Query->whereIn('parent_id', $level1Ids);
-                } else {
-                    return collect();
-                }
-            }
-
-            $level2Ids = $level2Query->pluck('id');
-
-            if ($level2Ids->isNotEmpty()) {
-                $query->whereIn('parent_id', $level2Ids);
-            } else {
-                return collect();
-            }
-        }
-
-        return $query->pluck('name')->unique()->values();
-    }
-
-    #[Computed]
     public function classificationTypeOptions()
     {
         return ClassificationType::query()
@@ -407,6 +370,13 @@ class CatalogItemForm extends Component
         if ($this->imageUrls === []) {
             $this->imageUrls = [''];
         }
+    }
+
+    public function removeNewImage($index)
+    {
+        unset($this->newImages[$index]);
+
+        $this->newImages = array_values($this->newImages);
     }
 
     public function openAddUnitOfMeasureModal(): void
@@ -646,7 +616,7 @@ class CatalogItemForm extends Component
 
             'imageInputMode' => ['required', Rule::in(['upload', 'url'])],
             'newImages' => ['nullable', 'array', 'max:5'],
-            'newImages.*' => [$this->imageInputMode === 'upload' ? 'image' : 'nullable', 'max:8192'],
+            'newImages.*' => [$this->imageInputMode === 'upload' ? 'image' : 'nullable', 'max:8192', 'dimensions:width=400,height=400'],
             'imageUrls' => [$this->imageInputMode === 'url' ? 'required' : 'nullable', 'array', 'max:5'],
             'imageUrls.*' => ['nullable', 'string', 'max:2048'],
 
@@ -683,6 +653,7 @@ class CatalogItemForm extends Component
         return [
             'classifications.*.key.required_with' => 'All classification rows must include both a type and a value.',
             'classifications.*.value.required_with' => 'All classification rows must include both a type and a value.',
+            'newImages.*.dimensions' => 'Each image must be 400x400.',
         ];
     }
 
@@ -818,7 +789,7 @@ class CatalogItemForm extends Component
                 $disk = config('filesystems.default');
 
                 foreach ($this->newImages as $index => $upload) {
-                    $path = $upload->store('tmp-images/' . $vendor->name . '/' . $this->sellerSku, $disk);
+                    $path = $upload->store("exports/{$vendor->name}/images", $disk);
 
                     CatalogItemImage::create([
                         'catalog_item_id' => $item->id,

@@ -137,7 +137,7 @@ class CatalogExportService
             : 'Unknown';
 
         $catalogName = $vendorName . '-' . $catalog->name;
-        $disk = $submission->disk ?? 'local';
+        $disk = $submission->disk ?? config('filesystems.default');
 
         $itemsQuery = CatalogItem::with([
             'commodityType',

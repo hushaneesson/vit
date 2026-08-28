@@ -49,12 +49,13 @@ class GenerateCatalogExportJob implements ShouldQueue
     public function handle(CatalogExportService $exportService): void
     {
         $submission = CatalogSubmission::findOrFail($this->catalogSubmissionId);
+        $disk = $submission->disk ?? config('filesystems.default');
 
         // Idempotency: if already completed and file exists, do not regenerate
         if (
             $submission->processing_status === 'completed' &&
             $submission->file_path &&
-            Storage::disk($submission->disk ?? 'local')->exists($submission->file_path)
+            Storage::disk($disk)->exists($submission->file_path)
         ) {
             return;
         }
@@ -68,7 +69,7 @@ class GenerateCatalogExportJob implements ShouldQueue
         try {
             $path = $exportService->generateFromSubmission($submission);
 
-            $fileSize = Storage::disk($submission->disk ?? 'local')->size($path);
+            $fileSize = Storage::disk($disk)->size($path);
 
             $submission->update([
                 'file_path' => $path,
