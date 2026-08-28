@@ -7,7 +7,6 @@ use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
-use Filament\Notifications\Notification;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
@@ -50,20 +49,14 @@ class UnitOfMeasuresTable
                     ->modalDescription('This will allow vendors to submit catalogs including this unit of measure.')
                     ->action(function (UnitOfMeasure $record): void {
                         if ($record->active) {
-                            Notification::make()
-                                ->title('Unit of measure is already approved.')
-                                ->warning()
-                                ->send();
+                            $this->getLivewire()->dispatch('notify', type: 'warning', message: 'Unit of measure is already approved.');
 
                             return;
                         }
 
                         $record->update(['active' => true]);
 
-                        Notification::make()
-                            ->title('Unit of measure approved.')
-                            ->success()
-                            ->send();
+                        $this->getLivewire()->dispatch('notify', type: 'success', message: 'Unit of measure approved.');
                     }),
 
                 EditAction::make(),

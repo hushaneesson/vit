@@ -113,13 +113,6 @@
         <!-- Main Content -->
         <main class="container px-4 py-8 mx-auto sm:px-6 lg:px-8">
 
-            @if (session('status'))
-                <div
-                    class="px-4 py-3 mb-5 text-sm border shadow-sm rounded-xl border-emerald-200 bg-emerald-50 text-emerald-700">
-                    {{ session('status') }}
-                </div>
-            @endif
-
             @if ($errors->any())
                 <div class="px-4 py-3 mb-5 text-sm text-red-800 border border-red-200 shadow-sm rounded-xl bg-red-50">
                     <ul class="list-disc list-inside">

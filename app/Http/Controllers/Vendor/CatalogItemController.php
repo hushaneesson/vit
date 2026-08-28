@@ -88,6 +88,9 @@ class CatalogItemController extends Controller
 
         return redirect()
             ->route('vendor.catalog.items', ['catalog' => $catalogId])
-            ->with('status', 'Catalog item deleted.');
+            ->with('notify', [
+                'type' => 'success',
+                'message' => 'Catalog item deleted.',
+            ]);
     }
 }

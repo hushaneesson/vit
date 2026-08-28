@@ -9,7 +9,6 @@ use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
-use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
@@ -276,10 +275,7 @@ class AvailabilitySettings extends Page implements HasForms
         });
 
 
-        Notification::make()
-            ->title('Availability saved')
-            ->success()
-            ->send();
+        $this->dispatch('notify', type: 'success', message: 'Availability saved');
     }
 
 

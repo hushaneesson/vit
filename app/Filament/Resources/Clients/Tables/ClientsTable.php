@@ -8,7 +8,6 @@ use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
-use Filament\Notifications\Notification;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
@@ -65,10 +64,7 @@ class ClientsTable
                         $token = $record->generateInvitationToken();
                         $record->notify(new ClientInvitationNotification($token));
 
-                        Notification::make()
-                            ->title('Invitation resent to ' . $record->email)
-                            ->success()
-                            ->send();
+                        $this->getLivewire()->dispatch('notify', type: 'success', message: 'Invitation resent to ' . $record->email);
                     }),
                 EditAction::make(),
             ])

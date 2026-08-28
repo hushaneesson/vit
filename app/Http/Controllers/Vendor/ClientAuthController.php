@@ -32,7 +32,10 @@ class ClientAuthController extends Controller
 
         return redirect()
             ->route('vendor.login')
-            ->with('status', 'Your account is now active. Enter your email below to receive a login code.');
+            ->with('notify', [
+                'type' => 'success',
+                'message' => 'Your account is now active. Enter your email below to receive a login code.',
+            ]);
     }
 
     public function showLoginForm()
@@ -59,7 +62,10 @@ class ClientAuthController extends Controller
 
         return redirect()
             ->route('vendor.login.otp', ['email' => $request->email])
-            ->with('status', 'If that email address is registered and active, a login code has been sent.');
+            ->with('notify', [
+                'type' => 'info',
+                'message' => 'If that email address is registered and active, a login code has been sent.',
+            ]);
     }
 
     public function showOtpForm(Request $request)

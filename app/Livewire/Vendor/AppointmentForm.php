@@ -241,6 +241,9 @@ class AppointmentForm extends Component
 
         return redirect()
             ->route('vendor.appointments.index')
-            ->with('status', 'Appointment booked successfully!');
+            ->with('notify', [
+                'type' => 'success',
+                'message' => 'Appointment booked successfully!',
+            ]);
     }
 }

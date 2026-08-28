@@ -8,7 +8,6 @@ use App\Models\User;
 use App\Notifications\ClientAppointmentCancelledNotification;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Textarea;
-use Filament\Notifications\Notification;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
@@ -114,10 +113,7 @@ class AppointmentsTable
                         }
 
 
-                        Notification::make()
-                            ->title('Appointment cancelled')
-                            ->success()
-                            ->send();
+                        $this->getLivewire()->dispatch('notify', type: 'success', message: 'Appointment cancelled');
                     }),
             ]);
     }
