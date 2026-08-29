@@ -1,22 +1,20 @@
-<div
-    x-data="{
-        toasts: [],
-        init() {
-            const seeded = @js(session('notify'));
+<div x-data="{
+    toasts: [],
+    init() {
+        const seeded = @js(session('notify'));
 
-            if (seeded && seeded.type && seeded.message) {
-                this.showToast(seeded.type, seeded.message);
-            }
-        },
-        showToast(type, message) {
-            const id = Date.now();
-
-            this.toasts.push({ id, type, message });
-
-            setTimeout(() => this.toasts = this.toasts.filter(t => t.id !== id), 5000);
+        if (seeded && seeded.type && seeded.message) {
+            this.showToast(seeded.type, seeded.message);
         }
-    }"
-    x-on:notify.window="showToast($event.detail.type, $event.detail.message)"
+    },
+    showToast(type, message) {
+        const id = Date.now();
+
+        this.toasts.push({ id, type, message });
+
+        setTimeout(() => this.toasts = this.toasts.filter(t => t.id !== id), 8000);
+    }
+}" x-on:notify.window="showToast($event.detail.type, $event.detail.message)"
     class="fixed z-[70] flex flex-col gap-2 top-4 right-4">
     <template x-for="toast in toasts" :key="toast.id">
         <div x-show="true" x-transition
@@ -46,7 +44,7 @@
                 <path stroke-linecap="round" stroke-linejoin="round"
                     d="M11.25 11.25l.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z" />
             </svg>
-            <span class="flex-1" x-text="toast.message"></span>
+            <span class="flex-1" x-html="toast.message"></span>
             <button @click="toasts = toasts.filter(t => t.id !== toast.id)"
                 class="shrink-0 opacity-70 hover:opacity-100">&times;</button>
         </div>
