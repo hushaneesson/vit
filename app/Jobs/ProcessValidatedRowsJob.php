@@ -6,6 +6,7 @@ use App\Enums\CatalogUploadStatus;
 use App\Models\CatalogItem;
 use App\Models\CatalogUpload;
 use App\Models\ClassificationType;
+use App\Models\ProductHierarchy;
 use App\Models\CountryCode;
 use App\Notifications\CatalogUploadValidationReportNotification;
 use App\Services\VitFieldDefinition;
@@ -39,6 +40,14 @@ class ProcessValidatedRowsJob implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 1;
+
+    /**
+     * Blocking error used when an upload row references a SKU that already
+     * belongs to a different catalog. SKU is globally unique and must never
+     * be moved between catalogs by an upload.
+     */
+    public const CROSS_CATALOG_SKU_ERROR =
+        'SKU already belongs to another catalog.';
 
     public function __construct(public int $catalogUploadId) {}
 
@@ -217,6 +226,7 @@ class ProcessValidatedRowsJob implements ShouldQueue
         $this->addCountryOfOriginClassification($attrs);
         $this->addUnspscClassification($attrs);
         $this->addMsdsClassification($attrs);
+        $this->addHierarchyClassification($attrs);
         $this->normalizeClassificationsAttribute($attrs);
 
         /*
@@ -233,6 +243,34 @@ class ProcessValidatedRowsJob implements ShouldQueue
             );
 
             if ($existing) {
+                /*
+                 * Cross-catalog SKU guard (safety net for the race window
+                 * between row validation and item processing). An upload
+                 * belonging to a different catalog must never update an
+                 * existing SKU, and an item's catalog_id must never be
+                 * reassigned by an upload.
+                 */
+                if ((int) $existing->catalog_id !== (int) $upload->catalog_id) {
+                    $row->update([
+                        'status' => 'invalid',
+                        'errors' => [
+                            'errors' => [
+                                [
+                                    'field_key' => 'dealer_sku',
+                                    'message' =>
+                                        self::CROSS_CATALOG_SKU_ERROR,
+                                ],
+                            ],
+                        ],
+                    ]);
+
+                    return [
+                        'created' => 0,
+                        'updated' => 0,
+                        'unchanged' => 0,
+                    ];
+                }
+
                 return $this->updateExistingItem(
                     $existing,
                     $updateAttrs,
@@ -246,7 +284,9 @@ class ProcessValidatedRowsJob implements ShouldQueue
             $attrs,
             $updateAttrs,
             $vendor->id,
-            $sellerSku
+            $sellerSku,
+            (int) $upload->catalog_id,
+            $row
         );
     }
 
@@ -669,6 +709,39 @@ class ProcessValidatedRowsJob implements ShouldQueue
     }
 
     /**
+     * Resolve the exported hierarchy_number back to the real hierarchy FK.
+     *
+     * catalog_items.hierarchy stores a ProductHierarchy id, but the VIT export
+     * writes that row's hierarchy_number (see VitFieldDefinition::hierarchy's
+     * model_attribute). Reimport must reverse that lookup, not write the raw
+     * hierarchy_number straight into the id column.
+     */
+    private function addHierarchyClassification(array &$attrs): void
+    {
+        if (!array_key_exists('hierarchy', $attrs)) {
+            return;
+        }
+
+        $hierarchyNumber = $attrs['hierarchy'];
+
+        unset($attrs['hierarchy']);
+
+        if ($hierarchyNumber === null || $hierarchyNumber === '') {
+            return;
+        }
+
+        $hierarchy = ProductHierarchy::query()
+            ->where('hierarchy_number', trim((string) $hierarchyNumber))
+            ->first();
+
+        if ($hierarchy === null) {
+            return;
+        }
+
+        $attrs['hierarchy'] = $hierarchy->id;
+    }
+
+    /**
      * Safely retrieve the classifications currently accumulated in attrs.
      */
     private function getClassificationsArray(array $attrs): array
@@ -786,15 +859,19 @@ class ProcessValidatedRowsJob implements ShouldQueue
      * Create a new CatalogItem.
      *
      * If the unique dealer SKU constraint is hit, re-fetch the existing
-     * item and update it instead.
+     * item and update it instead — but only when the existing item belongs
+     * to the upload's catalog. A cross-catalog duplicate (concurrent upload
+     * race) is rejected and the row is marked invalid instead.
      *
-     * @return array{created: int, updated: int, unchanged: int}
+     * @return array{created: int, updated: int, unchanged: int, cross_catalog_rejected?: bool}
      */
     private function createItem(
         array $attrs,
         array $updateAttrs,
         $vendorId,
-        ?string $sellerSku
+        ?string $sellerSku,
+        ?int $expectedCatalogId = null,
+        $row = null
     ): array {
         $attrs['id'] = (string) Str::uuid();
         $attrs['created_at'] = now();
@@ -820,6 +897,38 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
             if (!$existing) {
                 throw $e;
+            }
+
+            /*
+             * Cross-catalog SKU guard for the concurrent-upload race: the
+             * item was created in another catalog between validation and
+             * persistence. Never reassign its catalog_id or update it.
+             */
+            if (
+                $expectedCatalogId !== null
+                && (int) $existing->catalog_id !== $expectedCatalogId
+            ) {
+                if ($row) {
+                    $row->update([
+                        'status' => 'invalid',
+                        'errors' => [
+                            'errors' => [
+                                [
+                                    'field_key' => 'dealer_sku',
+                                    'message' =>
+                                        self::CROSS_CATALOG_SKU_ERROR,
+                                ],
+                            ],
+                        ],
+                    ]);
+                }
+
+                return [
+                    'created' => 0,
+                    'updated' => 0,
+                    'unchanged' => 0,
+                    'cross_catalog_rejected' => true,
+                ];
             }
 
             $updateAttrs['updated_at'] = now();

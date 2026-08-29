@@ -90,6 +90,25 @@ namespace App\Services;
 class VitFieldDefinition
 {
     /**
+     * The version of the generated VIT export structure (as defined by
+     * exportableFields() and the vit_csv_column headers below).
+     *
+     * Bump this whenever the set/order/text of exportableFields() changes so
+     * that stale re-uploads of older VIT exports fall back to the normal
+     * mapper instead of being auto-mapped against a mismatched structure.
+     */
+    public const VIT_EXPORT_VERSION = 1;
+
+    /**
+     * Custom document-property marker written into generated VIT workbooks by
+     * CatalogExportService. Detected on re-upload to decide whether a file is a
+     * VIT-generated workbook eligible for automatic column mapping.
+     */
+    public const VIT_EXPORT_MARKER_KEY = 'vit_export_type';
+    public const VIT_EXPORT_MARKER_VALUE = 'vit_catalog';
+    public const VIT_EXPORT_VERSION_KEY = 'vit_export_version';
+
+    /**
      * Process-wide cache of the built collection, populated on first call to
      * all(). The DEFINITIONS constant is immutable, so this cache is safe
      * and eliminates repeated collection construction in hot loops (e.g.
@@ -895,7 +914,7 @@ class VitFieldDefinition
             'web_app_label' => 'Shipping Lead Time',
             'description' => 'Number of days needed to fulfill and ship the order',
             'requirement_type' => 'optional',
-            'field_type' => 'number',
+            'field_type' => 'text',
             'is_system_derived' => false,
             'system_source' => null,
             'is_multi_value' => false,

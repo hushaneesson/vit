@@ -3,12 +3,14 @@
 namespace App\Jobs;
 
 use App\Enums\CatalogUploadStatus;
+use App\Models\CatalogItem;
 use App\Models\CatalogUpload;
 use App\Models\CatalogUploadRow;
 use App\Models\CommodityType;
 use App\Models\UnitOfMeasure;
 use App\Services\CatalogRowValidator;
 use App\Services\VitFieldDefinition;
+use App\Services\WeightUnitConverter;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -39,7 +41,10 @@ class ProcessCatalogUploadJob implements ShouldQueue
 
     private const READ_CHUNK_SIZE = 500;
 
-    public function __construct(public int $catalogUploadId) {}
+    public function __construct(
+        public int $catalogUploadId,
+        public bool $isVitFileImport = false
+    ) {}
 
     public function handle(CatalogRowValidator $validator): void
     {
@@ -149,6 +154,28 @@ class ProcessCatalogUploadJob implements ShouldQueue
             $upload->file_type
         );
 
+        /*
+         * Whether this upload was detected as a genuine VIT-generated export.
+         * The single detection happens in VendorCatalogUpload (via
+         * VitExportFileDetector::detect) and is carried into the job so that
+         * already-normalized VIT values are not transformed again (e.g. item
+         * weight is already pounds in a VIT file).
+         */
+
+        // Weight unit is mapper configuration carried on the item_weight
+        // mapping row. Default to pounds when not present.
+        $weightUnit = WeightUnitConverter::DEFAULT_UNIT;
+
+        $weightMapping = $upload->columnMappings
+            ->firstWhere('field_key', 'item_weight_in_pounds');
+
+        if (
+            $weightMapping
+            && ! empty($weightMapping->source_separator)
+        ) {
+            $weightUnit = (string) $weightMapping->source_separator;
+        }
+
         return [
             'columnToFieldKey' => $columnToFieldKey,
             'activeFields' => $activeFields,
@@ -159,6 +186,8 @@ class ProcessCatalogUploadJob implements ShouldQueue
             'reader' => $reader,
             'allowedColumns' => $allowedColumns,
             'totalRows' => $totalRows,
+            'is_vit_export' => $this->isVitFileImport,
+            'weight_unit' => $weightUnit,
         ];
     }
 
@@ -380,7 +409,9 @@ class ProcessCatalogUploadJob implements ShouldQueue
                     $context['activeFields'],
                     $upload->columnMappings,
                     $context['rangeFieldKeys'],
-                    $context['lookupMaps']
+                    $context['lookupMaps'],
+                    $context['is_vit_export'],
+                    $context['weight_unit']
                 );
 
                 $result = $this->validateMappedRow(
@@ -575,7 +606,9 @@ class ProcessCatalogUploadJob implements ShouldQueue
                     $context['activeFields'],
                     $upload->columnMappings,
                     $context['rangeFieldKeys'],
-                    $context['lookupMaps']
+                    $context['lookupMaps'],
+                    $context['is_vit_export'],
+                    $context['weight_unit']
                 );
 
                 $result = $this->validateMappedRow(
@@ -696,6 +729,29 @@ class ProcessCatalogUploadJob implements ShouldQueue
             ? 'valid'
             : 'invalid';
 
+        /*
+         * Cross-catalog SKU guard.
+         *
+         * SKU is the single globally unique identifier for a CatalogItem.
+         * An upload belonging to a different catalog must never update an
+         * existing SKU (and therefore never move it between catalogs).
+         */
+        if (
+            $status === 'valid'
+            && $this->skuBelongsToAnotherCatalog(
+                $upload,
+                $mappedData['dealer_sku'] ?? null
+            )
+        ) {
+            $blockingErrors[] = [
+                'field_key' => 'dealer_sku',
+                'message' =>
+                    ProcessValidatedRowsJob::CROSS_CATALOG_SKU_ERROR,
+            ];
+
+            $status = 'invalid';
+        }
+
         if ($status === 'invalid') {
             Log::info(
                 'ProcessCatalogUploadJob: validation failed for row',
@@ -727,6 +783,24 @@ class ProcessCatalogUploadJob implements ShouldQueue
             'errors' => $blockingErrors,
             'warnings' => $warnings,
         ];
+    }
+
+    /**
+     * Determine whether the row's SKU already exists on an item that
+     * belongs to a different catalog than the upload.
+     */
+    private function skuBelongsToAnotherCatalog(
+        CatalogUpload $upload,
+        $dealerSku
+    ): bool {
+        if ($dealerSku === null || trim((string) $dealerSku) === '') {
+            return false;
+        }
+
+        return CatalogItem::where('vendor_id', $upload->vendor_id)
+            ->where('dealer_sku', trim((string) $dealerSku))
+            ->where('catalog_id', '!=', $upload->catalog_id)
+            ->exists();
     }
 
     /**
@@ -907,7 +981,9 @@ class ProcessCatalogUploadJob implements ShouldQueue
         $activeFields,
         $columnMappings,
         array $rangeFieldKeys,
-        array $lookupMaps = []
+        array $lookupMaps = [],
+        bool $isVitFileImport = false,
+        string $weightUnit = WeightUnitConverter::DEFAULT_UNIT
     ): array {
         $mappedData = [];
         $rawData = [];
@@ -990,9 +1066,107 @@ class ProcessCatalogUploadJob implements ShouldQueue
                 );
         }
 
+        $this->applyVitAwareTransforms(
+            $mappedData,
+            $isVitFileImport,
+            $weightUnit
+        );
+
         return [
             $mappedData,
             $rawData,
+        ];
+    }
+
+    /**
+     * Apply import transforms that depend on VIT detection / mapper
+     * configuration. Runs after mapping and before validation, so validated
+     * values are exactly what gets persisted.
+     *
+     * Normal (non-VIT) uploads:
+     *   - item_weight is converted from the mapper's selected unit to pounds
+     *     (the only unit the database stores).
+     *
+     * Verified VIT re-imports:
+     *   - item weight is already pounds per the VIT spec -> NO conversion.
+     *   - quantity_per_unit was appended to the name by the exporter
+     *     ("{name}, {qty} {unit_word}/{uom}") -> parse it back out so the
+     *     name stays clean and quantity_per_unit round-trips.
+     */
+    private function applyVitAwareTransforms(
+        array &$mappedData,
+        bool $isVitFileImport,
+        string $weightUnit
+    ): void {
+        if (
+            array_key_exists('item_weight_in_pounds', $mappedData)
+            && ! $isVitFileImport
+            && $weightUnit !== WeightUnitConverter::DEFAULT_UNIT
+            && is_numeric($mappedData['item_weight_in_pounds'])
+        ) {
+            $mappedData['item_weight_in_pounds'] =
+                WeightUnitConverter::toPounds(
+                    (float) $mappedData['item_weight_in_pounds'],
+                    $weightUnit
+                );
+        }
+
+        if (
+            $isVitFileImport
+            && isset($mappedData['short_description'])
+            && is_string($mappedData['short_description'])
+            && $mappedData['short_description'] !== ''
+        ) {
+            $parsed = $this->parseAppendedQuantityPerUnit(
+                $mappedData['short_description']
+            );
+
+            if ($parsed !== null) {
+                [$name, $quantity] = $parsed;
+
+                if ($name !== '') {
+                    $mappedData['short_description'] = $name;
+                }
+
+                if (
+                    ! array_key_exists('quantity_per_unit', $mappedData)
+                    || $mappedData['quantity_per_unit'] === null
+                    || $mappedData['quantity_per_unit'] === ''
+                ) {
+                    $mappedData['quantity_per_unit'] = $quantity;
+                }
+            }
+        }
+    }
+
+    /**
+     * Split the quantity suffix the exporter appends onto the name field for
+     * VIT exports (see CatalogExportService's appended-fields handling):
+     *
+     *   "{name}, {quantity} {unit_word}/{uom}"
+     *   "{name}, {quantity} {uom}"        (no unit_word)
+     *   "{name}, {quantity}"              (neither)
+     *
+     * Returns [cleanName, quantity] or null when the value does not match
+     * the exported format.
+     *
+     * @return array{0: string, 1: string}|null
+     */
+    private function parseAppendedQuantityPerUnit(string $value): ?array
+    {
+        if (
+            ! preg_match(
+                '/^(?<name>.+),\s*(?<qty>\d+(?:\.\d+)?)\s*(?<word>[^,\/]*)(?:\/(?<uom>[^,]*))?$/u',
+                $value,
+                $matches
+            )
+        ) {
+            return null;
+        }
+
+        return [
+            trim($matches['name']),
+            $matches['qty'],
         ];
     }
 

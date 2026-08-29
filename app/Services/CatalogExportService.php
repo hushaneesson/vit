@@ -43,6 +43,7 @@ class CatalogExportService
         $fields = VitFieldDefinition::exportableFields();
 
         $spreadsheet = new Spreadsheet();
+        $this->applyVitExportMarker($spreadsheet);
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Catalog');
 
@@ -85,6 +86,7 @@ class CatalogExportService
         $fields = VitFieldDefinition::exportableFields();
 
         $spreadsheet = new Spreadsheet();
+        $this->applyVitExportMarker($spreadsheet);
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Catalog');
 
@@ -121,21 +123,41 @@ class CatalogExportService
     }
 
     /**
-     * Generate Excel file from all current CatalogItems belonging to the
-     * submission's vendor.
-     *
-     * @return string Relative storage path to the generated .xlsx
+     * Stamp the workbook with custom document properties that mark it as a
+     * VIT-generated catalog export. On re-upload, CatalogFileInspectionService
+     * / the re-upload detector reads these to decide whether the file is
+     * eligible for automatic column mapping.
      */
+    private function applyVitExportMarker(Spreadsheet $spreadsheet): void
+    {
+        $properties = $spreadsheet->getProperties();
+
+        $properties->setCustomProperty(
+            VitFieldDefinition::VIT_EXPORT_MARKER_KEY,
+            VitFieldDefinition::VIT_EXPORT_MARKER_VALUE,
+            's'
+        );
+
+        $properties->setCustomProperty(
+            VitFieldDefinition::VIT_EXPORT_VERSION_KEY,
+            VitFieldDefinition::VIT_EXPORT_VERSION,
+            'i'
+        );
+    }
+
     public function generateFromSubmission(
         CatalogSubmission $submission
     ): string {
         $vendor = $submission->vendor;
 
-        $vendorName = is_string($vendor->name)
-            ? $vendor->name
-            : 'Unknown';
+        $vendorName = $this->resolveVendorFolderName($vendor);
 
-        $catalogName = $vendorName;
+        $catalogName = $submission->catalog?->name;
+
+        if (! is_string($catalogName) || $catalogName === '') {
+            $catalogName = $vendorName;
+        }
+
         $disk = $submission->disk ?? 'local';
 
         $itemsQuery = CatalogItem::with([
@@ -232,16 +254,57 @@ class CatalogExportService
     }
 
     /**
+     * Resolve the vendor name to use for the export folder, falling back to
+     * the vendor id when the name is missing/blank so folders never collide
+     * under a generic placeholder like "Unknown".
+     */
+    private function resolveVendorFolderName(Vendor $vendor): string
+    {
+        if (is_string($vendor->name) && trim($vendor->name) !== '') {
+            return $vendor->name;
+        }
+
+        return (string) $vendor->id;
+    }
+
+    /**
+     * Sanitize a vendor or catalog name so it is safe to use as a
+     * filesystem path / file-name component.
+     */
+    private function sanitizeNameComponent(string $name): string
+    {
+        $name = preg_replace('/[\\\\\/:*?"<>|]/', '', $name);
+        $name = preg_replace('/\s+/', ' ', trim($name));
+
+        // Windows silently strips trailing dots/spaces from path components,
+        // which desyncs the path PHP thinks it wrote from what's actually on
+        // disk. Strip them ourselves so both sides agree.
+        $name = rtrim($name, " .");
+
+        return $name !== '' ? $name : 'Unnamed';
+    }
+
+    /**
      * Build the storage path for the generated catalog export.
+     *
+     * Files are stored inside a folder named after the vendor, with a
+     * filename of "{vendor} - {catalog} - {human-readable timestamp}.xlsx".
      */
     private function buildExportPath(
         Vendor $vendor,
         string $catalogName
     ): string {
-        return "exports/vendor-{$vendor->id}/"
-            . "{$catalogName}-"
-            . now()->format('Ymd-His')
-            . '.xlsx';
+        $vendorName = $this->sanitizeNameComponent(
+            $this->resolveVendorFolderName($vendor)
+        );
+        $catalogName = $this->sanitizeNameComponent($catalogName);
+
+        // Human-readable timestamp; colons are replaced with hyphens
+        // because they are not valid in Windows file names.
+        $timestamp = now()->format('F j, Y g-i A');
+
+        return "exports/{$vendorName}/"
+            . "{$vendorName} - {$catalogName} - {$timestamp}.xlsx";
     }
 
     /**
@@ -520,6 +583,12 @@ class CatalogExportService
                 ? 'TRUE'
                 : 'FALSE';
         }
+
+        /*
+         * lead_time is stored as a string in the application (matching the
+         * Catalog Item form's string buckets such as "0-3 days"), so it is
+         * exported exactly as stored and validated as text on re-import.
+         */
 
         return (string) $rawValue;
     }
