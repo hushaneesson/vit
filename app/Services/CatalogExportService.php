@@ -8,6 +8,7 @@ use App\Models\Vendor;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\IOFactory;
@@ -163,6 +164,7 @@ class CatalogExportService
         // being flagged as "modified" by the stamp itself.
         DB::table('catalog_items')
             ->where('vendor_id', $vendor->id)
+            ->where('catalog_id', $submission->catalog_id)
             ->whereIn('status', ['acceptable', 'excellent'])
             ->whereNull('last_submitted_at')
             ->update(['last_submitted_at' => now()]);
@@ -252,7 +254,10 @@ class CatalogExportService
         Vendor $vendor,
         string $catalogName
     ): string {
-        return "inbound/{$vendor->name}/"
+
+        $folderName = Str::slug($vendor->name);
+
+        return "inbound/{$folderName}/"
             . "{$catalogName}-"
             . now()->format('Ymd-His')
             . '.xlsx';

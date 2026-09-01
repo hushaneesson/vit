@@ -44,16 +44,16 @@ class CatalogSubmissionButton extends Component
         // the joined row null.
         $canSubmit = CatalogItem::leftJoin('commodity_types', 'catalog_items.category', '=', 'commodity_types.id')
             ->leftJoin('product_hierarchies', 'catalog_items.hierarchy', '=', 'product_hierarchies.id')
-            ->when($this->catalogId, fn ($q) => $q->where('catalog_items.catalog_id', $this->catalogId))
+            ->when($this->catalogId, fn($q) => $q->where('catalog_items.catalog_id', $this->catalogId))
             ->where('commodity_types.approved', false)
             ->whereNull('product_hierarchies.id')
             ->count();
 
         $total = CatalogItem::where('vendor_id', $client->vendor_id)
-            ->when($this->catalogId, fn ($q) => $q->where('catalog_id', $this->catalogId))
+            ->when($this->catalogId, fn($q) => $q->where('catalog_id', $this->catalogId))
             ->count();
         $complete = CatalogItem::where('vendor_id', $client->vendor_id)
-            ->when($this->catalogId, fn ($q) => $q->where('catalog_id', $this->catalogId))
+            ->when($this->catalogId, fn($q) => $q->where('catalog_id', $this->catalogId))
             ->whereIn('status', ['acceptable', 'excellent'])
             ->count();
         $incomplete = $total - $complete;
@@ -127,10 +127,24 @@ class CatalogSubmissionButton extends Component
 
         $vendorId = $client->vendor_id;
 
+        if (! $this->catalogId) {
+            $this->dispatch(
+                'notify',
+                type: 'error',
+                message: 'Unable to identify the current catalog.'
+            );
+
+            return;
+        }
+
         try {
-            // Count only this catalog's items (not the whole vendor).
-            $totalItems = CatalogItem::where('vendor_id', $vendorId)
-                ->when($this->catalogId, fn ($q) => $q->where('catalog_id', $this->catalogId))
+            // Count only this catalog's items (not the whole vendor) and was submitted for this catalog
+            // this ensures only the relevant number of items are counted for the submission and prevents cross-catalog submissions.
+            $totalItems = CatalogItem::query()
+                ->where('vendor_id', $vendorId)
+                ->where('catalog_id', $this->catalogId)
+                ->whereIn('status', ['acceptable', 'excellent'])
+                ->whereNull('last_submitted_at')
                 ->count();
 
             if ($totalItems === 0) {
@@ -141,7 +155,7 @@ class CatalogSubmissionButton extends Component
             // Pending check is scoped to the current catalog so a pending
             // submission for another catalog does not block this one.
             $pending = CatalogSubmission::where('vendor_id', $vendorId)
-                ->when($this->catalogId, fn ($q) => $q->where('catalog_id', $this->catalogId))
+                ->when($this->catalogId, fn($q) => $q->where('catalog_id', $this->catalogId))
                 ->whereIn('status', [
                     CatalogSubmissionStatus::ReviewRequested,
                     CatalogSubmissionStatus::ReadyForReview,
