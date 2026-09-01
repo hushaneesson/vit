@@ -4,7 +4,7 @@ namespace App\Jobs;
 
 use App\Enums\CatalogSubmissionStatus;
 use App\Models\CatalogSubmission;
-use App\Services\CatalogExportService;
+use App\Services\Catalog\CatalogExportService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;

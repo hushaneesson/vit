@@ -7,7 +7,8 @@ use App\Jobs\ProcessCatalogUploadJob;
 use App\Models\CatalogUpload;
 use App\Models\CatalogUploadColumnMapping;
 use App\Models\VendorMappingTemplate;
-use App\Services\CatalogFileInspectionService;
+use App\Services\Catalog\CatalogFileInspectionService;
+use App\Services\VitExportFileDetector;
 use App\Services\VitFieldDefinition;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -43,6 +44,13 @@ class VendorCatalogUpload extends Component
 
     // field_key => separator for multi-value fields
     public array $separators = [];
+
+    /**
+     * Mapper-level unit selector for the item_weight_in_pounds field. Stored
+     * on the item_weight mapping row's source_separator column as mapper
+     * configuration (matches the existing per-field config pattern).
+     */
+    public string $weightUnit = 'lb';
 
     // field_key => start/end column index for multi-value attribute ranges
     public array $rangeStarts = [];
@@ -83,6 +91,16 @@ class VendorCatalogUpload extends Component
     public function catalogFields()
     {
         return VitFieldDefinition::frontendVisible();
+    }
+
+    /**
+     * Weight units available for the item_weight_in_pounds mapper setting.
+     *
+     * @return array<int, string>
+     */
+    public function weightUnits(): array
+    {
+        return \App\Services\WeightUnitConverter::supportedUnits();
     }
 
     public function mappedFieldKeys()
@@ -190,6 +208,55 @@ class VendorCatalogUpload extends Component
         $this->catalogUploadId = $upload->id;
         $this->columns = $inspection['columns'];
         $this->sampleRows = $inspection['sample_rows'];
+
+        // VIT re-upload fast path: if the uploaded workbook is a valid
+        // VIT-generated export (marker + version + headers all verified),
+        // auto-map the vendor-importable fields and go straight to
+        // processing, bypassing the manual mapper. System-derived /
+        // export-only columns are intentionally left unmapped — the import
+        // pipeline ignores them and the database stays the source of truth.
+        try {
+            $detection = app(VitExportFileDetector::class)
+                ->detect(self::DISK, $storedPath, $fileType, $inspection['columns']);
+        } catch (\Throwable $e) {
+            $detection = null;
+        }
+
+        if ($detection !== null) {
+            DB::transaction(function () use ($upload, $detection) {
+                $upload->columnMappings()->delete();
+
+                foreach ($detection['mappings'] as $mapping) {
+                    CatalogUploadColumnMapping::create([
+                        'catalog_upload_id' => $upload->id,
+                        'field_key' => $mapping['field_key'],
+                        'column_index' => $mapping['column_index'],
+                        'source_column_name' => $mapping['source_column_name'],
+                        'source_separator' => $mapping['source_separator'],
+                    ]);
+                }
+
+                $upload->update([
+                    'mapping_confirmed_at' => now(),
+                    'status' => CatalogUploadStatus::Queued,
+                ]);
+            });
+
+            // Detected VIT export: carry the single detection result into the
+            // job so VIT values are not re-transformed (e.g. weight).
+            ProcessCatalogUploadJob::dispatch($upload->id, true);
+
+            $this->step = 'processing';
+
+            $this->dispatch(
+                'notify',
+                type: 'success',
+                message: 'VIT file detected!<br>Your columns were mapped automatically, and the catalog import has started.'
+            );
+
+
+            return;
+        }
 
         $this->currentFileSignature = $inspector->computeFileSignature(self::DISK, $storedPath, $fileType);
 
@@ -510,6 +577,14 @@ class VendorCatalogUpload extends Component
                     $field = VitFieldDefinition::find($fieldKey);
                     $sourceSeparator = ($field && $field->is_multi_value) ? ($this->separators[$fieldKey] ?? null) : null;
 
+                    // Item weight: the mapper's selected unit is stored as
+                    // per-field mapping configuration on the mapping row. Its
+                    // source_separator is otherwise always null (scalar field),
+                    // so this reuses the existing config slot without a DB change.
+                    if ($fieldKey === 'item_weight_in_pounds') {
+                        $sourceSeparator = $this->weightUnit ?: \App\Services\WeightUnitConverter::DEFAULT_UNIT;
+                    }
+
                     CatalogUploadColumnMapping::create([
                         'catalog_upload_id' => $upload->id,
                         'field_key' => $fieldKey,
@@ -649,7 +724,7 @@ class VendorCatalogUpload extends Component
 
     public function startOver(): void
     {
-        $this->reset(['file', 'catalogUploadId', 'columns', 'sampleRows', 'mapping', 'suggestedIndexes', 'suggestionsFinalized', 'currentFileSignature', 'rangeStarts', 'rangeEnds', 'separators']);
+        $this->reset(['file', 'catalogUploadId', 'columns', 'sampleRows', 'mapping', 'suggestedIndexes', 'suggestionsFinalized', 'currentFileSignature', 'rangeStarts', 'rangeEnds', 'separators', 'weightUnit']);
         $this->progress = ['status' => null, 'total_rows' => 0, 'success_rows' => 0, 'created_rows' => 0, 'updated_rows' => 0, 'unchanged_rows' => 0, 'invalid_rows' => 0, 'failure_reason' => null];
         $this->step = 'upload';
     }

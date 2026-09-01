@@ -593,6 +593,20 @@
                                                         </p>
                                                     @endif
                                                 @endif
+
+                                                {{-- Item weight unit selector (mapper configuration) --}}
+                                                @if ($field->field_key === 'item_weight_in_pounds' && $currentSelection !== null)
+                                                    <div class="flex items-center gap-2">
+                                                        <label class="text-xs text-slate-500 shrink-0">Unit:</label>
+                                                        <select wire:model.live="weightUnit"
+                                                            class="w-28 px-2 py-1.5 text-sm bg-white border rounded-lg border-slate-300 focus:border-slate-500 focus:ring-1 focus:ring-slate-500">
+                                                            @foreach (\App\Services\WeightUnitConverter::supportedUnits() as $unit)
+                                                                <option value="{{ $unit }}">
+                                                                    {{ $unit }}</option>
+                                                            @endforeach
+                                                        </select>
+                                                    </div>
+                                                @endif
                                             </div>
                                         @endif
                                     </td>

@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Services;
+namespace App\Services\Catalog;
 
 use Illuminate\Support\Facades\Storage;
 use PhpOffice\PhpSpreadsheet\IOFactory;

@@ -1,10 +1,11 @@
 <?php
 
-namespace App\Services;
+namespace App\Services\Catalog;
 
 use App\Models\CatalogItem;
 use App\Models\CatalogSubmission;
 use App\Models\Vendor;
+use App\Services\VitFieldDefinition;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -45,6 +46,8 @@ class CatalogExportService
         $fields = VitFieldDefinition::exportableFields();
 
         $spreadsheet = new Spreadsheet();
+        $this->applyVitExportMarker($spreadsheet);
+
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Catalog');
 
@@ -85,6 +88,8 @@ class CatalogExportService
         string $disk = 'local'
     ): string {
         $fields = VitFieldDefinition::exportableFields();
+
+        $this->applyVitExportMarker($spreadsheet);
 
         $spreadsheet = new Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
@@ -261,6 +266,29 @@ class CatalogExportService
             . "{$catalogName}-"
             . now()->format('Ymd-His')
             . '.xlsx';
+    }
+
+    /**
+     * Stamp the workbook with custom document properties that mark it as a
+     * VIT-generated catalog export. On re-upload, the re-upload detector
+     * (VitExportFileDetector) reads these to decide whether the file is
+     * eligible for automatic column mapping.
+     */
+    private function applyVitExportMarker(Spreadsheet $spreadsheet): void
+    {
+        $properties = $spreadsheet->getProperties();
+
+        $properties->setCustomProperty(
+            VitFieldDefinition::VIT_EXPORT_MARKER_KEY,
+            VitFieldDefinition::VIT_EXPORT_MARKER_VALUE,
+            's'
+        );
+
+        $properties->setCustomProperty(
+            VitFieldDefinition::VIT_EXPORT_VERSION_KEY,
+            VitFieldDefinition::VIT_EXPORT_VERSION,
+            'i'
+        );
     }
 
     /**

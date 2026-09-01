@@ -74,6 +74,25 @@ namespace App\Services;
 class VitFieldDefinition
 {
     /**
+     * The version of the generated VIT export structure (as defined by
+     * exportableFields() and the vit_csv_column headers below).
+     *
+     * Bump this whenever the set/order/text of exportableFields() changes so
+     * that stale re-uploads of older VIT exports fall back to the normal
+     * mapper instead of being auto-mapped against a mismatched structure.
+     */
+    public const VIT_EXPORT_VERSION = 1;
+
+    /**
+     * Custom document-property marker written into generated VIT workbooks by
+     * CatalogExportService. Detected on re-upload to decide whether a file is a
+     * VIT-generated workbook eligible for automatic column mapping.
+     */
+    public const VIT_EXPORT_MARKER_KEY = 'vit_export_type';
+    public const VIT_EXPORT_MARKER_VALUE = 'vit_catalog';
+    public const VIT_EXPORT_VERSION_KEY = 'vit_export_version';
+
+    /**
      * Process-wide cache of the built collection, populated on first call to
      * all(). The DEFINITIONS constant is immutable, so this cache is safe
      * and eliminates repeated collection construction in hot loops (e.g.
@@ -226,7 +245,7 @@ class VitFieldDefinition
         // NEW: was missing entirely. Single SKU value, "as applicable".
         ['field_key' => 'replacement_sku', 'web_app_label' => 'Replacement Part Number', 'description' => 'SKU of the replacement product, if available', 'requirement_type' => 'optional', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => true, 'join_separator' => ',', 'max_length' => 255, 'conditional_on_field' => 'discontinued', 'conditional_on_value' => 'TRUE', 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'replacement Sku', 'model_attribute' => null, 'sort_order' => 280],
 
-        ['field_key' => 'lead_time', 'web_app_label' => 'Shipping Lead Time', 'description' => 'Number of days needed to fulfill and ship the order', 'requirement_type' => 'optional', 'field_type' => 'number', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => null, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'lead_time', 'model_attribute' => 'lead_time', 'sort_order' => 290],
+        ['field_key' => 'lead_time', 'web_app_label' => 'Shipping Lead Time', 'description' => 'Number of days needed to fulfill and ship the order', 'requirement_type' => 'optional', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => null, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => false, 'vit_csv_column' => 'lead_time', 'model_attribute' => 'lead_time', 'sort_order' => 290],
 
         ['field_key' => 'availability', 'web_app_label' => 'Availability', 'description' => 'Current stock status, such as In Stock or Out of Stock', 'requirement_type' => 'optional', 'field_type' => 'text', 'is_system_derived' => false, 'system_source' => null, 'is_multi_value' => false, 'join_separator' => null, 'max_length' => 255, 'conditional_on_field' => null, 'conditional_on_value' => null, 'packs_into_field' => null, 'packs_into_key' => null, 'append_to_field' => null, 'shown_on_frontend' => true, 'vit_csv_column' => 'availability', 'model_attribute' => 'availability', 'sort_order' => 300],
     ];
