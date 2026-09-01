@@ -179,8 +179,12 @@ class CatalogItemForm extends Component
     #[Computed]
     public function hierarchyOptions()
     {
+        // Leaf nodes only, so a vendor can never pick a level 1/2 category
+        // that has deeper children still available under it. Level 3 leaves
+        // are listed first since they're the preferred, most specific choice.
         return ProductHierarchy::query()
-            ->where('level', 3)
+            ->leaves()
+            ->orderByDesc('level')
             ->orderBy('name')
             ->get();
     }
@@ -236,7 +240,7 @@ class CatalogItemForm extends Component
     }
 
     #[On('option-selected')]
-    public function optionSelected($option)
+    public function optionSelected($option = null)
     {
         if (isset($option['default_value']) && isset($option['index'])) {
             $this->classifications[$option['index']][$option['value']] = $option['default_value'];
@@ -608,7 +612,13 @@ class CatalogItemForm extends Component
             'manufacturerSku' => ['nullable', 'string', 'max:255'],
 
             'productCategory' => ['required', Rule::exists('commodity_types', 'id')],
-            'hierarchy' => ['required', Rule::exists('product_hierarchies', 'id')->where('level', 3)],
+            'hierarchy' => [
+                'required',
+                Rule::exists('product_hierarchies', 'id')->whereNotIn(
+                    'id',
+                    ProductHierarchy::query()->whereNotNull('parent_id')->select('parent_id')
+                ),
+            ],
 
             'description' => ['required', 'string', 'max:4000'],
             'unitOfMeasure' => ['required'],

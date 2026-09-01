@@ -37,9 +37,13 @@
 
                         const option = this.tomSelectInstance.options[val];
 
-                        this.$dispatch('option-selected', {
-                            option: option
-                        });
+                        // Skip the event entirely when cleared (val === ''), otherwise
+                        // the payload serializes to {} and Livewire can't resolve $option.
+                        if (option) {
+                            this.$dispatch('option-selected', {
+                                option: option
+                            });
+                        }
                     },
                     onOptionAdd: (value, data) => {
                         // dispatch to Livewire so you can persist the new option
