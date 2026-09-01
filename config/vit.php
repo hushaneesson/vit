@@ -47,4 +47,7 @@ return [
         'image_size' => (int) env('VIT_EXCEL_IMAGE_SIZE', 400), // px, square
         'image_padding' => (int) env('VIT_EXCEL_IMAGE_PADDING', 8), // px between stacked images
     ],
+
+
+    'image_link' => 'https://deky7bh3zxkqj.cloudfront.net/All_Images/'
 ];

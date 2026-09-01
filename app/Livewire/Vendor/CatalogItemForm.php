@@ -73,8 +73,8 @@ class CatalogItemForm extends Component
     public array $searchTerms = [''];
     public array $sellingPoints = [''];
 
-    // Images
-    public string $imageInputMode = 'url';
+    // Images — existing uploads, pending new uploads, and URL entries all
+    // share a single 5-image cap; none of them clear the others.
     public array $newImages = [];
     public array $existingImages = [];
     public array $imageUrls = [''];
@@ -145,12 +145,6 @@ class CatalogItemForm extends Component
         $this->imageUrls = is_array($catalogItem->images) && $catalogItem->images !== []
             ? array_values($catalogItem->images)
             : [''];
-
-        if ($this->existingImages !== []) {
-            $this->imageInputMode = 'upload';
-        } elseif ($this->normalizedImageUrls() !== []) {
-            $this->imageInputMode = 'url';
-        }
     }
 
     #[Computed]
@@ -336,28 +330,18 @@ class CatalogItemForm extends Component
         $this->existingImages = collect($this->existingImages)->reject(fn($i) => $i['id'] === $imageId)->values()->all();
     }
 
-    public function setImageInputMode(string $mode): void
+    /**
+     * Total media items across existing uploads, pending new uploads, and
+     * non-blank URL entries — the shared cap all three count against.
+     */
+    protected function totalImageCount(): int
     {
-        if (! in_array($mode, ['upload', 'url'], true)) {
-            return;
-        }
-
-        $this->imageInputMode = $mode;
-
-        if ($mode === 'upload') {
-            $this->imageUrls = [''];
-            $this->resetValidation(['imageUrls', 'imageUrls.*']);
-
-            return;
-        }
-
-        $this->newImages = [];
-        $this->resetValidation(['newImages', 'newImages.*']);
+        return count($this->existingImages) + count($this->newImages) + count($this->normalizedImageUrls());
     }
 
     public function addImageUrl(): void
     {
-        if (count($this->imageUrls) < 5) {
+        if ($this->totalImageCount() < 5) {
             $this->imageUrls[] = '';
         }
     }
@@ -624,10 +608,9 @@ class CatalogItemForm extends Component
             'unitOfMeasure' => ['required'],
             'quantityPerUnit' => ['nullable', 'integer', 'min:1'],
 
-            'imageInputMode' => ['required', Rule::in(['upload', 'url'])],
             'newImages' => ['nullable', 'array', 'max:5'],
-            'newImages.*' => [$this->imageInputMode === 'upload' ? 'image' : 'nullable', 'max:8192', 'dimensions:width=400,height=400'],
-            'imageUrls' => [$this->imageInputMode === 'url' ? 'required' : 'nullable', 'array', 'max:5'],
+            'newImages.*' => ['image', 'max:8192', 'dimensions:width=400,height=400'],
+            'imageUrls' => ['nullable', 'array', 'max:5'],
             'imageUrls.*' => ['nullable', 'string', 'max:2048'],
 
             'manufacturer' => ['nullable', 'string', 'max:255'],
@@ -694,22 +677,10 @@ class CatalogItemForm extends Component
         $sellingPointsClean = array_values(array_filter(array_map('trim', $this->sellingPoints)));
         $imageUrlsClean = $this->normalizedImageUrls();
 
-        if ($this->imageInputMode === 'url' && $imageUrlsClean === []) {
-            $this->addError('imageUrls', 'Add at least one image name or URL.');
-            $this->dispatch('scroll-to-first-error');
+        $totalImages = count($this->existingImages) + count($this->newImages) + count($imageUrlsClean);
 
-            return;
-        }
-
-        if ($this->imageInputMode === 'upload' && count($this->existingImages) === 0 && count($this->newImages) === 0) {
-            $this->addError('newImages', 'Upload at least one image.');
-            $this->dispatch('scroll-to-first-error');
-
-            return;
-        }
-
-        if ($this->imageInputMode === 'upload' && (count($this->existingImages) + count($this->newImages)) > 5) {
-            $this->addError('newImages', 'You can only attach up to 5 images.');
+        if ($totalImages > 5) {
+            $this->addError('newImages', 'You can only have up to 5 images total, across uploads and URLs.');
             $this->dispatch('scroll-to-first-error');
 
             return;
@@ -755,7 +726,7 @@ class CatalogItemForm extends Component
                 'max_qty_per_order' => $this->maxQtyPerOrder !== null && $this->maxQtyPerOrder !== '' ? (int) $this->maxQtyPerOrder : null,
                 'multiples' => $this->multiples !== null && $this->multiples !== '' ? (int) $this->multiples : null,
                 'search_terms' => $searchTermsClean,
-                'images' => $this->imageInputMode === 'url' ? $imageUrlsClean : null,
+                'images' => $imageUrlsClean !== [] ? $imageUrlsClean : null,
                 'selling_points' => $sellingPointsClean,
                 'specifications' => $specPairs,
                 'classifications' => $classificationsClean,
@@ -779,14 +750,7 @@ class CatalogItemForm extends Component
                 $item = CatalogItem::create(array_merge(['vendor_id' => $vendor->id], $attrs));
             }
 
-            if ($this->imageInputMode === 'url') {
-                foreach ($item->images()->get() as $image) {
-                    Storage::disk($image->disk)->delete($image->path);
-                    $image->delete();
-                }
-            } else {
-                $item->forceFill(['images' => null])->saveQuietly();
-
+            if ($this->newImages !== []) {
                 // Seller SKU must exist before we can store an image since it must match the item sku.
                 if ($this->sellerSku == '') {
                     throw ValidationException::withMessages([
@@ -797,9 +761,11 @@ class CatalogItemForm extends Component
                 $existingImageCount = $item->images()->count();
 
                 $disk = config('filesystems.default');
+                $newImageLinks = [];
 
                 foreach ($this->newImages as $index => $upload) {
-                    $path = $upload->store("exports/{$vendor->name}/images", $disk);
+                    $name = Str::slug($item->dealer_sku . '-' . ($existingImageCount + $index)) . '.' . $upload->getClientOriginalExtension();
+                    $path = $upload->storeAs("inbound/{$vendor->name}/images", $name, $disk);
 
                     CatalogItemImage::create([
                         'catalog_item_id' => $item->id,
@@ -807,7 +773,15 @@ class CatalogItemForm extends Component
                         'path' => $path,
                         'sort_order' => $existingImageCount + $index,
                     ]);
+
+                    $newImageLinks[] = config('vit.image_link') . $name;
                 }
+
+                // Uploaded files still need a URL for the VIT export, which only
+                // reads the images column — not the catalog_item_images table.
+                $item->update([
+                    'images' => array_values(array_unique(array_merge($imageUrlsClean, $newImageLinks))),
+                ]);
             }
 
             return $item;

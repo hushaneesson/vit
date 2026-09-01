@@ -42,8 +42,10 @@ composer install
 cp .env.example .env
 php artisan key:generate
 
-# 3. Create the SQLite database file (default DB_CONNECTION=sqlite)
-touch database/database.sqlite
+# 3. Setup ENV vars
+- create database and add db credentials
+- set SFTP credentials
+- set mail credentials
 
 # 4. Run migrations and seed reference data (hierarchies, unit of measure, etc.)
 php artisan migrate --seed

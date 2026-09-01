@@ -20,7 +20,12 @@ class CatalogSubmissionResource extends Resource
 
     protected static string|UnitEnum|null $navigationGroup = 'Catalog';
 
-    protected static ?int $navigationSort = 3;
+
+    public static function getNavigationBadge(): ?string
+    {
+        return (string) CatalogSubmission::where('status', 'ready_for_review')
+            ->count();
+    }
 
     public static function form(Schema $schema): Schema
     {

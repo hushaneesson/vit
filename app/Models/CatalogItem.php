@@ -217,6 +217,7 @@ class CatalogItem extends Model
         $score = (int) round(($filledCount / count($allFields)) * 100);
 
         $status = 'acceptable';
+
         foreach (self::$requiredFields as $field) {
             if (empty($data[$field])) {
                 $status = 'incomplete';
