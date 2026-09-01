@@ -20,6 +20,7 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\On;
 use Livewire\Component;
 use Livewire\WithFileUploads;
 
@@ -72,14 +73,14 @@ class CatalogItemForm extends Component
     public array $searchTerms = [''];
     public array $sellingPoints = [''];
 
-    // Images
-    public string $imageInputMode = 'url';
+    // Images — existing uploads, pending new uploads, and URL entries all
+    // share a single 5-image cap; none of them clear the others.
     public array $newImages = [];
     public array $existingImages = [];
     public array $imageUrls = [''];
 
     public array $specifications = [['key' => '', 'value' => '']];
-    public array $classifications = [['type' => '', 'value' => '']];
+    public array $classifications = [];
 
 
     public function mount(?CatalogItem $catalogItem = null, ?int $catalogId = null): void
@@ -94,6 +95,7 @@ class CatalogItemForm extends Component
         $this->catalogId = $catalogId;
 
         $this->classifications = $this->ensureRequiredClassificationRows($this->classifications);
+        $this->applyClassificationDefaults();
     }
 
     protected function authorizeVendorOwnership(CatalogItem $catalogItem): void
@@ -133,6 +135,7 @@ class CatalogItemForm extends Component
         $this->classifications = $this->ensureRequiredClassificationRows(
             $this->mapStoredClassificationsToRows($catalogItem->classifications)
         );
+        $this->applyClassificationDefaults();
 
         $this->existingImages = $catalogItem->images()->get()->map(fn(CatalogItemImage $image) => [
             'id' => $image->id,
@@ -142,12 +145,6 @@ class CatalogItemForm extends Component
         $this->imageUrls = is_array($catalogItem->images) && $catalogItem->images !== []
             ? array_values($catalogItem->images)
             : [''];
-
-        if ($this->existingImages !== []) {
-            $this->imageInputMode = 'upload';
-        } elseif ($this->normalizedImageUrls() !== []) {
-            $this->imageInputMode = 'url';
-        }
     }
 
     #[Computed]
@@ -176,8 +173,12 @@ class CatalogItemForm extends Component
     #[Computed]
     public function hierarchyOptions()
     {
+        // Leaf nodes only, so a vendor can never pick a level 1/2 category
+        // that has deeper children still available under it. Level 3 leaves
+        // are listed first since they're the preferred, most specific choice.
         return ProductHierarchy::query()
-            ->where('level', 3)
+            ->leaves()
+            ->orderByDesc('level')
             ->orderBy('name')
             ->get();
     }
@@ -201,50 +202,13 @@ class CatalogItemForm extends Component
             ->orderBy('name');
 
         if ($this->newHierarchyLevel1 !== '') {
-            $level1HierarchyNumbers = ProductHierarchy::query()
+            $level1Ids = ProductHierarchy::query()
                 ->where('level', 1)
                 ->where('name', $this->newHierarchyLevel1)
-                ->pluck('hierarchy_number');
+                ->pluck('id');
 
-            if ($level1HierarchyNumbers->isNotEmpty()) {
-                $query->whereIn('parent_id', $level1HierarchyNumbers);
-            } else {
-                return collect();
-            }
-        }
-
-        return $query->pluck('name')->unique()->values();
-    }
-
-    #[Computed]
-    public function hierarchyLevel3NameOptions()
-    {
-        $query = ProductHierarchy::query()
-            ->where('level', 3)
-            ->orderBy('name');
-
-        if ($this->newHierarchyLevel2 !== '') {
-            $level2Query = ProductHierarchy::query()
-                ->where('level', 2)
-                ->where('name', $this->newHierarchyLevel2);
-
-            if ($this->newHierarchyLevel1 !== '') {
-                $level1HierarchyNumbers = ProductHierarchy::query()
-                    ->where('level', 1)
-                    ->where('name', $this->newHierarchyLevel1)
-                    ->pluck('hierarchy_number');
-
-                if ($level1HierarchyNumbers->isNotEmpty()) {
-                    $level2Query->whereIn('parent_id', $level1HierarchyNumbers);
-                } else {
-                    return collect();
-                }
-            }
-
-            $level2HierarchyNumbers = $level2Query->pluck('hierarchy_number');
-
-            if ($level2HierarchyNumbers->isNotEmpty()) {
-                $query->whereIn('parent_id', $level2HierarchyNumbers);
+            if ($level1Ids->isNotEmpty()) {
+                $query->whereIn('parent_id', $level1Ids);
             } else {
                 return collect();
             }
@@ -267,6 +231,14 @@ class CatalogItemForm extends Component
     {
         return CountryCode::orderBy('name')
             ->get();
+    }
+
+    #[On('option-selected')]
+    public function optionSelected($option = null)
+    {
+        if (isset($option['default_value']) && isset($option['index'])) {
+            $this->classifications[$option['index']][$option['value']] = $option['default_value'];
+        }
     }
 
     public function addSearchTerm(): void
@@ -317,7 +289,16 @@ class CatalogItemForm extends Component
 
     public function addClassification(): void
     {
-        $this->classifications[] = ['type' => '', 'value' => ''];
+        $this->classifications[] = ['key' => '', 'value' => ''];
+    }
+
+    public function updatedClassifications($value, $key): void
+    {
+        if (! is_string($key) || ! str_ends_with($key, '.key')) {
+            return;
+        }
+
+        $this->applyClassificationDefaults();
     }
 
     public function removeClassification(int $index): void
@@ -326,7 +307,7 @@ class CatalogItemForm extends Component
             return;
         }
 
-        $type = trim((string) ($this->classifications[$index]['type'] ?? ''));
+        $type = trim((string) ($this->classifications[$index]['key'] ?? ''));
 
         if ($type !== '' && in_array($type, $this->requiredClassificationTypeKeys(), true)) {
             return;
@@ -349,28 +330,18 @@ class CatalogItemForm extends Component
         $this->existingImages = collect($this->existingImages)->reject(fn($i) => $i['id'] === $imageId)->values()->all();
     }
 
-    public function setImageInputMode(string $mode): void
+    /**
+     * Total media items across existing uploads, pending new uploads, and
+     * non-blank URL entries — the shared cap all three count against.
+     */
+    protected function totalImageCount(): int
     {
-        if (! in_array($mode, ['upload', 'url'], true)) {
-            return;
-        }
-
-        $this->imageInputMode = $mode;
-
-        if ($mode === 'upload') {
-            $this->imageUrls = [''];
-            $this->resetValidation(['imageUrls', 'imageUrls.*']);
-
-            return;
-        }
-
-        $this->newImages = [];
-        $this->resetValidation(['newImages', 'newImages.*']);
+        return count($this->existingImages) + count($this->newImages) + count($this->normalizedImageUrls());
     }
 
     public function addImageUrl(): void
     {
-        if (count($this->imageUrls) < 5) {
+        if ($this->totalImageCount() < 5) {
             $this->imageUrls[] = '';
         }
     }
@@ -387,6 +358,13 @@ class CatalogItemForm extends Component
         if ($this->imageUrls === []) {
             $this->imageUrls = [''];
         }
+    }
+
+    public function removeNewImage($index)
+    {
+        unset($this->newImages[$index]);
+
+        $this->newImages = array_values($this->newImages);
     }
 
     public function openAddUnitOfMeasureModal(): void
@@ -497,48 +475,42 @@ class CatalogItemForm extends Component
 
             if (! $level1) {
                 $level1 = ProductHierarchy::create([
-                    'hierarchy_number' => $this->generateHierarchyNumber(1),
+                    'hierarchy_number' => null,
                     'parent_id' => null,
                     'level' => 1,
                     'name' => $level1Name,
                 ]);
-            } elseif (! $level1->hierarchy_number) {
-                $level1->hierarchy_number = $this->generateHierarchyNumber(1);
-                $level1->save();
             }
 
-            $level1ParentKey = $level1->hierarchy_number;
+            $level1ParentId = $level1->id;
 
             $level2 = ProductHierarchy::query()
                 ->where('level', 2)
                 ->where('name', $level2Name)
-                ->where('parent_id', $level1ParentKey)
+                ->where('parent_id', $level1ParentId)
                 ->first();
 
             if (! $level2) {
                 $level2 = ProductHierarchy::create([
-                    'hierarchy_number' => $this->generateHierarchyNumber(2),
-                    'parent_id' => $level1ParentKey,
+                    'hierarchy_number' => null,
+                    'parent_id' => $level1ParentId,
                     'level' => 2,
                     'name' => $level2Name,
                 ]);
-            } elseif (! $level2->hierarchy_number) {
-                $level2->hierarchy_number = $this->generateHierarchyNumber(2);
-                $level2->save();
             }
 
-            $level2ParentKey = $level2->hierarchy_number;
+            $level2ParentId = $level2->id;
 
             $level3 = ProductHierarchy::query()
                 ->where('level', 3)
                 ->where('name', $level3Name)
-                ->where('parent_id', $level2ParentKey)
+                ->where('parent_id', $level2ParentId)
                 ->first();
 
             if (! $level3) {
                 $level3 = ProductHierarchy::create([
                     'hierarchy_number' => null,
-                    'parent_id' => $level2ParentKey,
+                    'parent_id' => $level2ParentId,
                     'level' => 3,
                     'name' => $level3Name,
                 ]);
@@ -559,15 +531,6 @@ class CatalogItemForm extends Component
             'newHierarchyLevel3',
             'hierarchy',
         ]);
-    }
-
-    protected function generateHierarchyNumber(int $level): string
-    {
-        do {
-            $candidate = 'CUS-L' . $level . '-' . Str::upper(Str::random(8));
-        } while (ProductHierarchy::query()->where('hierarchy_number', $candidate)->exists());
-
-        return $candidate;
     }
 
     public function closeAddUnitOfMeasureModal(): void
@@ -633,16 +596,21 @@ class CatalogItemForm extends Component
             'manufacturerSku' => ['nullable', 'string', 'max:255'],
 
             'productCategory' => ['required', Rule::exists('commodity_types', 'id')],
-            'hierarchy' => ['required', Rule::exists('product_hierarchies', 'id')->where('level', 3)],
+            'hierarchy' => [
+                'required',
+                Rule::exists('product_hierarchies', 'id')->whereNotIn(
+                    'id',
+                    ProductHierarchy::query()->whereNotNull('parent_id')->select('parent_id')
+                ),
+            ],
 
             'description' => ['required', 'string', 'max:4000'],
             'unitOfMeasure' => ['required'],
             'quantityPerUnit' => ['nullable', 'integer', 'min:1'],
 
-            'imageInputMode' => ['required', Rule::in(['upload', 'url'])],
-            'newImages' => [$this->imageInputMode === 'upload' && ! $this->catalogItemId && count($this->existingImages) === 0 ? 'required' : 'nullable', 'array', 'max:5'],
-            'newImages.*' => [$this->imageInputMode === 'upload' ? 'image' : 'nullable', 'max:8192'],
-            'imageUrls' => [$this->imageInputMode === 'url' ? 'required' : 'nullable', 'array', 'max:5'],
+            'newImages' => ['nullable', 'array', 'max:5'],
+            'newImages.*' => ['image', 'max:8192', 'dimensions:width=400,height=400'],
+            'imageUrls' => ['nullable', 'array', 'max:5'],
             'imageUrls.*' => ['nullable', 'string', 'max:2048'],
 
             'manufacturer' => ['nullable', 'string', 'max:255'],
@@ -664,8 +632,8 @@ class CatalogItemForm extends Component
             'specifications.*.key' => ['nullable', 'string'],
             'specifications.*.value' => ['nullable', 'string'],
             'classifications' => ['nullable', 'array'],
-            'classifications.*.type' => ['nullable', 'required_with:classifications.*.value',],
-            'classifications.*.value' => ['nullable', 'required_with:classifications.*.type',],
+            'classifications.*.key' => ['nullable', 'required_with:classifications.*.value',],
+            'classifications.*.value' => ['nullable', 'required_with:classifications.*.key',],
 
             'minQtyPerOrder' => ['nullable', 'integer', 'min:0'],
             'maxQtyPerOrder' => ['nullable', 'integer', 'min:0'],
@@ -676,8 +644,9 @@ class CatalogItemForm extends Component
     public function messages(): array
     {
         return [
-            'classifications.*.type.required_with' => 'All classification rows must include both a type and a value.',
+            'classifications.*.key.required_with' => 'All classification rows must include both a type and a value.',
             'classifications.*.value.required_with' => 'All classification rows must include both a type and a value.',
+            'newImages.*.dimensions' => 'Each image must be 400x400.',
         ];
     }
 
@@ -686,6 +655,7 @@ class CatalogItemForm extends Component
         $client = Auth::guard('client')->user();
         $vendor = $client->vendor;
         $this->classifications = $this->ensureRequiredClassificationRows($this->classifications);
+        $this->applyClassificationDefaults();
 
         try {
             $this->validate();
@@ -707,22 +677,10 @@ class CatalogItemForm extends Component
         $sellingPointsClean = array_values(array_filter(array_map('trim', $this->sellingPoints)));
         $imageUrlsClean = $this->normalizedImageUrls();
 
-        if ($this->imageInputMode === 'url' && $imageUrlsClean === []) {
-            $this->addError('imageUrls', 'Add at least one image name or URL.');
-            $this->dispatch('scroll-to-first-error');
+        $totalImages = count($this->existingImages) + count($this->newImages) + count($imageUrlsClean);
 
-            return;
-        }
-
-        if ($this->imageInputMode === 'upload' && count($this->existingImages) === 0 && count($this->newImages) === 0) {
-            $this->addError('newImages', 'Upload at least one image.');
-            $this->dispatch('scroll-to-first-error');
-
-            return;
-        }
-
-        if ($this->imageInputMode === 'upload' && (count($this->existingImages) + count($this->newImages)) > 5) {
-            $this->addError('newImages', 'You can only attach up to 5 images.');
+        if ($totalImages > 5) {
+            $this->addError('newImages', 'You can only have up to 5 images total, across uploads and URLs.');
             $this->dispatch('scroll-to-first-error');
 
             return;
@@ -730,7 +688,7 @@ class CatalogItemForm extends Component
 
         $classificationsClean = [];
         foreach ($this->classifications as $classification) {
-            $type = trim((string) ($classification['type'] ?? ''));
+            $type = trim((string) ($classification['key'] ?? ''));
             $value = trim((string) ($classification['value'] ?? ''));
 
             if ($type !== '' && $value !== '') {
@@ -768,7 +726,7 @@ class CatalogItemForm extends Component
                 'max_qty_per_order' => $this->maxQtyPerOrder !== null && $this->maxQtyPerOrder !== '' ? (int) $this->maxQtyPerOrder : null,
                 'multiples' => $this->multiples !== null && $this->multiples !== '' ? (int) $this->multiples : null,
                 'search_terms' => $searchTermsClean,
-                'images' => $this->imageInputMode === 'url' ? $imageUrlsClean : null,
+                'images' => $imageUrlsClean !== [] ? $imageUrlsClean : null,
                 'selling_points' => $sellingPointsClean,
                 'specifications' => $specPairs,
                 'classifications' => $classificationsClean,
@@ -792,25 +750,38 @@ class CatalogItemForm extends Component
                 $item = CatalogItem::create(array_merge(['vendor_id' => $vendor->id], $attrs));
             }
 
-            if ($this->imageInputMode === 'url') {
-                foreach ($item->images()->get() as $image) {
-                    Storage::disk($image->disk)->delete($image->path);
-                    $image->delete();
+            if ($this->newImages !== []) {
+                // Seller SKU must exist before we can store an image since it must match the item sku.
+                if ($this->sellerSku == '') {
+                    throw ValidationException::withMessages([
+                        'sellerSku' => 'Seller SKU is required before uploading images.',
+                    ]);
                 }
-            } else {
-                $item->forceFill(['images' => null])->saveQuietly();
+
                 $existingImageCount = $item->images()->count();
 
+                $disk = config('filesystems.default');
+                $newImageLinks = [];
+
                 foreach ($this->newImages as $index => $upload) {
-                    $path = $upload->store('catalog-images/vendor-' . $vendor->id, 'local');
+                    $name = Str::slug($item->dealer_sku . '-' . ($existingImageCount + $index)) . '.' . $upload->getClientOriginalExtension();
+                    $path = $upload->storeAs("inbound/{$vendor->name}/images", $name, $disk);
 
                     CatalogItemImage::create([
                         'catalog_item_id' => $item->id,
-                        'disk' => 'local',
+                        'disk' => $disk,
                         'path' => $path,
                         'sort_order' => $existingImageCount + $index,
                     ]);
+
+                    $newImageLinks[] = config('vit.image_link') . $name;
                 }
+
+                // Uploaded files still need a URL for the VIT export, which only
+                // reads the images column — not the catalog_item_images table.
+                $item->update([
+                    'images' => array_values(array_unique(array_merge($imageUrlsClean, $newImageLinks))),
+                ]);
             }
 
             return $item;
@@ -838,7 +809,7 @@ class CatalogItemForm extends Component
     protected function mapStoredClassificationsToRows($stored): array
     {
         if (! is_array($stored) || empty($stored)) {
-            return [['type' => '', 'value' => '']];
+            return [['key' => '', 'value' => '']];
         }
 
         $rows = [];
@@ -846,7 +817,7 @@ class CatalogItemForm extends Component
         foreach ($stored as $entry) {
             if (is_array($entry)) {
                 $rows[] = [
-                    'type' => (string) ($entry['type'] ?? $entry['key'] ?? ''),
+                    'key' => (string) ($entry['key'] ?? $entry['key'] ?? ''),
                     'value' => (string) ($entry['value'] ?? ''),
                 ];
 
@@ -863,7 +834,7 @@ class CatalogItemForm extends Component
                 [$type, $value] = explode('=', $text, 2);
 
                 $rows[] = [
-                    'type' => trim($type),
+                    'key' => trim($type),
                     'value' => trim($value),
                 ];
 
@@ -871,18 +842,18 @@ class CatalogItemForm extends Component
             }
 
             $rows[] = [
-                'type' => '',
+                'key' => '',
                 'value' => $text,
             ];
         }
 
-        return $rows !== [] ? $rows : [['type' => '', 'value' => '']];
+        return $rows !== [] ? $rows : [['key' => '', 'value' => '']];
     }
 
     protected function hasDuplicateClassificationTypes(): bool
     {
         $types = collect($this->classifications)
-            ->map(fn(array $row) => trim((string) ($row['type'] ?? '')))
+            ->map(fn(array $row) => trim((string) ($row['key'] ?? '')))
             ->filter()
             ->values();
 
@@ -915,6 +886,42 @@ class CatalogItemForm extends Component
     }
 
     /**
+     * @return array<string, string>
+     */
+    protected function classificationDefaultValuesByKey(): array
+    {
+        return ClassificationType::query()
+            ->whereNotNull('default_value')
+            ->pluck('default_value', 'key')
+            ->mapWithKeys(fn($value, $key) => [trim((string) $key) => trim((string) $value)])
+            ->filter(fn($value, $key) => $key !== '' && $value !== '')
+            ->all();
+    }
+
+    protected function applyClassificationDefaults(): void
+    {
+        $defaults = $this->classificationDefaultValuesByKey();
+
+        if ($defaults === []) {
+            return;
+        }
+
+        $this->classifications = array_values(array_map(function (array $row) use ($defaults): array {
+            $key = trim((string) ($row['key'] ?? ''));
+            $value = trim((string) ($row['value'] ?? ''));
+
+            if ($key !== '' && array_key_exists($key, $defaults)) {
+                $value = $defaults[$key];
+            }
+
+            return [
+                'key' => $key,
+                'value' => $value,
+            ];
+        }, $this->classifications));
+    }
+
+    /**
      * @param  array<int, array<string, mixed>>  $rows
      * @return array<int, array{type:string, value:string}>
      */
@@ -922,7 +929,7 @@ class CatalogItemForm extends Component
     {
         $normalized = array_values(array_map(
             fn(array $row) => [
-                'type' => trim((string) ($row['type'] ?? '')),
+                'key' => trim((string) ($row['key'] ?? '')),
                 'value' => trim((string) ($row['value'] ?? '')),
             ],
             $rows,
@@ -931,19 +938,19 @@ class CatalogItemForm extends Component
         $requiredKeys = $this->requiredClassificationTypeKeys();
 
         if ($requiredKeys === []) {
-            return $normalized !== [] ? $normalized : [['type' => '', 'value' => '']];
+            return $normalized !== [] ? $normalized : [['key' => '', 'value' => '']];
         }
 
         $rowsByType = collect($normalized)
-            ->filter(fn(array $row) => $row['type'] !== '')
-            ->keyBy('type');
+            ->filter(fn(array $row) => $row['key'] !== '')
+            ->keyBy('key');
 
         $requiredRows = collect($requiredKeys)
             ->map(function (string $key) use ($rowsByType): array {
                 $row = $rowsByType->get($key);
 
                 return [
-                    'type' => $key,
+                    'key' => $key,
                     'value' => trim((string) ($row['value'] ?? '')),
                 ];
             })
@@ -951,7 +958,7 @@ class CatalogItemForm extends Component
             ->all();
 
         $nonRequiredRows = collect($normalized)
-            ->filter(fn(array $row) => ! in_array($row['type'], $requiredKeys, true))
+            ->filter(fn(array $row) => ! in_array($row['key'], $requiredKeys, true))
             ->values()
             ->all();
 

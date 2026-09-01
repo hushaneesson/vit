@@ -8,21 +8,21 @@ use App\Notifications\ClientInvitationNotification;
 class ClientObserver
 {
     /**
-     * When the admin creates a new client record, automatically generate an
-     * invitation token and email it. The client cannot log in (request an
-     * OTP) until they've followed this link to activate.
-     *
-     * If the record is created already active (e.g. a data seed/import, or
-     * a test simulating a pre-activated client), skip the invitation flow
-     * entirely rather than overwriting the caller's intended status.
+     * When the admin creates a new client record, set it active immediately
+     * and send a portal access email. Clients can log in directly with OTP.
      */
     public function created(Client $client): void
     {
-        if ($client->status === 'active') {
+        if ($client->status === 'disabled') {
             return;
         }
 
-        $token = $client->generateInvitationToken();
-        $client->notify(new ClientInvitationNotification($token));
+        $client->forceFill([
+            'status' => 'active',
+            'activated_at' => $client->activated_at ?? now(),
+            'invited_at' => $client->invited_at ?? now(),
+        ])->save();
+
+        $client->notify(new ClientInvitationNotification());
     }
 }

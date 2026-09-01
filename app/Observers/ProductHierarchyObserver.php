@@ -28,13 +28,13 @@ class ProductHierarchyObserver
         $segments = [$hierarchy->name];
 
         $parent = $hierarchy->parent_id
-            ? ProductHierarchy::query()->where('hierarchy_number', $hierarchy->parent_id)->first()
+            ? ProductHierarchy::query()->find($hierarchy->parent_id)
             : null;
 
         while ($parent) {
             array_unshift($segments, $parent->name);
             $parent = $parent->parent_id
-                ? ProductHierarchy::query()->where('hierarchy_number', $parent->parent_id)->first()
+                ? ProductHierarchy::query()->find($parent->parent_id)
                 : null;
         }
 

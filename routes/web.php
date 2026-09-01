@@ -1,7 +1,6 @@
 <?php
 
 use App\Http\Controllers\Vendor\AppointmentController;
-use App\Http\Controllers\CatalogUploadController;
 use App\Http\Controllers\Vendor\CatalogController;
 use App\Http\Controllers\Vendor\CatalogItemController;
 use App\Http\Controllers\Vendor\CatalogItemImageController;
@@ -27,8 +26,6 @@ Route::get('/', function () {
 |
 */
 Route::prefix('vendor')->name('vendor.')->group(function () {
-    Route::get('activate/{token}', [ClientAuthController::class, 'activate'])->name('activate');
-
     Route::get('login', [ClientAuthController::class, 'showLoginForm'])->name('login');
     Route::post('login', [ClientAuthController::class, 'sendOtp'])->name('login.send');
     Route::get('login/otp', [ClientAuthController::class, 'showOtpForm'])->name('login.otp');

@@ -5,14 +5,12 @@ namespace App\Filament\Resources\CatalogSubmissions\Tables;
 use App\Enums\CatalogSubmissionStatus;
 use App\Jobs\UploadCatalogSubmissionToVit;
 use App\Models\CatalogSubmission;
-use App\Notifications\CatalogSubmissionReviewedNotification;
 use Filament\Actions\Action;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
 
 class CatalogSubmissionsTable
 {
@@ -21,10 +19,12 @@ class CatalogSubmissionsTable
         return $table
             ->columns([
                 TextColumn::make('requestedByClient.name')
+                    ->label('Client')
                     ->description(fn($record) => $record->vendor->name)
                     ->searchable()
                     ->sortable(),
                 TextColumn::make('requested_at')
+                    ->label('Submitted At')
                     ->dateTime('F d, Y', 'America/New_York')
                     ->description(fn($record) => $record->total_items . ' items')
                     ->searchable()
@@ -33,21 +33,6 @@ class CatalogSubmissionsTable
                     ->badge()
                     ->formatStateUsing(fn($state) => $state?->label() ?? '')
                     ->color(fn($state) => $state?->filamentColor() ?? 'gray'),
-
-                // file processing status (pending, generating, completed, uploading, failed)
-                // TODO: need to refactor this to be more clear to the user what it represents
-                //and ensure a descrition error is shown when the file is missing or failed to generate
-                TextColumn::make('processing_status')
-                    ->badge()
-                    ->formatStateUsing(fn($state) => Str::headline($state ?? ''))
-                    ->color(fn($state): string => match ($state) {
-                        'pending' => 'gray',
-                        'generating' => 'warning',
-                        'completed' => 'success',
-                        'uploading' => 'info',
-                        'failed' => 'danger',
-                        default => 'gray',
-                    }),
                 TextColumn::make('generated_at')
                     ->dateTime()
                     ->toggleable(isToggledHiddenByDefault: true),
@@ -58,14 +43,12 @@ class CatalogSubmissionsTable
             ])
             ->filters([
                 SelectFilter::make('status')
-                    ->options(
-                        collect(CatalogSubmissionStatus::cases())
-                            ->mapWithKeys(fn($case) => [$case->value => $case->label()])
-                            ->all()
-                    ),
-                SelectFilter::make('vendor_id')
-                    ->label('Vendor')
-                    ->options(fn() => \App\Models\Vendor::query()->pluck('name', 'id')),
+                    ->options([
+                        'ready_for_review' => 'Pending',
+                        'approved' => 'Delivered',
+                        'withdrawn' => 'Withdrawn',
+                    ])
+                    ->default('ready_for_review'),
             ])
             ->defaultSort('requested_at', 'desc')
             ->recordActions([

@@ -52,11 +52,11 @@
             </div>
             <div class="p-6 space-y-8">
                 <div>
-                    <label>Product Name <span class="text-red-600">*</span></label>
+                    <label>Product Name / Short Description <span class="text-red-600">*</span></label>
                     <input type="text" wire:model="name"
                         class="mt-1.5 block w-full rounded-lg border-gray-300 shadow-sm text-sm focus:border-sky-500 focus:ring-sky-500 focus:ring-1" />
                     <p class="text-sm text-gray-500 mt-1.5">Enter the customer facing product title. Example: Premium
-                        2-Ply Bath Tissue, 48 Rolls.</p>
+                        2-Ply Bath Tissue.</p>
                     @error('name')
                         <p class="text-sm text-red-600 mt-1.5">{{ $message }}</p>
                     @enderror
@@ -197,96 +197,93 @@
             <div class="flex items-center gap-3 px-6 py-4 border-b border-gray-100 bg-gray-50/60">
                 <span
                     class="flex items-center justify-center flex-shrink-0 text-xs font-semibold text-white rounded-full w-7 h-7 bg-sky-600">4</span>
-                <h2 class="font-semibold text-gray-900">Product Images <span class="font-normal text-red-600">*</span>
-                </h2>
+                <h2 class="font-semibold text-gray-900">Product Images</h2>
             </div>
+            @php
+                $totalImages = count($newImages) + count(array_filter(array_map('trim', $imageUrls)));
+            @endphp
             <div class="p-6 space-y-4">
-                <p class="text-xs text-gray-500">Choose one option: enter up to five image names or URLs, or upload up
-                    to five image files.</p>
+                <p class="text-xs text-gray-500">Add up to five images total, mixing image names/URLs and uploaded
+                    files as needed. ({{ $totalImages }}/5 used)</p>
 
-                <div class="grid gap-3 md:grid-cols-2">
-                    <button type="button" wire:click="setImageInputMode('url')"
-                        class="p-4 text-sm text-left border rounded-lg transition-colors {{ $imageInputMode === 'url' ? 'border-sky-500 bg-sky-50 text-sky-700' : 'border-gray-200 hover:border-sky-300' }}">
-                        <div class="font-semibold">Image names / URLs</div>
-                        <div class="mt-1 text-xs text-gray-500">Paste up to 5 image names or hosted links.</div>
-                    </button>
-                    <button type="button" wire:click="setImageInputMode('upload')"
-                        class="p-4 text-sm text-left border rounded-lg transition-colors {{ $imageInputMode === 'upload' ? 'border-sky-500 bg-sky-50 text-sky-700' : 'border-gray-200 hover:border-sky-300' }}">
-                        <div class="font-semibold">Upload image files</div>
-                        <div class="mt-1 text-xs text-gray-500">Upload up to 5 images from your computer.</div>
-                    </button>
+                <div class="space-y-2">
+                    @foreach ($imageUrls as $index => $imageUrl)
+                        <div class="flex gap-2">
+                            <input type="text" wire:model="imageUrls.{{ $index }}"
+                                placeholder="Image name or https://example.com/image.jpg"
+                                class="block w-full text-sm border-gray-300 rounded-lg shadow-sm focus:border-sky-500 focus:ring-sky-500 focus:ring-1">
+                            @if (count($imageUrls) > 1)
+                                <button type="button" wire:click="removeImageUrl({{ $index }})"
+                                    class="flex-shrink-0 px-3 text-sm text-red-600 transition-colors rounded-lg hover:bg-red-50">Remove</button>
+                            @endif
+                        </div>
+                    @endforeach
                 </div>
 
-                @if ($imageInputMode === 'url')
-                    <div class="space-y-2">
-                        @foreach ($imageUrls as $index => $imageUrl)
-                            <div class="flex gap-2">
-                                <input type="text" wire:model="imageUrls.{{ $index }}"
-                                    placeholder="Image name or https://example.com/image.jpg"
-                                    class="block w-full text-sm border-gray-300 rounded-lg shadow-sm focus:border-sky-500 focus:ring-sky-500 focus:ring-1">
-                                @if (count($imageUrls) > 1)
-                                    <button type="button" wire:click="removeImageUrl({{ $index }})"
-                                        class="flex-shrink-0 px-3 text-sm text-red-600 transition-colors rounded-lg hover:bg-red-50">Remove</button>
-                                @endif
+                @if ($totalImages < 5)
+                    <button type="button" wire:click="addImageUrl"
+                        class="inline-flex items-center gap-1 mt-2 text-sm font-medium text-sky-600 hover:text-sky-700">
+                        <i class="fas fa-plus"></i>
+                        Add another
+                    </button>
+                @endif
+
+                @error('imageUrls')
+                    <p class="text-sm text-red-600">{{ $message }}</p>
+                @enderror
+                @error('imageUrls.*')
+                    <p class="text-sm text-red-600">{{ $message }}</p>
+                @enderror
+
+                {{-- @if (count($existingImages))
+                    <div class="flex flex-wrap gap-3">
+                        @foreach ($existingImages as $image)
+                            <div class="relative group">
+                                <img src="{{ $image['url'] }}"
+                                    class="object-cover w-24 h-24 border border-gray-200 rounded-lg">
+                                <button type="button" wire:click="removeExistingImage({{ $image['id'] }})"
+                                    class="absolute w-5 h-5 text-xs leading-5 text-white transition-colors bg-red-600 rounded-full shadow-sm -top-2 -right-2 hover:bg-red-700">&times;</button>
                             </div>
                         @endforeach
                     </div>
+                @endif --}}
 
-                    @if (count($imageUrls) < 5)
-                        <button type="button" wire:click="addImageUrl"
-                            class="inline-flex items-center gap-1 mt-2 text-sm font-medium text-sky-600 hover:text-sky-700">
-                            <i class="fas fa-plus"></i>
-                            Add another
-                        </button>
-                    @endif
-
-                    @error('imageUrls')
-                        <p class="text-sm text-red-600">{{ $message }}</p>
-                    @enderror
-                    @error('imageUrls.*')
-                        <p class="text-sm text-red-600">{{ $message }}</p>
-                    @enderror
-                @else
-                    @if (count($existingImages))
-                        <div class="flex flex-wrap gap-3">
-                            @foreach ($existingImages as $image)
-                                <div class="relative group">
-                                    <img src="{{ $image['url'] }}"
-                                        class="object-cover w-24 h-24 border border-gray-200 rounded-lg">
-                                    <button type="button" wire:click="removeExistingImage({{ $image['id'] }})"
-                                        class="absolute w-5 h-5 text-xs leading-5 text-white transition-colors bg-red-600 rounded-full shadow-sm -top-2 -right-2 hover:bg-red-700">&times;</button>
-                                </div>
-                            @endforeach
-                        </div>
-                    @endif
-
+                @if ($totalImages < 5)
                     <label
                         class="flex flex-col items-center justify-center gap-2 px-6 py-8 text-center transition-colors border-2 border-gray-300 border-dashed rounded-lg cursor-pointer hover:border-sky-400 hover:bg-sky-50/40">
                         <i class="text-3xl text-gray-400 fas fa-cloud-upload-alt"></i>
                         <span class="text-sm text-gray-600"><span class="font-medium text-sky-600">Click to
                                 upload</span>
                             or drag and drop images</span>
-                        <span class="text-xs text-gray-500">Up to 5 images</span>
+                        <span class="text-xs text-gray-500">{{ 5 - $totalImages }} slot(s) remaining</span>
                         <input type="file" wire:model="newImages" multiple accept="image/*" class="hidden" />
                     </label>
-                    @error('newImages')
-                        <p class="text-sm text-red-600">{{ $message }}</p>
-                    @enderror
-                    @error('newImages.*')
-                        <p class="text-sm text-red-600">{{ $message }}</p>
-                    @enderror
+                @endif
+                @error('newImages')
+                    <p class="text-sm text-red-600">{{ $message }}</p>
+                @enderror
+                @error('newImages.*')
+                    <p class="text-sm text-red-600">{{ $message }}</p>
+                @enderror
 
-                    @if ($newImages)
-                        <div class="flex flex-wrap gap-3">
-                            @foreach ($newImages as $upload)
+                @if ($newImages)
+                    <div class="flex flex-wrap gap-3">
+                        @foreach ($newImages as $index => $upload)
+                            <div class="relative">
                                 <img src="{{ $upload->temporaryUrl() }}"
                                     class="object-cover w-24 h-24 border border-gray-200 rounded-lg">
-                            @endforeach
-                        </div>
-                    @endif
+
+                                <button type="button" wire:click="removeNewImage({{ $index }})"
+                                    class="absolute flex items-center justify-center w-6 h-6 text-white bg-red-600 rounded-full -top-2 -right-2 hover:bg-red-700">
+                                    &times;
+                                </button>
+                            </div>
+                        @endforeach
+                    </div>
                 @endif
             </div>
         </section>
+
 
         {{-- Manufacturer / Brand / Search --}}
         <section class="overflow-hidden bg-white border border-gray-200 shadow-sm rounded-xl">
@@ -516,7 +513,7 @@
                     <div class="space-y-2 mt-1.5">
                         @foreach ($classifications as $index => $classification)
                             @php
-                                $selectedType = $classification['type'] ?? '';
+                                $selectedType = $classification['key'] ?? '';
                                 $isRequiredType =
                                     $selectedType !== '' &&
                                     $this->classificationTypeOptions
@@ -524,31 +521,40 @@
                                         ->where('is_always_required', true)
                                         ->isNotEmpty();
                                 $selectedTypesInOtherRows = collect($classifications)
-                                    ->map(fn($row, $i) => $i === $index ? null : $row['type'] ?? null)
+                                    ->map(fn($row, $i) => $i === $index ? null : $row['key'] ?? null)
                                     ->filter();
                             @endphp
                             <div class="flex items-center gap-2">
-                                <x-searchable-select wire-model="classifications.{{ $index }}.type"
+                                <x-searchable-select wire-model="classifications.{{ $index }}.key"
                                     class="flex-1" :options="$this->classificationTypeOptions
                                         ->filter(
                                             fn($t) => !$selectedTypesInOtherRows->contains($t->key) ||
                                                 $selectedType === $t->key,
                                         )
-                                        ->map(fn($t) => ['value' => $t->key, 'label' => $t->label])
+                                        ->map(
+                                            fn($t) => [
+                                                'value' => $t->key,
+                                                'label' => $t->label,
+                                                'default_value' => $t->default_value,
+                                                'index' => $index,
+                                            ],
+                                        )
                                         ->values()
                                         ->toArray()" :allow-create="false" :disabled="$isRequiredType"
                                     placeholder="Select an option..." />
 
 
-
-
-                                @if ($classification['type'] === 'Country of Origin')
+                                @if ($classification['key'] === 'Country of Origin')
                                     <x-searchable-select wire-model="classifications.{{ $index }}.value"
                                         class="flex-1" :options="$this->countries
                                             ->map(fn($t) => ['value' => $t->code, 'label' => $t->name])
                                             ->values()
                                             ->toArray()" :allow-create="false" :disabled="$isRequiredType"
                                         placeholder="Select an option..." />
+                                @elseif($this->classificationTypeOptions->firstWhere('key', $classification['key'])?->default_value)
+                                    <p class="w-1/2 text-xs text-gray-500">Default value applied from classification
+                                        type.
+                                    </p>
                                 @else
                                     <input type="text" wire:model="classifications.{{ $index }}.value"
                                         placeholder="Enter value"
@@ -563,7 +569,7 @@
                             </div>
                         @endforeach
                     </div>
-                    @error('classifications.*.type')
+                    @error('classifications.*.key')
                         <p class="text-sm text-red-600 mt-1.5">{{ $message }}</p>
                     @enderror
                     @error('classifications.*.value')
@@ -772,12 +778,10 @@
 
                 <div>
                     <label>Category Level 3</label>
-                    <x-searchable-select
-                        wire:key="new-hierarchy-level3-{{ md5($newHierarchyLevel1 . '|' . $newHierarchyLevel2) }}"
-                        wire-model="newHierarchyLevel3" :options="$this->hierarchyLevel3NameOptions
-                            ->map(fn($name) => ['value' => $name, 'label' => $name])
-                            ->toArray()" :allow-create="true"
-                        placeholder="Select or type level 3" />
+                    <input type="text" wire:model.defer="newHierarchyLevel3"
+                        class="mt-1.5 block w-full rounded-lg border-gray-300 shadow-sm text-sm focus:border-sky-500 focus:ring-sky-500 focus:ring-1"
+                        placeholder="Example: Janitorial Supplies" />
+
                     @error('newHierarchyLevel3')
                         <p class="mt-1.5 text-sm text-red-600">{{ $message }}</p>
                     @enderror

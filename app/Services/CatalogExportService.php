@@ -6,7 +6,9 @@ use App\Models\CatalogItem;
 use App\Models\CatalogSubmission;
 use App\Models\Vendor;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\IOFactory;
@@ -149,6 +151,7 @@ class CatalogExportService
         CatalogSubmission $submission
     ): string {
         $vendor = $submission->vendor;
+        $catalog = $submission->catalog;
 
         $vendorName = $this->resolveVendorFolderName($vendor);
 
@@ -158,7 +161,8 @@ class CatalogExportService
             $catalogName = $vendorName;
         }
 
-        $disk = $submission->disk ?? 'local';
+        $catalogName = $vendorName . '-' . $catalog->name;
+        $disk = $submission->disk ?? config('filesystems.default');
 
         $itemsQuery = CatalogItem::with([
             'commodityType',
@@ -168,14 +172,27 @@ class CatalogExportService
         ])
             ->where('vendor_id', $vendor->id)
             ->whereIn('status', ['acceptable', 'excellent'])
+            ->whereNull('last_submitted_at')
             ->orderBy('id');
 
-        return $this->generateAndStoreFromQuery(
+        $path = $this->generateAndStoreFromQuery(
             $vendor,
             $catalogName,
             $itemsQuery,
             $disk
         );
+
+        // Stamp the submitted items directly (bypassing the updated_at
+        // timestamp) so their submission state can be tracked without
+        // being flagged as "modified" by the stamp itself.
+        DB::table('catalog_items')
+            ->where('vendor_id', $vendor->id)
+            ->where('catalog_id', $submission->catalog_id)
+            ->whereIn('status', ['acceptable', 'excellent'])
+            ->whereNull('last_submitted_at')
+            ->update(['last_submitted_at' => now()]);
+
+        return $path;
     }
 
     /**
@@ -294,17 +311,13 @@ class CatalogExportService
         Vendor $vendor,
         string $catalogName
     ): string {
-        $vendorName = $this->sanitizeNameComponent(
-            $this->resolveVendorFolderName($vendor)
-        );
-        $catalogName = $this->sanitizeNameComponent($catalogName);
 
-        // Human-readable timestamp; colons are replaced with hyphens
-        // because they are not valid in Windows file names.
-        $timestamp = now()->format('F j, Y g-i A');
+        $folderName = Str::slug($vendor->name);
 
-        return "exports/{$vendorName}/"
-            . "{$vendorName} - {$catalogName} - {$timestamp}.xlsx";
+        return "inbound/{$folderName}/"
+            . "{$catalogName}-"
+            . now()->format('Ymd-His')
+            . '.xlsx';
     }
 
     /**

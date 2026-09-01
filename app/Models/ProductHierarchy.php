@@ -32,7 +32,22 @@ class ProductHierarchy extends Model
 
     public function parent(): BelongsTo
     {
-        return $this->belongsTo(self::class, 'parent_id', 'hierarchy_number');
+        return $this->belongsTo(self::class, 'parent_id', 'id');
+    }
+
+    public function children(): HasMany
+    {
+        return $this->hasMany(self::class, 'parent_id', 'id');
+    }
+
+    /**
+     * Leaf nodes only: level 3 rows, or level 2/1 rows that have no deeper
+     * children. Used to force selecting the most specific hierarchy that
+     * exists for a given branch instead of hard-coding level 3.
+     */
+    public function scopeLeaves($query)
+    {
+        return $query->whereDoesntHave('children');
     }
 
     public function getPathAttribute()
@@ -45,6 +60,6 @@ class ProductHierarchy extends Model
             $category = $category->parent;
         }
 
-        return  implode('! ', $path);
+        return  implode(' > ', $path);
     }
 }

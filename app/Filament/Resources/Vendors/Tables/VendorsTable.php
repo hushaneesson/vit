@@ -7,6 +7,7 @@ use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Support\Str;
 
 class VendorsTable
 {
@@ -15,10 +16,11 @@ class VendorsTable
         return $table
             ->columns([
                 TextColumn::make('name')
+                    ->description(fn($record) => Str::headline($record->tier))
                     ->searchable(),
                 TextColumn::make('primary_contact_name')
-                    ->searchable(),
-                TextColumn::make('primary_contact_email')
+                    ->label('Primary Contact')
+                    ->description(fn($record) => $record->primary_contact_email)
                     ->searchable(),
                 TextColumn::make('primary_contact_phone')
                     ->searchable(),

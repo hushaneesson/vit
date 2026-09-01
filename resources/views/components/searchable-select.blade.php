@@ -1,7 +1,7 @@
 @props(['wireModel', 'options' => [], 'allowCreate' => false, 'placeholder' => 'Select an option...'])
 
 <div {{ $attributes->merge(['class' => 'w-full']) }} wire:ignore x-data="searchableSelect(@js($options), @entangle($wireModel), @js($allowCreate), @js($placeholder))" x-init="init()">
-    <select x-ref="select" ></select>
+    <select x-ref="select"></select>
 </div>
 
 <script>
@@ -20,7 +20,7 @@
 
                 this.tomSelectInstance = new TomSelect(this.$refs.select, {
                     options: options.map(o => ({
-                        value: o.value,
+                        ...o,
                         text: o.label
                     })),
                     valueField: 'value',
@@ -34,6 +34,16 @@
 
                     onChange: (val) => {
                         this.value = val;
+
+                        const option = this.tomSelectInstance.options[val];
+
+                        // Skip the event entirely when cleared (val === ''), otherwise
+                        // the payload serializes to {} and Livewire can't resolve $option.
+                        if (option) {
+                            this.$dispatch('option-selected', {
+                                option: option
+                            });
+                        }
                     },
                     onOptionAdd: (value, data) => {
                         // dispatch to Livewire so you can persist the new option

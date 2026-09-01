@@ -20,6 +20,7 @@ class VendorSeeder extends Seeder
                     'primary_contact_email' => 'sandra.mcneil@acmeoffice.test',
                     'primary_contact_phone' => '804-555-0101',
                     'status' => 'active',
+                    'tier' => 'tier_1',
                 ],
                 'clients' => [
                     [
@@ -34,7 +35,7 @@ class VendorSeeder extends Seeder
                         'email' => 'nora.patel@acmeoffice.test',
                         'phone' => '804-555-0103',
                         'title' => 'Sales Operations Specialist',
-                        'status' => 'invited',
+                        'status' => 'active',
                     ],
                 ],
             ],
@@ -45,6 +46,7 @@ class VendorSeeder extends Seeder
                     'primary_contact_email' => 'caleb.dawson@blueridgefurniture.test',
                     'primary_contact_phone' => '540-555-0141',
                     'status' => 'active',
+                    'tier' => 'tier_2',
                 ],
                 'clients' => [
                     [
@@ -70,6 +72,7 @@ class VendorSeeder extends Seeder
                     'primary_contact_email' => 'renee.alston@piedmonttech.test',
                     'primary_contact_phone' => '703-555-0188',
                     'status' => 'pending',
+                    'tier' => 'tier_3',
                 ],
                 'clients' => [
                     [
@@ -77,7 +80,7 @@ class VendorSeeder extends Seeder
                         'email' => 'victor.hall@piedmonttech.test',
                         'phone' => '703-555-0189',
                         'title' => 'Implementation Lead',
-                        'status' => 'invited',
+                        'status' => 'active',
                     ],
                     [
                         'name' => 'Tina Mendez',
@@ -114,7 +117,7 @@ class VendorSeeder extends Seeder
                         'phone' => $clientData['phone'],
                         'title' => $clientData['title'],
                         'status' => $status,
-                        'invited_at' => in_array($status, ['invited', 'active', 'disabled'], true) ? now() : null,
+                        'invited_at' => in_array($status, ['active', 'disabled'], true) ? now() : null,
                         'activated_at' => in_array($status, ['active', 'disabled'], true) ? now() : null,
                     ]
                 );

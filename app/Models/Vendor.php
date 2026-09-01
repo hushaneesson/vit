@@ -22,6 +22,7 @@ class Vendor extends Model
         'primary_contact_phone',
         'status',
         'notes',
+        'tier',
     ];
 
     public function clients(): HasMany
