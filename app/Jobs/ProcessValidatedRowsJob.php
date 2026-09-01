@@ -45,7 +45,7 @@ class ProcessValidatedRowsJob implements ShouldQueue
      * be moved between catalogs by an upload.
      */
     public const CROSS_CATALOG_SKU_ERROR =
-        'SKU already belongs to another catalog.';
+    'SKU already belongs to another catalog.';
 
     public function __construct(public int $catalogUploadId) {}
 
@@ -188,7 +188,6 @@ class ProcessValidatedRowsJob implements ShouldQueue
     }
 
     /**
->>>>>>> theirs
      * Mark the upload as completed and store processing statistics.
      */
     private function completeUpload(
