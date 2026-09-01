@@ -252,7 +252,7 @@ class CatalogExportService
         Vendor $vendor,
         string $catalogName
     ): string {
-        return "exports/{$vendor->name}/"
+        return "inbound/{$vendor->name}/"
             . "{$catalogName}-"
             . now()->format('Ymd-His')
             . '.xlsx';

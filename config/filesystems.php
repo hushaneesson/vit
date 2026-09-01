@@ -72,7 +72,7 @@ return [
             'username' => env('PARTNER_SFTP_USERNAME'),
             'privateKey' => env('PARTNER_SFTP_PRIVATE_KEY'),
             'passphrase' => env('PARTNER_SFTP_PASSPHRASE'),
-            'port' => env('PARTNER_SFTP_PORT', 22),
+            'port' => (int) env('PARTNER_SFTP_PORT', 22),
             'root' => env('PARTNER_SFTP_ROOT', ''),
             'timeout' => 30,
         ],

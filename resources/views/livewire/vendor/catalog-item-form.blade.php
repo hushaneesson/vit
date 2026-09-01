@@ -52,11 +52,11 @@
             </div>
             <div class="p-6 space-y-8">
                 <div>
-                    <label>Product Name <span class="text-red-600">*</span></label>
+                    <label>Product Name / Short Description <span class="text-red-600">*</span></label>
                     <input type="text" wire:model="name"
                         class="mt-1.5 block w-full rounded-lg border-gray-300 shadow-sm text-sm focus:border-sky-500 focus:ring-sky-500 focus:ring-1" />
                     <p class="text-sm text-gray-500 mt-1.5">Enter the customer facing product title. Example: Premium
-                        2-Ply Bath Tissue, 48 Rolls.</p>
+                        2-Ply Bath Tissue.</p>
                     @error('name')
                         <p class="text-sm text-red-600 mt-1.5">{{ $message }}</p>
                     @enderror
