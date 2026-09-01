@@ -35,7 +35,7 @@ class VendorSeeder extends Seeder
                         'email' => 'nora.patel@acmeoffice.test',
                         'phone' => '804-555-0103',
                         'title' => 'Sales Operations Specialist',
-                        'status' => 'invited',
+                        'status' => 'active',
                     ],
                 ],
             ],
@@ -80,7 +80,7 @@ class VendorSeeder extends Seeder
                         'email' => 'victor.hall@piedmonttech.test',
                         'phone' => '703-555-0189',
                         'title' => 'Implementation Lead',
-                        'status' => 'invited',
+                        'status' => 'active',
                     ],
                     [
                         'name' => 'Tina Mendez',
@@ -117,7 +117,7 @@ class VendorSeeder extends Seeder
                         'phone' => $clientData['phone'],
                         'title' => $clientData['title'],
                         'status' => $status,
-                        'invited_at' => in_array($status, ['invited', 'active', 'disabled'], true) ? now() : null,
+                        'invited_at' => in_array($status, ['active', 'disabled'], true) ? now() : null,
                         'activated_at' => in_array($status, ['active', 'disabled'], true) ? now() : null,
                     ]
                 );

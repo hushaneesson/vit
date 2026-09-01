@@ -11,30 +11,11 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Client (vendor-side) authentication. Clients never have a password —
- * they activate via a one-time invitation link, then log in for every
- * session using a freshly emailed one-time code (OTP).
+ * Client (vendor-side) authentication. Clients never have a password and
+ * log in for every session using a freshly emailed one-time code (OTP).
  */
 class ClientAuthController extends Controller
 {
-    /**
-     * Landing page for an invitation link. Marks the client active so they
-     * can proceed to request an OTP and log in.
-     */
-    public function activate(string $token): RedirectResponse
-    {
-        $client = Client::where('invitation_token', $token)->firstOrFail();
-
-        $client->forceFill([
-            'status' => 'active',
-            'activated_at' => $client->activated_at ?? now(),
-        ])->save();
-
-        return redirect()
-            ->route('vendor.login')
-            ->with('status', 'Your account is now active. Enter your email below to receive a login code.');
-    }
-
     public function showLoginForm()
     {
         return view('vendor.auth.login');
@@ -48,18 +29,28 @@ class ClientAuthController extends Controller
     {
         $request->validate(['email' => ['required', 'email']]);
 
-        $client = Client::where('email', $request->email)->where('status', 'active')->first();
+        $client = Client::where('email', $request->email)
+            ->whereIn('status', ['active', 'invited'])
+            ->first();
 
         // Always respond the same way whether or not the email matched, to
         // avoid leaking which addresses are registered.
         if ($client) {
+            if ($client->status === 'invited') {
+                $client->forceFill([
+                    'status' => 'active',
+                    'activated_at' => $client->activated_at ?? now(),
+                    'invited_at' => $client->invited_at ?? now(),
+                ])->save();
+            }
+
             $code = $client->generateOtp();
             $client->notify(new ClientOtpNotification($code));
         }
 
         return redirect()
             ->route('vendor.login.otp', ['email' => $request->email])
-            ->with('status', 'If that email address is registered and active, a login code has been sent.');
+            ->with('status', 'If that email address is registered, a login code has been sent.');
     }
 
     public function showOtpForm(Request $request)
@@ -79,7 +70,7 @@ class ClientAuthController extends Controller
         ]);
 
         $client = Client::where('email', $request->email)
-            ->where('status', 'active')
+            ->whereIn('status', ['active', 'invited'])
             ->where('otp_code', $request->code)
             ->first();
 
@@ -90,6 +81,9 @@ class ClientAuthController extends Controller
         }
 
         $client->forceFill([
+            'status' => 'active',
+            'activated_at' => $client->activated_at ?? now(),
+            'invited_at' => $client->invited_at ?? now(),
             'otp_code' => null,
             'otp_expires_at' => null,
             'last_login_at' => now(),

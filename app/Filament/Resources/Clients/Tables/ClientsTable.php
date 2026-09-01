@@ -31,18 +31,13 @@ class ClientsTable
                     ->badge()
                     ->color(fn(string $state): string => match ($state) {
                         'active' => 'success',
-                        'invited' => 'warning',
                         'disabled' => 'danger',
                         default => 'gray',
                     }),
                 TextColumn::make('last_login_at')
-                    ->dateTime()
+                    ->dateTime('M d, Y g:i A', 'America/New_York')
                     ->sortable()
                     ->placeholder('Never logged in'),
-                TextColumn::make('created_at')
-                    ->dateTime()
-                    ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
                 SelectFilter::make('vendor_id')
@@ -51,25 +46,11 @@ class ClientsTable
                     ->searchable(),
                 SelectFilter::make('status')
                     ->options([
-                        'invited' => 'Invited',
                         'active' => 'Active',
                         'disabled' => 'Disabled',
                     ]),
             ])
             ->recordActions([
-                Action::make('resendInvitation')
-                    ->label('Resend Invite')
-                    ->icon('heroicon-o-envelope')
-                    ->visible(fn(Client $record) => $record->status !== 'active')
-                    ->action(function (Client $record) {
-                        $token = $record->generateInvitationToken();
-                        $record->notify(new ClientInvitationNotification($token));
-
-                        Notification::make()
-                            ->title('Invitation resent to ' . $record->email)
-                            ->success()
-                            ->send();
-                    }),
                 EditAction::make(),
             ])
             ->toolbarActions([

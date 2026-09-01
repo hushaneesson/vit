@@ -32,6 +32,7 @@ class AdminPanelProvider extends PanelProvider
             ->colors([
                 'primary' => Color::Sky,
             ])
+            ->resourceEditPageRedirect('index')
             ->brandLogo(fn(): string => asset('/logo.png'))
             ->brandLogoHeight(fn(): string => '60px')
             ->viteTheme('resources/css/filament/admin/theme.css')

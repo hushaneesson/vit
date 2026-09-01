@@ -9,7 +9,6 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Notifications\Notifiable;
-use Illuminate\Support\Str;
 
 /**
  * A login account for a person at a vendor company. Logs in via email-OTP
@@ -28,7 +27,6 @@ class Client extends Model implements AuthenticatableContract
         'phone',
         'title',
         'status',
-        'invitation_token',
         'invited_at',
         'activated_at',
         'otp_code',
@@ -38,7 +36,6 @@ class Client extends Model implements AuthenticatableContract
 
     protected $hidden = [
         'otp_code',
-        'invitation_token',
     ];
 
     protected $with = [
@@ -68,18 +65,6 @@ class Client extends Model implements AuthenticatableContract
     public function catalogSubmissions(): HasMany
     {
         return $this->hasMany(CatalogSubmission::class);
-    }
-
-    public function generateInvitationToken(): string
-    {
-        $token = Str::random(48);
-        $this->forceFill([
-            'invitation_token' => $token,
-            'invited_at' => now(),
-            'status' => 'invited',
-        ])->save();
-
-        return $token;
     }
 
     public function generateOtp(): string
