@@ -787,9 +787,12 @@ class CatalogItemForm extends Component
             return $item;
         });
 
-        session()->flash('status', $this->catalogItemId
-            ? 'Catalog item updated successfully.'
-            : 'Catalog item added successfully.');
+        session()->flash('notify', [
+            'type' => 'success',
+            'message' => $this->catalogItemId
+                ? 'Catalog item updated successfully.'
+                : 'Catalog item added successfully.',
+        ]);
 
         return redirect()->route('vendor.catalog.items', ['catalog' => $catalogItem->catalog_id]);
     }

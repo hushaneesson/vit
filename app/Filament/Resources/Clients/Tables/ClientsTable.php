@@ -8,7 +8,6 @@ use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
-use Filament\Notifications\Notification;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
@@ -51,6 +50,16 @@ class ClientsTable
                     ]),
             ])
             ->recordActions([
+                Action::make('resendInvitation')
+                    ->label('Resend Invite')
+                    ->icon('heroicon-o-envelope')
+                    ->visible(fn(Client $record) => $record->status !== 'active')
+                    ->action(function (Client $record) {
+                        $token = $record->generateInvitationToken();
+                        $record->notify(new ClientInvitationNotification($token));
+
+                        $this->getLivewire()->dispatch('notify', type: 'success', message: 'Invitation resent to ' . $record->email);
+                    }),
                 EditAction::make(),
             ])
             ->toolbarActions([

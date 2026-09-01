@@ -7,7 +7,6 @@ use App\Jobs\UploadCatalogSubmissionToVit;
 use App\Models\CatalogSubmission;
 use Filament\Actions\Action;
 use Filament\Actions\DeleteBulkAction;
-use Filament\Notifications\Notification;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
@@ -64,41 +63,25 @@ class CatalogSubmissionsTable
                     ->action(function (CatalogSubmission $record) {
                         // Guard: must be in ready_for_review status
                         if ($record->status !== CatalogSubmissionStatus::ReadyForReview) {
-                            Notification::make()
-                                ->title('Cannot approve')
-                                ->body('This submission is not ready for review.')
-                                ->danger()
-                                ->send();
+                            $this->getLivewire()->dispatch('notify', type: 'error', message: 'Cannot approve: This submission is not ready for review.');
                             return;
                         }
 
                         // Guard: processing_status must be completed
                         if ($record->processing_status !== 'completed') {
-                            Notification::make()
-                                ->title('Cannot approve')
-                                ->body('The Excel file has not been generated yet. Please wait for generation to complete.')
-                                ->warning()
-                                ->send();
+                            $this->getLivewire()->dispatch('notify', type: 'warning', message: 'Cannot approve: The Excel file has not been generated yet. Please wait for generation to complete.');
                             return;
                         }
 
                         // Guard: file_path must exist
                         if (!$record->file_path) {
-                            Notification::make()
-                                ->title('Cannot approve')
-                                ->body('The Excel file path is missing. Please contact support.')
-                                ->danger()
-                                ->send();
+                            $this->getLivewire()->dispatch('notify', type: 'error', message: 'Cannot approve: The Excel file path is missing. Please contact support.');
                             return;
                         }
 
                         // Guard: file must exist on storage
                         if (!Storage::disk($record->disk ?? 'local')->exists($record->file_path)) {
-                            Notification::make()
-                                ->title('Cannot approve')
-                                ->body('The generated Excel file is missing from storage.')
-                                ->danger()
-                                ->send();
+                            $this->getLivewire()->dispatch('notify', type: 'error', message: 'Cannot approve: The generated Excel file is missing from storage.');
                             return;
                         }
 
@@ -120,17 +103,9 @@ class CatalogSubmissionsTable
                             // Dispatch the FTP upload job (uploads existing file, does NOT regenerate)
                             UploadCatalogSubmissionToVit::dispatch($record->id);
 
-                            Notification::make()
-                                ->title('Submission approved')
-                                ->body('The Excel file is being uploaded to the VIT FTP server.')
-                                ->success()
-                                ->send();
+                            $this->getLivewire()->dispatch('notify', type: 'success', message: 'Submission approved: The Excel file is being uploaded to the VIT FTP server.');
                         } catch (\Throwable $e) {
-                            Notification::make()
-                                ->title('Approval failed')
-                                ->body($e->getMessage())
-                                ->danger()
-                                ->send();
+                            $this->getLivewire()->dispatch('notify', type: 'error', message: 'Approval failed: ' . $e->getMessage());
                         }
                     }),
 
@@ -140,20 +115,12 @@ class CatalogSubmissionsTable
                     ->color('info')
                     ->action(function (CatalogSubmission $record) {
                         if (!$record->file_path) {
-                            Notification::make()
-                                ->title('File not available')
-                                ->body('The Excel file has not been generated yet')
-                                ->warning()
-                                ->send();
+                            $this->getLivewire()->dispatch('notify', type: 'warning', message: 'File not available: The Excel file has not been generated yet.');
                             return;
                         }
 
                         if (!Storage::disk($record->disk ?? 'local')->exists($record->file_path)) {
-                            Notification::make()
-                                ->title('File not found')
-                                ->body('The generated file is missing from storage')
-                                ->danger()
-                                ->send();
+                            $this->getLivewire()->dispatch('notify', type: 'error', message: 'File not found: The generated file is missing from storage.');
                             return;
                         }
 

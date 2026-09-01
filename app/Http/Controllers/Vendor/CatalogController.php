@@ -52,6 +52,9 @@ class CatalogController extends Controller
 
         return redirect()
             ->route('vendor.catalog.items', ['catalog' => $catalog->id])
-            ->with('status', 'Catalog created. You can now add items to it.');
+            ->with('notify', [
+                'type' => 'success',
+                'message' => 'Catalog created. You can now add items to it.',
+            ]);
     }
 }

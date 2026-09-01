@@ -5,7 +5,6 @@ namespace App\Filament\Resources\Users\Pages;
 use App\Filament\Resources\Users\UserResource;
 use Filament\Auth\Notifications\ResetPassword as ResetPasswordNotification;
 use Filament\Facades\Filament;
-use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
 use Illuminate\Contracts\Auth\CanResetPassword;
 use Illuminate\Support\Facades\Notification as NotificationFacade;
@@ -41,18 +40,11 @@ class CreateUser extends CreateRecord
         );
 
         if ($status === Password::RESET_LINK_SENT) {
-            Notification::make()
-                ->title('User created and reset-link email sent.')
-                ->success()
-                ->send();
+            $this->dispatch('notify', type: 'success', message: 'User created and reset-link email sent.');
 
             return;
         }
 
-        Notification::make()
-            ->title('User created, but reset-link email could not be sent.')
-            ->body(__($status))
-            ->warning()
-            ->send();
+        $this->dispatch('notify', type: 'warning', message: 'User created, but reset-link email could not be sent. ' . __($status));
     }
 }
