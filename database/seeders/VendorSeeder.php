@@ -20,6 +20,7 @@ class VendorSeeder extends Seeder
                     'primary_contact_email' => 'sandra.mcneil@acmeoffice.test',
                     'primary_contact_phone' => '804-555-0101',
                     'status' => 'active',
+                    'tier' => 'tier_1',
                 ],
                 'clients' => [
                     [
@@ -45,6 +46,7 @@ class VendorSeeder extends Seeder
                     'primary_contact_email' => 'caleb.dawson@blueridgefurniture.test',
                     'primary_contact_phone' => '540-555-0141',
                     'status' => 'active',
+                    'tier' => 'tier_2',
                 ],
                 'clients' => [
                     [
@@ -70,6 +72,7 @@ class VendorSeeder extends Seeder
                     'primary_contact_email' => 'renee.alston@piedmonttech.test',
                     'primary_contact_phone' => '703-555-0188',
                     'status' => 'pending',
+                    'tier' => 'tier_3',
                 ],
                 'clients' => [
                     [
