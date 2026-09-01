@@ -15,5 +15,4 @@ Artisan::command('inspire', function () {
 // Demo/staging only: wipes and reseeds the database every 7 days.
 Schedule::command('elink:reset-database')
     ->weekly()
-    ->when(fn () => (bool) config('catalog.allow_db_reset'));
-
+    ->when(fn() => (bool) config('catalog.allow_db_reset'));

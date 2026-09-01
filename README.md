@@ -93,15 +93,15 @@ npm run dev
 
 In addition to the standard Laravel `.env` values, this app uses:
 
-| Variable                             | Purpose                                                                                            |
-| ------------------------------------ | -------------------------------------------------------------------------------------------------- |
-| `VIT_ADMIN_EMAIL`                    | Receives "catalog ready for review" notifications                                                  |
-| `VIT_GATEWAY_EMAIL`                  | Receives notifications for new/unrecognized hierarchy paths, commodity types, and units of measure |                                                          |
-| `VIT_RETRY_AFTER_HOURS`              | Comma-separated hours after which failed uploads are auto-retried (default `1,6,24`)               |
-| `VIT_EXCEL_IMAGE_SIZE`               | Square pixel size images are resized to when embedded in the export Excel file                     |
-| `VIT_EXCEL_IMAGE_PADDING`            | Padding (px) between stacked images in the export Excel file                                       |
-| `CATALOG_PROCESSING_TIMEOUT_MINUTES` | Minutes before a stuck catalog upload job is considered stale and reclaimable                      |
-| `ALLOW_PERIODIC_DB_RESET`     | When `true`, `elink:reset-database` runs weekly (via the scheduler) to wipe and reseed the database. Demo/staging only — leave unset in production |
+| Variable                             | Purpose                                                                                                                                            |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | --- |
+| `VIT_ADMIN_EMAIL`                    | Receives "catalog ready for review" notifications                                                                                                  |
+| `VIT_GATEWAY_EMAIL`                  | Receives notifications for new/unrecognized hierarchy paths, commodity types, and units of measure                                                 |     |
+| `VIT_RETRY_AFTER_HOURS`              | Comma-separated hours after which failed uploads are auto-retried (default `1,6,24`)                                                               |
+| `VIT_EXCEL_IMAGE_SIZE`               | Square pixel size images are resized to when embedded in the export Excel file                                                                     |
+| `VIT_EXCEL_IMAGE_PADDING`            | Padding (px) between stacked images in the export Excel file                                                                                       |
+| `CATALOG_PROCESSING_TIMEOUT_MINUTES` | Minutes before a stuck catalog upload job is considered stale and reclaimable                                                                      |
+| `ALLOW_PERIODIC_DB_RESET`            | When `true`, `elink:reset-database` runs weekly (via the scheduler) to wipe and reseed the database. Demo/staging only — leave unset in production |
 
 ## Testing
 
