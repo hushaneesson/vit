@@ -26,21 +26,6 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | VIT Catalog Upload API
-    |--------------------------------------------------------------------------
-    |
-    | Placeholder endpoint until VIT provides real production credentials.
-    | Do not hardcode secrets here — always via .env.
-    |
-    */
-    'api' => [
-        'endpoint' => env('VIT_API_ENDPOINT', 'https://api.vit-placeholder.com/v1/catalogs/upload'),
-        'token' => env('VIT_API_TOKEN'),
-        'timeout' => (int) env('VIT_API_TIMEOUT', 30),
-    ],
-
-    /*
-    |--------------------------------------------------------------------------
     | Auto-Retry Schedule (Phase 11)
     |--------------------------------------------------------------------------
     |

@@ -171,7 +171,7 @@ class CatalogSubmissionButton extends Component
                 try {
                     GenerateCatalogExportJob::dispatch($submission->id);
 
-                    $adminEmail = config('vit.admin_email');
+                    $adminEmail = config('vit.gateway_email');
 
                     if (is_string($adminEmail) && $adminEmail !== '') {
                         Notification::route('mail', $adminEmail)
