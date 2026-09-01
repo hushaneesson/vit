@@ -6,6 +6,7 @@ use App\Models\CatalogItem;
 use App\Models\CatalogSubmission;
 use App\Models\Vendor;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
@@ -147,14 +148,26 @@ class CatalogExportService
         ])
             ->where('vendor_id', $vendor->id)
             ->whereIn('status', ['acceptable', 'excellent'])
+            ->whereNull('last_submitted_at')
             ->orderBy('id');
 
-        return $this->generateAndStoreFromQuery(
+        $path = $this->generateAndStoreFromQuery(
             $vendor,
             $catalogName,
             $itemsQuery,
             $disk
         );
+
+        // Stamp the submitted items directly (bypassing the updated_at
+        // timestamp) so their submission state can be tracked without
+        // being flagged as "modified" by the stamp itself.
+        DB::table('catalog_items')
+            ->where('vendor_id', $vendor->id)
+            ->whereIn('status', ['acceptable', 'excellent'])
+            ->whereNull('last_submitted_at')
+            ->update(['last_submitted_at' => now()]);
+
+        return $path;
     }
 
     /**

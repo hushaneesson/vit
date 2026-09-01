@@ -45,6 +45,7 @@ class CatalogItem extends Model
         // not VIT, but useful for completeness scoring
         'status',
         'completeness_score',
+        'last_submitted_at',
     ];
 
     protected $casts = [
@@ -53,6 +54,7 @@ class CatalogItem extends Model
         'specifications' => 'array',
         'selling_points' => 'array',
         'classifications' => 'array',
+        'last_submitted_at' => 'datetime',
     ];
 
     public function vendor()
@@ -83,6 +85,21 @@ class CatalogItem extends Model
     public function unitOfMeasure()
     {
         return $this->belongsTo(UnitOfMeasure::class, 'unit_of_measure', 'id');
+    }
+
+    /**
+     * Whether this item has never been submitted or was submitted and has
+     * not changed since. last_submitted_at is cleared whenever the item is
+     * modified, so a non-null value always means it matches what was submitted.
+     *
+     * - 'not_submitted': last_submitted_at is null.
+     * - 'submitted': last_submitted_at is set.
+     */
+    protected function submissionState(): Attribute
+    {
+        return Attribute::make(
+            get: fn() => $this->last_submitted_at === null ? 'modified' : 'submitted',
+        );
     }
 
     protected function replacementSku(): Attribute
@@ -165,6 +182,12 @@ class CatalogItem extends Model
             $stats = self::calculateCompleteness($item->toArray());
             $item->completeness_score = $stats['score'];
             $item->status = $stats['status'];
+
+            // Any change other than an explicit last_submitted_at update means
+            // the item no longer matches what was last submitted.
+            if ($item->exists && $item->isDirty() && ! $item->isDirty('last_submitted_at')) {
+                $item->last_submitted_at = null;
+            }
         });
     }
 

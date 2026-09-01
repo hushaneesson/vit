@@ -51,6 +51,7 @@ return new class extends Migration
 
             $table->string('status', 20)->default('incomplete');
             $table->integer('completeness_score')->default(0);
+            $table->timestamp('last_submitted_at')->nullable();
 
             $table->timestamps();
 

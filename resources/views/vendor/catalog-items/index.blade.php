@@ -10,7 +10,8 @@
                     <i class="fas fa-arrow-left"></i>
                     Back to Catalogs
                 </a>
-                <a href="{{ route('vendor.catalog-upload', ['catalogId' => $catalog->id]) }}" class="w-full text-white md:w-auto btn btn-gray">
+                <a href="{{ route('vendor.catalog-upload', ['catalogId' => $catalog->id]) }}"
+                    class="w-full text-white md:w-auto btn btn-gray">
                     <i class="fas fa-upload"></i>
                     Batch Upload
                 </a>
@@ -103,6 +104,9 @@
                                         Status</th>
                                     <th
                                         class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">
+                                        Submission Status</th>
+                                    <th
+                                        class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">
                                     </th>
                                 </tr>
                             </thead>
@@ -133,6 +137,7 @@
                                                 @endif
                                             </span>
                                         </td>
+                                        <td class="px-6 py-4 text-gray-500">{{ $item->submissionState }}</td>
                                         <td class="px-6 py-4 space-x-3">
                                             <a href="{{ route('vendor.catalog.edit', $item) }}"
                                                 class="text-sky-600 hover:text-sky-800">Edit</a>
