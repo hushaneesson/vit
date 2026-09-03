@@ -89,9 +89,11 @@ class CatalogExportService
     ): string {
         $fields = VitFieldDefinition::exportableFields();
 
+        $spreadsheet = new Spreadsheet();
+
         $this->applyVitExportMarker($spreadsheet);
 
-        $spreadsheet = new Spreadsheet();
+
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Catalog');
 
