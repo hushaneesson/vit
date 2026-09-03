@@ -8,7 +8,9 @@ use App\Models\CatalogUpload;
 use App\Models\CatalogUploadRow;
 use App\Models\CommodityType;
 use App\Models\UnitOfMeasure;
+use App\Services\Catalog\CatalogItemProcessor;
 use App\Services\Catalog\CatalogRowValidator;
+use App\Services\Catalog\CatalogValidationReportService;
 use App\Services\VitFieldDefinition;
 use App\Services\WeightUnitConverter;
 use Illuminate\Bus\Queueable;
@@ -20,6 +22,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use OpenSpout\Common\Entity\Cell;
+use OpenSpout\Reader\XLSX\Reader as OpenSpoutXlsxReader;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Reader\Csv as CsvReader;
@@ -32,13 +36,10 @@ class ProcessCatalogUploadJob implements ShouldQueue
 
     public int $tries = 1;
 
-    /**
-     * 30 minute ceiling for very large vendor files.
-     */
+    // 30-minute ceiling for very large vendor files.
     public int $timeout = 1800;
 
     private const BATCH_SIZE = 200;
-
     private const READ_CHUNK_SIZE = 500;
 
     public function __construct(
@@ -46,8 +47,13 @@ class ProcessCatalogUploadJob implements ShouldQueue
         public bool $isVitFileImport = false
     ) {}
 
-    public function handle(CatalogRowValidator $validator): void
-    {
+    // Job lifecycle
+
+    public function handle(
+        CatalogRowValidator $validator,
+        CatalogItemProcessor $itemProcessor,
+        CatalogValidationReportService $reportService
+    ): void {
         $upload = $this->loadUpload();
 
         $this->markUploadAsProcessing($upload);
@@ -56,41 +62,35 @@ class ProcessCatalogUploadJob implements ShouldQueue
 
         try {
             $context = $this->buildProcessingContext($upload);
-
             $temporaryPath = $context['temporary_path'];
 
-            [$successCount, $errorCount] = $this->processUpload(
+            $counts = $this->processUpload(
                 $upload,
                 $validator,
+                $itemProcessor,
+                $reportService,
                 $context
             );
 
             $this->finalizeUpload(
                 $upload,
-                $successCount,
-                $errorCount
+                $reportService,
+                $counts
             );
         } catch (Throwable $e) {
             $this->handleFailure($upload, $e);
-
             throw $e;
         } finally {
             $this->cleanupTemporaryFile($temporaryPath);
         }
     }
 
-    /**
-     * Load the upload and its column mappings.
-     */
     private function loadUpload(): CatalogUpload
     {
-        return CatalogUpload::with('columnMappings')
+        return CatalogUpload::with(['vendor', 'columnMappings'])
             ->findOrFail($this->catalogUploadId);
     }
 
-    /**
-     * Mark the upload as being processed by this job.
-     */
     private function markUploadAsProcessing(CatalogUpload $upload): void
     {
         $upload->update([
@@ -99,21 +99,8 @@ class ProcessCatalogUploadJob implements ShouldQueue
         ]);
     }
 
-    /**
-     * Build all metadata and reader configuration needed to process the upload.
-     *
-     * @return array{
-     *     columnToFieldKey: mixed,
-     *     activeFields: mixed,
-     *     rangeFieldKeys: array<int, string>,
-     *     lookupMaps: array<string, mixed>,
-     *     localPath: string,
-     *     temporary_path: string|null,
-     *     reader: mixed,
-     *     allowedColumns: array<int, int>,
-     *     totalRows: int
-     * }
-     */
+    // Upload setup
+
     private function buildProcessingContext(CatalogUpload $upload): array
     {
         $columnToFieldKey = $this->buildColumnToFieldKey($upload);
@@ -122,48 +109,38 @@ class ProcessCatalogUploadJob implements ShouldQueue
             ->keyBy('field_key');
 
         $rangeFieldKeys = $this->buildRangeFieldKeys($upload);
-
         $lookupMaps = $this->buildLookupMaps();
 
-        $pathResult = $this->resolveLocalPath(
+                $pathResult = $this->resolveLocalPath(
             $upload->disk,
             $upload->file_path
         );
 
         $localPath = $pathResult['path'];
 
-        $reader = $this->createReader(
-            $upload->file_type,
-            $localPath
-        );
-
+        $reader = null;
         $allowedColumns = [];
+        $totalRows = PHP_INT_MAX;
 
-        if ($upload->file_type !== 'csv') {
+        if ($upload->file_type === 'csv') {
+            $reader = $this->createReader('csv');
+            $totalRows = $this->determineTotalRows($reader, $localPath);
+        } elseif ($upload->file_type === 'xlsx') {
+            // Streaming path: OpenSpout handles the workbook without loading
+            // sharedStrings.xml into memory. No PhpSpreadsheet reader needed.
+            $totalRows = PHP_INT_MAX;
+        } else {
+            $reader = $this->createReader($upload->file_type);
             $this->configureExcelReader(
                 $reader,
                 $localPath,
                 $upload,
                 $allowedColumns
             );
+            $totalRows = $this->determineTotalRows($reader, $localPath);
         }
 
-        $totalRows = $this->determineTotalRows(
-            $reader,
-            $localPath,
-            $upload->file_type
-        );
-
-        /*
-         * Whether this upload was detected as a genuine VIT-generated export.
-         * The single detection happens in VendorCatalogUpload (via
-         * VitExportFileDetector::detect) and is carried into the job so that
-         * already-normalized VIT values are not transformed again (e.g. item
-         * weight is already pounds in a VIT file).
-         */
-
-        // Weight unit is mapper configuration carried on the item_weight
-        // mapping row. Default to pounds when not present.
+        // Mapper configuration determines the source weight unit.
         $weightUnit = WeightUnitConverter::DEFAULT_UNIT;
 
         $weightMapping = $upload->columnMappings
@@ -171,7 +148,7 @@ class ProcessCatalogUploadJob implements ShouldQueue
 
         if (
             $weightMapping
-            && ! empty($weightMapping->source_separator)
+            && !empty($weightMapping->source_separator)
         ) {
             $weightUnit = (string) $weightMapping->source_separator;
         }
@@ -191,9 +168,6 @@ class ProcessCatalogUploadJob implements ShouldQueue
         ];
     }
 
-    /**
-     * Build the source-column => field-key mapping used by mapRow().
-     */
     private function buildColumnToFieldKey(CatalogUpload $upload)
     {
         return $upload->columnMappings
@@ -202,14 +176,6 @@ class ProcessCatalogUploadJob implements ShouldQueue
             ]);
     }
 
-    /**
-     * Determine which mapped fields use attribute-range mode.
-     *
-     * A field is treated as a range field when it has more than one
-     * column mapping row.
-     *
-     * @return array<int, string>
-     */
     private function buildRangeFieldKeys(CatalogUpload $upload): array
     {
         return $upload->columnMappings
@@ -219,18 +185,6 @@ class ProcessCatalogUploadJob implements ShouldQueue
             ->all();
     }
 
-    /**
-     * Build normalized lookup maps once per upload instead of querying
-     * reference tables for every row.
-     *
-     * @return array{
-     *     category: array<string, int>,
-     *     unit_of_measure: array{
-     *         description: array<string, int>,
-     *         code: array<string, int>
-     *     }
-     * }
-     */
     private function buildLookupMaps(): array
     {
         return [
@@ -250,10 +204,7 @@ class ProcessCatalogUploadJob implements ShouldQueue
         ];
     }
 
-    /**
-     * Create the appropriate spreadsheet reader for the uploaded file type.
-     */
-    private function createReader(string $fileType, string $localPath): object
+    private function createReader(string $fileType): object
     {
         $reader = $fileType === 'csv'
             ? new CsvReader()
@@ -266,11 +217,6 @@ class ProcessCatalogUploadJob implements ShouldQueue
         return $reader;
     }
 
-    /**
-     * Configure Excel-specific memory controls.
-     *
-     * Only the first worksheet and mapped columns are loaded.
-     */
     private function configureExcelReader(
         object $reader,
         string $localPath,
@@ -294,16 +240,11 @@ class ProcessCatalogUploadJob implements ShouldQueue
         }
     }
 
-    /**
-     * Determine the total number of rows without materializing the workbook.
-     */
     private function determineTotalRows(
         object $reader,
-        string $localPath,
-        string $fileType
+        string $localPath
     ): int {
         $worksheetInfo = $reader->listWorksheetInfo($localPath);
-
         $totalRows = $worksheetInfo[0]['totalRows'] ?? 0;
 
         return $totalRows > 0
@@ -311,25 +252,29 @@ class ProcessCatalogUploadJob implements ShouldQueue
             : PHP_INT_MAX;
     }
 
-    /**
-     * Process the uploaded file according to its format.
-     *
-     * CSV files are streamed directly so the entire file does not need to be
-     * loaded repeatedly for every 500-row chunk.
-     *
-     * Excel files continue using PhpSpreadsheet's chunked read-filter approach.
-     *
-     * @return array{0: int, 1: int}
-     */
+    // File processing
+
     private function processUpload(
         CatalogUpload $upload,
         CatalogRowValidator $validator,
+        CatalogItemProcessor $itemProcessor,
+        CatalogValidationReportService $reportService,
         array $context
     ): array {
         if ($upload->file_type === 'csv') {
             return $this->processCsvFile(
                 $upload,
                 $validator,
+                $itemProcessor,
+                $context
+            );
+        }
+
+        if ($upload->file_type === 'xlsx') {
+            return $this->processExcelFileStreaming(
+                $upload,
+                $validator,
+                $itemProcessor,
                 $context
             );
         }
@@ -337,24 +282,15 @@ class ProcessCatalogUploadJob implements ShouldQueue
         return $this->processExcelFile(
             $upload,
             $validator,
+            $itemProcessor,
             $context
         );
     }
 
-    /**
-     * Process CSV rows as a stream.
-     *
-     * The first CSV row is always treated as the header and is never
-     * mapped, validated, counted, or inserted into catalog_upload_rows.
-     *
-     * fgetcsv() preserves standard CSV quoting/escaping behavior while
-     * allowing the job to process one row at a time.
-     *
-     * @return array{0: int, 1: int}
-     */
     private function processCsvFile(
         CatalogUpload $upload,
         CatalogRowValidator $validator,
+        CatalogItemProcessor $itemProcessor,
         array $context
     ): array {
         $handle = fopen($context['localPath'], 'rb');
@@ -365,31 +301,24 @@ class ProcessCatalogUploadJob implements ShouldQueue
             );
         }
 
-        $successCount = 0;
-        $errorCount = 0;
+        $createdCount = 0;
+        $updatedCount = 0;
+        $unchangedCount = 0;
+        $invalidCount = 0;
         $batch = [];
-
-        /*
-         * CSV row numbers are kept aligned with the physical file:
-         *
-         * Row 1 = header
-         * Row 2 = first data row
-         * Row 3 = second data row
-         *
-         * This is also consistent with the Excel processing path.
-         */
         $sourceRowNumber = 0;
+
+        $vendor = $upload->vendor;
+        $nonComparableColumns = [
+            'dealer_sku',
+            'vendor_id',
+        ];
 
         try {
             while (($rowCells = fgetcsv($handle)) !== false) {
                 $sourceRowNumber++;
 
-                /*
-                 * IMPORTANT:
-                 *
-                 * The first physical CSV row is the header.
-                 * Do not pass it through mapRow() or validation.
-                 */
+                // Row 1 is the header.
                 if ($sourceRowNumber === 1) {
                     continue;
                 }
@@ -423,21 +352,43 @@ class ProcessCatalogUploadJob implements ShouldQueue
                 );
 
                 if ($result['status'] === 'valid') {
-                    $successCount++;
+                    $catalogUploadRow = $this->persistValidRow(
+                        $upload,
+                        $sourceRowNumber,
+                        $mappedData,
+                        $rawData,
+                        $result
+                    );
+
+                    $itemResult = $this->processValidRow(
+                        $upload,
+                        $vendor,
+                        $itemProcessor,
+                        $nonComparableColumns,
+                        $catalogUploadRow
+                    );
+
+                    if (!empty($itemResult['cross_catalog_rejected'])) {
+                        $invalidCount++;
+                    } else {
+                        $createdCount += $itemResult['created'];
+                        $updatedCount += $itemResult['updated'];
+                        $unchangedCount += $itemResult['unchanged'];
+                    }
                 } else {
-                    $errorCount++;
-                }
+                    $invalidCount++;
 
-                $batch[] = $this->buildRowPayload(
-                    $upload,
-                    $sourceRowNumber,
-                    $mappedData,
-                    $rawData,
-                    $result
-                );
+                    $batch[] = $this->buildRowPayload(
+                        $upload,
+                        $sourceRowNumber,
+                        $mappedData,
+                        $rawData,
+                        $result
+                    );
 
-                if (count($batch) >= self::BATCH_SIZE) {
-                    $this->flushBatch($batch);
+                    if (count($batch) >= self::BATCH_SIZE) {
+                        $this->flushBatch($batch);
+                    }
                 }
             }
 
@@ -448,16 +399,14 @@ class ProcessCatalogUploadJob implements ShouldQueue
             fclose($handle);
         }
 
-        return [$successCount, $errorCount];
+        return [
+            'created' => $createdCount,
+            'updated' => $updatedCount,
+            'unchanged' => $unchangedCount,
+            'invalid' => $invalidCount,
+        ];
     }
 
-    /**
-     * Convert a CSV row into the same 0-based column-index structure used
-     * by the Excel processing path.
-     *
-     * @param array<int, mixed> $row
-     * @return array<int, mixed>
-     */
     private function indexCsvRow(array $row): array
     {
         $indexed = [];
@@ -469,134 +418,122 @@ class ProcessCatalogUploadJob implements ShouldQueue
         return $indexed;
     }
 
-    /**
-     * Process Excel files in bounded row chunks.
-     *
-     * Row 1 is always treated as the header.
-     *
-     * @return array{0: int, 1: int}
-     */
     private function processExcelFile(
         CatalogUpload $upload,
         CatalogRowValidator $validator,
+        CatalogItemProcessor $itemProcessor,
         array $context
     ): array {
-        $successCount = 0;
-        $errorCount = 0;
+        $createdCount = 0;
+        $updatedCount = 0;
+        $unchangedCount = 0;
+        $invalidCount = 0;
+        $totalRows = $context['totalRows'];
 
-        /*
-         * Row 1 is the header.
-         * Data processing therefore starts explicitly at row 2.
-         */
-        $chunkStartRow = 2;
+        $vendor = $upload->vendor;
+        $nonComparableColumns = [
+            'dealer_sku',
+            'vendor_id',
+        ];
 
-        while ($chunkStartRow <= $context['totalRows']) {
-            $chunkEndRow = min(
-                $chunkStartRow + self::READ_CHUNK_SIZE - 1,
-                $context['totalRows']
-            );
-
-            [$chunkSuccess, $chunkErrors] = $this->processExcelChunk(
-                $upload,
-                $validator,
-                $context,
-                $chunkStartRow,
-                $chunkEndRow
-            );
-
-            $successCount += $chunkSuccess;
-            $errorCount += $chunkErrors;
-
-            $chunkStartRow = $chunkEndRow + 1;
-        }
-
-        return [$successCount, $errorCount];
-    }
-
-    /**
-     * Load and process one Excel row chunk.
-     *
-     * @return array{0: int, 1: int}
-     */
-    private function processExcelChunk(
-        CatalogUpload $upload,
-        CatalogRowValidator $validator,
-        array $context,
-        int $chunkStartRow,
-        int $chunkEndRow
-    ): array {
-        $reader = $context['reader'];
-        $allowedColumns = $context['allowedColumns'];
-
-        if (!empty($allowedColumns)) {
-            $reader->setReadFilter(
-                $this->createReadFilter(
-                    $allowedColumns,
-                    $chunkStartRow,
-                    $chunkEndRow
-                )
-            );
-        }
-
-        $spreadsheet = $reader->load(
+        // Load the workbook once; the reader already limits it to mapped columns.
+        $spreadsheet = $context['reader']->load(
             $context['localPath']
         );
 
         try {
-            /*
-             * Always explicitly use worksheet 0.
-             *
-             * This prevents workbook active-sheet metadata from causing
-             * another worksheet to be processed.
-             */
             $sheet = $spreadsheet->getSheet(0);
+            $chunkStartRow = 2;
 
-            $highestRow = $sheet->getHighestDataRow();
+            while ($chunkStartRow <= $totalRows) {
+                $chunkEndRow = min(
+                    $chunkStartRow + self::READ_CHUNK_SIZE - 1,
+                    $totalRows
+                );
 
-            /*
-             * Never allow processing to move above row 2.
-             *
-             * Row 1 is the header and must never reach mapRow() or
-             * CatalogRowValidator.
-             */
-            $effectiveStartRow = max(
-                2,
-                $chunkStartRow
+                $chunkResult = $this->processExcelRows(
+                    $upload,
+                    $validator,
+                    $itemProcessor,
+                    $context,
+                    $sheet,
+                    $chunkStartRow,
+                    $chunkEndRow,
+                    $vendor,
+                    $nonComparableColumns
+                );
+
+                $createdCount += $chunkResult['created'];
+                $updatedCount += $chunkResult['updated'];
+                $unchangedCount += $chunkResult['unchanged'];
+                $invalidCount += $chunkResult['invalid'];
+                $chunkStartRow = $chunkEndRow + 1;
+            }
+        } finally {
+            $spreadsheet->disconnectWorksheets();
+
+            unset(
+                $sheet,
+                $spreadsheet
             );
 
-            $effectiveEndRow = min(
-                $highestRow,
-                $chunkEndRow
-            );
+            gc_collect_cycles();
+        }
 
-            $successCount = 0;
-            $errorCount = 0;
-            $batch = [];
+        return [
+            'created' => $createdCount,
+            'updated' => $updatedCount,
+            'unchanged' => $unchangedCount,
+            'invalid' => $invalidCount,
+        ];
+    }
 
-            for (
-                $rowIndex = $effectiveStartRow;
-                $rowIndex <= $effectiveEndRow;
-                $rowIndex++
-            ) {
-                /*
-                 * Defensive guard:
-                 *
-                 * Even if the chunk boundaries are changed in the future,
-                 * row 1 can never be processed as catalog data.
-                 */
-                if ($rowIndex < 2) {
+    private function processExcelFileStreaming(
+        CatalogUpload $upload,
+        CatalogRowValidator $validator,
+        CatalogItemProcessor $itemProcessor,
+        array $context
+    ): array {
+        $createdCount = 0;
+        $updatedCount = 0;
+        $unchangedCount = 0;
+        $invalidCount = 0;
+        $batch = [];
+        $sourceRowNumber = 0;
+
+        $vendor = $upload->vendor;
+        $nonComparableColumns = [
+            'dealer_sku',
+            'vendor_id',
+        ];
+
+        $reader = new OpenSpoutXlsxReader();
+
+        try {
+            $reader->open($context['localPath']);
+
+            $sheetIterator = $reader->getSheetIterator();
+
+            $sheetIterator->rewind();
+            $sheet = $sheetIterator->current();
+
+            if ($sheet === null) {
+                throw new \RuntimeException('XLSX file has no worksheets.');
+            }
+
+            $rowIterator = $sheet->getRowIterator();
+
+            foreach ($rowIterator as $row) {
+                $sourceRowNumber++;
+
+                // Row 1 is the header.
+                if ($sourceRowNumber === 1) {
                     continue;
                 }
 
-                $rowCells = $this->extractExcelRow(
-                    $sheet,
-                    $rowIndex
-                );
+                $rowCells = $this->extractOpenSpoutRow($row);
 
-                if (
-                    empty($rowCells)
-                    || $this->rowIsBlank($rowCells)
-                ) {
+                if (empty($rowCells) || $this->rowIsBlank($rowCells)) {
                     continue;
                 }
 
@@ -616,14 +553,246 @@ class ProcessCatalogUploadJob implements ShouldQueue
                     $validator,
                     $context['activeFields'],
                     $mappedData,
-                    $rowIndex
+                    $sourceRowNumber
                 );
 
                 if ($result['status'] === 'valid') {
-                    $successCount++;
+                    $catalogUploadRow = $this->persistValidRow(
+                        $upload,
+                        $sourceRowNumber,
+                        $mappedData,
+                        $rawData,
+                        $result
+                    );
+
+                    $itemResult = $this->processValidRow(
+                        $upload,
+                        $vendor,
+                        $itemProcessor,
+                        $nonComparableColumns,
+                        $catalogUploadRow
+                    );
+
+                    if (!empty($itemResult['cross_catalog_rejected'])) {
+                        $invalidCount++;
+                    } else {
+                        $createdCount += $itemResult['created'];
+                        $updatedCount += $itemResult['updated'];
+                        $unchangedCount += $itemResult['unchanged'];
+                    }
                 } else {
-                    $errorCount++;
+                    $invalidCount++;
+
+                    $batch[] = $this->buildRowPayload(
+                        $upload,
+                        $sourceRowNumber,
+                        $mappedData,
+                        $rawData,
+                        $result
+                    );
+
+                    if (count($batch) >= self::BATCH_SIZE) {
+                        $this->flushBatch($batch);
+                    }
                 }
+            }
+
+            if (!empty($batch)) {
+                $this->flushBatch($batch);
+            }
+        } finally {
+            $reader->close();
+        }
+
+        return [
+            'created' => $createdCount,
+            'updated' => $updatedCount,
+            'unchanged' => $unchangedCount,
+            'invalid' => $invalidCount,
+        ];
+    }
+
+    /**
+     * Persist a validated source row as a CatalogUploadRow model instance so it
+     * can be passed to CatalogItemProcessor::processRow(), which requires a
+     * persisted model (it may update the row for cross-catalog SKU rejections).
+     */
+    private function persistValidRow(
+        CatalogUpload $upload,
+        int $sourceRowNumber,
+        array $mappedData,
+        array $rawData,
+        array $validationResult
+    ): CatalogUploadRow {
+        $payload = $this->buildRowPayload(
+            $upload,
+            $sourceRowNumber,
+            $mappedData,
+            $rawData,
+            $validationResult
+        );
+
+        // Eloquent manages created_at/updated_at automatically on save().
+        unset($payload['created_at'], $payload['updated_at']);
+
+        $catalogUploadRow = new CatalogUploadRow();
+        $catalogUploadRow->fill($payload);
+        $catalogUploadRow->save();
+
+        return $catalogUploadRow;
+    }
+
+    /**
+     * Process one valid row into catalog_items inside its own independent
+     * transaction. A failure rolls back only this row's catalog-item work; the
+     * upload continues with the next source row.
+     *
+     * @return array{created: int, updated: int, unchanged: int, cross_catalog_rejected?: bool}
+     */
+    private function processValidRow(
+        CatalogUpload $upload,
+        $vendor,
+        CatalogItemProcessor $itemProcessor,
+        array $nonComparableColumns,
+        CatalogUploadRow $catalogUploadRow
+    ): array {
+        $dealerSku = $catalogUploadRow->data['dealer_sku'] ?? null;
+
+        try {
+            Log::info('ProcessCatalogUploadJob: catalog item transaction started', [
+                'upload_id' => $upload->id,
+                'source_row_number' => $catalogUploadRow->row_number,
+                'dealer_sku' => $dealerSku,
+            ]);
+
+            $result = DB::transaction(function () use ($upload, $vendor, $itemProcessor, $nonComparableColumns, $catalogUploadRow) {
+                return $itemProcessor->processRow(
+                    $upload,
+                    $vendor,
+                    $catalogUploadRow,
+                    $nonComparableColumns
+                );
+            });
+
+            Log::info('ProcessCatalogUploadJob: catalog item transaction committed', [
+                'upload_id' => $upload->id,
+                'source_row_number' => $catalogUploadRow->row_number,
+                'dealer_sku' => $dealerSku,
+            ]);
+
+            return $result;
+        } catch (Throwable $e) {
+            Log::error('ProcessCatalogUploadJob: catalog item transaction failed', [
+                'upload_id' => $upload->id,
+                'source_row_number' => $catalogUploadRow->row_number,
+                'catalog_upload_row_id' => $catalogUploadRow->id,
+                'dealer_sku' => $dealerSku,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'created' => 0,
+                'updated' => 0,
+                'unchanged' => 0,
+            ];
+        }
+    }
+
+    private function extractOpenSpoutRow(
+        $row
+    ): array {
+        $rowCells = [];
+
+        foreach ($row->getCells() as $colIndex => $cell) {
+            $value = $cell->getValue();
+
+            if ($value instanceof \DateTimeInterface) {
+                $value = $value->format('Y-m-d H:i:s');
+            }
+
+            $rowCells[$colIndex] = $value;
+        }
+
+        return $rowCells;
+    }
+
+    private function processExcelRows(
+        CatalogUpload $upload,
+        CatalogRowValidator $validator,
+        CatalogItemProcessor $itemProcessor,
+        array $context,
+        object $sheet,
+        int $chunkStartRow,
+        int $chunkEndRow,
+        $vendor,
+        array $nonComparableColumns
+    ): array {
+        $highestRow = $sheet->getHighestDataRow();
+        $effectiveStartRow = max(2, $chunkStartRow);
+        $effectiveEndRow = min($highestRow, $chunkEndRow);
+
+        $createdCount = 0;
+        $updatedCount = 0;
+        $unchangedCount = 0;
+        $invalidCount = 0;
+        $batch = [];
+
+        for (
+            $rowIndex = $effectiveStartRow;
+            $rowIndex <= $effectiveEndRow;
+            $rowIndex++
+        ) {
+            $rowCells = $this->extractExcelRow($sheet, $rowIndex);
+
+            if (empty($rowCells) || $this->rowIsBlank($rowCells)) {
+                continue;
+            }
+
+            [$mappedData, $rawData] = $this->mapRow(
+                $rowCells,
+                $context['columnToFieldKey'],
+                $context['activeFields'],
+                $upload->columnMappings,
+                $context['rangeFieldKeys'],
+                $context['lookupMaps'],
+                $context['is_vit_export'],
+                $context['weight_unit']
+            );
+
+            $result = $this->validateMappedRow(
+                $upload,
+                $validator,
+                $context['activeFields'],
+                $mappedData,
+                $rowIndex
+            );
+
+            if ($result['status'] === 'valid') {
+                $catalogUploadRow = $this->persistValidRow(
+                    $upload,
+                    $rowIndex,
+                    $mappedData,
+                    $rawData,
+                    $result
+                );
+
+                $itemResult = $this->processValidRow(
+                    $upload,
+                    $vendor,
+                    $itemProcessor,
+                    $nonComparableColumns,
+                    $catalogUploadRow
+                );
+
+                if (!empty($itemResult['cross_catalog_rejected'])) {
+                    $invalidCount++;
+                } else {
+                    $createdCount += $itemResult['created'];
+                    $updatedCount += $itemResult['updated'];
+                    $unchangedCount += $itemResult['unchanged'];
+                }
+            } else {
+                $invalidCount++;
 
                 $batch[] = $this->buildRowPayload(
                     $upload,
@@ -637,31 +806,20 @@ class ProcessCatalogUploadJob implements ShouldQueue
                     $this->flushBatch($batch);
                 }
             }
-
-            if (!empty($batch)) {
-                $this->flushBatch($batch);
-            }
-
-            return [$successCount, $errorCount];
-        } finally {
-            $spreadsheet->disconnectWorksheets();
-
-            unset(
-                $sheet,
-                $spreadsheet
-            );
-
-            gc_collect_cycles();
         }
+
+        if (!empty($batch)) {
+            $this->flushBatch($batch);
+        }
+
+        return [
+            'created' => $createdCount,
+            'updated' => $updatedCount,
+            'unchanged' => $unchangedCount,
+            'invalid' => $invalidCount,
+        ];
     }
 
-    /**
-     * Extract only existing cells from one Excel row.
-     *
-     * Cells excluded by the read filter are never auto-created.
-     *
-     * @return array<int, mixed>
-     */
     private function extractExcelRow(
         object $sheet,
         int $rowIndex
@@ -669,10 +827,7 @@ class ProcessCatalogUploadJob implements ShouldQueue
         $rowCells = [];
 
         $row = $sheet
-            ->getRowIterator(
-                $rowIndex,
-                $rowIndex
-            )
+            ->getRowIterator($rowIndex, $rowIndex)
             ->current();
 
         if ($row === null) {
@@ -680,33 +835,21 @@ class ProcessCatalogUploadJob implements ShouldQueue
         }
 
         foreach (
-            $row->getCellIterator(
-                'A',
-                null,
-                true
-            ) as $cell
+            $row->getCellIterator('A', null, true) as $cell
         ) {
             $colIndex =
                 Coordinate::columnIndexFromString(
                     $cell->getColumn()
                 ) - 1;
 
-            $rowCells[$colIndex] =
-                $cell->getValue();
+            $rowCells[$colIndex] = $cell->getValue();
         }
 
         return $rowCells;
     }
 
-    /**
-     * Validate a mapped row and log blocking validation failures.
-     *
-     * @return array{
-     *     status: string,
-     *     errors: array,
-     *     warnings: array
-     * }
-     */
+    // Validation
+
     private function validateMappedRow(
         CatalogUpload $upload,
         CatalogRowValidator $validator,
@@ -719,23 +862,14 @@ class ProcessCatalogUploadJob implements ShouldQueue
             $mappedData
         );
 
-        $blockingErrors =
-            $result['errors'] ?? [];
-
-        $warnings =
-            $result['warnings'] ?? [];
+        $blockingErrors = $result['errors'] ?? [];
+        $warnings = $result['warnings'] ?? [];
 
         $status = empty($blockingErrors)
             ? 'valid'
             : 'invalid';
 
-        /*
-         * Cross-catalog SKU guard.
-         *
-         * SKU is the single globally unique identifier for a CatalogItem.
-         * An upload belonging to a different catalog must never update an
-         * existing SKU (and therefore never move it between catalogs).
-         */
+        // A SKU cannot move between catalogs.
         if (
             $status === 'valid'
             && $this->skuBelongsToAnotherCatalog(
@@ -757,23 +891,9 @@ class ProcessCatalogUploadJob implements ShouldQueue
                 'ProcessCatalogUploadJob: validation failed for row',
                 [
                     'upload_id' => $upload->id,
-
-                    /*
-                     * Existing row_number convention is preserved.
-                     *
-                     * Database row_number remains zero-based relative
-                     * to the data rows:
-                     *
-                     * physical row 2 -> row_number 1
-                     * physical row 3 -> row_number 2
-                     */
                     'row_number' => $sourceRowNumber - 1,
-
-                    'blocking_errors' =>
-                    $blockingErrors,
-
-                    'warnings' =>
-                    $warnings,
+                    'blocking_errors' => $blockingErrors,
+                    'warnings' => $warnings,
                 ]
             );
         }
@@ -785,10 +905,6 @@ class ProcessCatalogUploadJob implements ShouldQueue
         ];
     }
 
-    /**
-     * Determine whether the row's SKU already exists on an item that
-     * belongs to a different catalog than the upload.
-     */
     private function skuBelongsToAnotherCatalog(
         CatalogUpload $upload,
         $dealerSku
@@ -803,9 +919,6 @@ class ProcessCatalogUploadJob implements ShouldQueue
             ->exists();
     }
 
-    /**
-     * Build the CatalogUploadRow insert payload.
-     */
     private function buildRowPayload(
         CatalogUpload $upload,
         int $sourceRowNumber,
@@ -813,11 +926,8 @@ class ProcessCatalogUploadJob implements ShouldQueue
         array $rawData,
         array $validationResult
     ): array {
-        $warnings =
-            $validationResult['warnings'];
-
-        $errors =
-            $validationResult['errors'];
+        $warnings = $validationResult['warnings'];
+        $errors = $validationResult['errors'];
 
         $rowPayload = [
             'warnings' => $warnings,
@@ -830,64 +940,29 @@ class ProcessCatalogUploadJob implements ShouldQueue
             : json_encode($rowPayload);
 
         return [
-            'catalog_upload_id' =>
-            $upload->id,
-
-            /*
-             * Preserve the existing database row_number behavior.
-             */
-            'row_number' =>
-            $sourceRowNumber - 1,
-
-            'data' =>
-            json_encode($mappedData),
-
-            'raw_data' =>
-            json_encode($rawData),
-
-            'status' =>
-            $validationResult['status'],
-
-            'errors' =>
-            $validationErrors,
-
-            'created_at' =>
-            now(),
-
-            'updated_at' =>
-            now(),
+            'catalog_upload_id' => $upload->id,
+            'row_number' => $sourceRowNumber - 1,
+            'data' => json_encode($mappedData),
+            'raw_data' => json_encode($rawData),
+            'status' => $validationResult['status'],
+            'errors' => $validationErrors,
+            'created_at' => now(),
+            'updated_at' => now(),
         ];
     }
 
-    /**
-     * Return the distinct 0-based source column indexes actually mapped
-     * for this upload.
-     *
-     * @return array<int, int>
-     */
     private function requiredSourceColumnIndexes(
         CatalogUpload $upload
     ): array {
         return $upload->columnMappings
             ->pluck('column_index')
-            ->filter(
-                fn($index) =>
-                $index !== null
-            )
-            ->map(
-                fn($index) =>
-                (int) $index
-            )
+            ->filter(fn($index) => $index !== null)
+            ->map(fn($index) => (int) $index)
             ->unique()
             ->values()
             ->all();
     }
 
-    /**
-     * Create the PhpSpreadsheet read filter used for Excel chunk processing.
-     *
-     * When row bounds are omitted, all rows are allowed.
-     */
     private function createReadFilter(
         array $allowedColumns,
         ?int $minRow = null,
@@ -932,19 +1007,15 @@ class ProcessCatalogUploadJob implements ShouldQueue
                         $columnAddress
                     ) - 1;
 
-                return isset(
-                    $this->allowedColumns[$columnIndex]
-                );
+                return isset($this->allowedColumns[$columnIndex]);
             }
         };
     }
 
-    /**
-     * Determine whether a row contains no meaningful values.
-     */
-    private function rowIsBlank(
-        array $values
-    ): bool {
+    // Row mapping
+
+    private function rowIsBlank(array $values): bool
+    {
         foreach ($values as $value) {
             if (
                 !is_null($value)
@@ -957,24 +1028,6 @@ class ProcessCatalogUploadJob implements ShouldQueue
         return true;
     }
 
-    /**
-     * Map one row's raw cell values into:
-     *
-     * 1. normalized mapped data
-     * 2. raw per-column data
-     *
-     * @param array<int, mixed> $rowCells
-     * @param mixed $columnToFieldKey
-     * @param mixed $activeFields
-     * @param mixed $columnMappings
-     * @param array<int, string> $rangeFieldKeys
-     * @param array<string, mixed> $lookupMaps
-     *
-     * @return array{
-     *     0: array<string, mixed>,
-     *     1: array<string, mixed>
-     * }
-     */
     private function mapRow(
         array $rowCells,
         $columnToFieldKey,
@@ -988,13 +1041,8 @@ class ProcessCatalogUploadJob implements ShouldQueue
         $mappedData = [];
         $rawData = [];
 
-        foreach (
-            $rowCells as $colIndex => $rawValue
-        ) {
-            $fieldKey =
-                $columnToFieldKey->get(
-                    $colIndex
-                );
+        foreach ($rowCells as $colIndex => $rawValue) {
+            $fieldKey = $columnToFieldKey->get($colIndex);
 
             $rawData["col_{$colIndex}"] = $rawValue;
 
@@ -1002,21 +1050,14 @@ class ProcessCatalogUploadJob implements ShouldQueue
                 continue;
             }
 
-            $field =
-                $activeFields->get(
-                    $fieldKey
-                );
+            $field = $activeFields->get($fieldKey);
 
-            $mapping =
-                $columnMappings->firstWhere(
-                    'column_index',
-                    $colIndex
-                );
+            $mapping = $columnMappings->firstWhere(
+                'column_index',
+                $colIndex
+            );
 
-            if (
-                $field
-                && $field->is_multi_value
-            ) {
+            if ($field && $field->is_multi_value) {
                 $this->mapMultiValueField(
                     $mappedData,
                     $fieldKey,
@@ -1029,41 +1070,29 @@ class ProcessCatalogUploadJob implements ShouldQueue
                 continue;
             }
 
-            if (
-                $this->isCategoryField(
-                    $fieldKey
-                )
-            ) {
+            if ($this->isCategoryField($fieldKey)) {
                 $mappedData['category'] =
                     $this->resolveLookupId(
                         (string) $rawValue,
-                        $lookupMaps['category']
-                            ?? []
+                        $lookupMaps['category'] ?? []
                     );
 
                 continue;
             }
 
-            if (
-                $fieldKey ===
-                'unit_of_measure'
-            ) {
+            if ($fieldKey === 'unit_of_measure') {
                 $mappedData[$fieldKey] =
                     $this->resolveLookupId(
                         (string) $rawValue,
-                        $lookupMaps['unit_of_measure']['description']
-                            ?? [],
-                        $lookupMaps['unit_of_measure']['code']
-                            ?? []
+                        $lookupMaps['unit_of_measure']['description'] ?? [],
+                        $lookupMaps['unit_of_measure']['code'] ?? []
                     );
 
                 continue;
             }
 
             $mappedData[$fieldKey] =
-                $this->normalizeScalar(
-                    $rawValue
-                );
+                $this->normalizeScalar($rawValue);
         }
 
         $this->applyVitAwareTransforms(
@@ -1078,21 +1107,8 @@ class ProcessCatalogUploadJob implements ShouldQueue
         ];
     }
 
-    /**
-     * Apply import transforms that depend on VIT detection / mapper
-     * configuration. Runs after mapping and before validation, so validated
-     * values are exactly what gets persisted.
-     *
-     * Normal (non-VIT) uploads:
-     *   - item_weight is converted from the mapper's selected unit to pounds
-     *     (the only unit the database stores).
-     *
-     * Verified VIT re-imports:
-     *   - item weight is already pounds per the VIT spec -> NO conversion.
-     *   - quantity_per_unit was appended to the name by the exporter
-     *     ("{name}, {qty} {unit_word}/{uom}") -> parse it back out so the
-     *     name stays clean and quantity_per_unit round-trips.
-     */
+    // VIT transformations
+
     private function applyVitAwareTransforms(
         array &$mappedData,
         bool $isVitFileImport,
@@ -1100,7 +1116,7 @@ class ProcessCatalogUploadJob implements ShouldQueue
     ): void {
         if (
             array_key_exists('item_weight_in_pounds', $mappedData)
-            && ! $isVitFileImport
+            && !$isVitFileImport
             && $weightUnit !== WeightUnitConverter::DEFAULT_UNIT
             && is_numeric($mappedData['item_weight_in_pounds'])
         ) {
@@ -1129,7 +1145,7 @@ class ProcessCatalogUploadJob implements ShouldQueue
                 }
 
                 if (
-                    ! array_key_exists('quantity_per_unit', $mappedData)
+                    !array_key_exists('quantity_per_unit', $mappedData)
                     || $mappedData['quantity_per_unit'] === null
                     || $mappedData['quantity_per_unit'] === ''
                 ) {
@@ -1139,23 +1155,11 @@ class ProcessCatalogUploadJob implements ShouldQueue
         }
     }
 
-    /**
-     * Split the quantity suffix the exporter appends onto the name field for
-     * VIT exports (see CatalogExportService's appended-fields handling):
-     *
-     *   "{name}, {quantity} {unit_word}/{uom}"
-     *   "{name}, {quantity} {uom}"        (no unit_word)
-     *   "{name}, {quantity}"              (neither)
-     *
-     * Returns [cleanName, quantity] or null when the value does not match
-     * the exported format.
-     *
-     * @return array{0: string, 1: string}|null
-     */
-    private function parseAppendedQuantityPerUnit(string $value): ?array
-    {
+    private function parseAppendedQuantityPerUnit(
+        string $value
+    ): ?array {
         if (
-            ! preg_match(
+            !preg_match(
                 '/^(?<name>.+),\s*(?<qty>\d+(?:\.\d+)?)\s*(?<word>[^,\/]*)(?:\/(?<uom>[^,]*))?$/u',
                 $value,
                 $matches
@@ -1170,14 +1174,8 @@ class ProcessCatalogUploadJob implements ShouldQueue
         ];
     }
 
-    /**
-     * Determine whether a field uses the CommodityType lookup.
-     *
-     * Both fields intentionally persist to the category database column.
-     */
-    private function isCategoryField(
-        string $fieldKey
-    ): bool {
+    private function isCategoryField(string $fieldKey): bool
+    {
         return in_array(
             $fieldKey,
             [
@@ -1188,9 +1186,6 @@ class ProcessCatalogUploadJob implements ShouldQueue
         );
     }
 
-    /**
-     * Map a multi-value field, including attribute-range mode.
-     */
     private function mapMultiValueField(
         array &$mappedData,
         string $fieldKey,
@@ -1200,11 +1195,7 @@ class ProcessCatalogUploadJob implements ShouldQueue
         array $rangeFieldKeys
     ): void {
         if (
-            in_array(
-                $fieldKey,
-                $rangeFieldKeys,
-                true
-            )
+            in_array($fieldKey, $rangeFieldKeys, true)
             && $mapping
             && !empty($mapping->source_column_name)
         ) {
@@ -1242,12 +1233,6 @@ class ProcessCatalogUploadJob implements ShouldQueue
             );
     }
 
-    /**
-     * Map a field operating in attribute-range mode.
-     *
-     * The source column name becomes the key for key/value fields,
-     * while the cell value becomes the value.
-     */
     private function mapRangeValue(
         array &$mappedData,
         string $fieldKey,
@@ -1255,17 +1240,10 @@ class ProcessCatalogUploadJob implements ShouldQueue
         object $mapping,
         mixed $rawValue
     ): void {
-        $value =
-            $this->sanitizeValue(
-                $rawValue
-            );
-
-        $key =
-            $this->sanitizeValue(
-                trim(
-                    $mapping->source_column_name
-                )
-            );
+        $value = $this->sanitizeValue($rawValue);
+        $key = $this->sanitizeValue(
+            trim($mapping->source_column_name)
+        );
 
         if (
             $value === null
@@ -1284,34 +1262,21 @@ class ProcessCatalogUploadJob implements ShouldQueue
             return;
         }
 
-        $mappedData[$fieldKey][] =
-            $value;
+        $mappedData[$fieldKey][] = $value;
     }
 
-    /**
-     * Build a normalized name => id lookup map.
-     *
-     * Keys are lowercased and trimmed so matching is case-insensitive
-     * and whitespace-tolerant.
-     *
-     * When duplicate normalized names exist, the first id wins.
-     */
-    private function buildLookupMap(
-        $idsByName
-    ): array {
+    // Lookup helpers
+
+    private function buildLookupMap($idsByName): array
+    {
         $map = [];
 
-        foreach (
-            $idsByName as $name => $id
-        ) {
+        foreach ($idsByName as $name => $id) {
             if ($name === null) {
                 continue;
             }
 
-            $normalized =
-                $this->normalizeForLookup(
-                    (string) $name
-                );
+            $normalized = $this->normalizeForLookup((string) $name);
 
             if (
                 $normalized === ''
@@ -1320,37 +1285,24 @@ class ProcessCatalogUploadJob implements ShouldQueue
                 continue;
             }
 
-            $map[$normalized] =
-                $id;
+            $map[$normalized] = $id;
         }
 
         return $map;
     }
 
-    /**
-     * Resolve vendor text against one or more lookup maps.
-     *
-     * The first matching map wins.
-     */
     private function resolveLookupId(
         string $rawValue,
         array ...$maps
     ): ?int {
-        $normalized =
-            $this->normalizeForLookup(
-                $rawValue
-            );
+        $normalized = $this->normalizeForLookup($rawValue);
 
         if ($normalized === '') {
             return null;
         }
 
         foreach ($maps as $map) {
-            if (
-                isset(
-                    $map[$normalized]
-                )
-            ) {
+            if (isset($map[$normalized])) {
                 return $map[$normalized];
             }
         }
@@ -1358,122 +1310,73 @@ class ProcessCatalogUploadJob implements ShouldQueue
         return null;
     }
 
-    /**
-     * Normalize lookup text.
-     */
-    private function normalizeForLookup(
-        string $value
-    ): string {
-        return strtolower(
-            trim($value)
-        );
+    private function normalizeForLookup(string $value): string
+    {
+        return strtolower(trim($value));
     }
 
-    /**
-     * Insert accumulated CatalogUploadRow records in one transaction.
-     */
-    private function flushBatch(
-        array &$batch
-    ): void {
+    private function flushBatch(array &$batch): void
+    {
         DB::transaction(
             function () use ($batch) {
-                CatalogUploadRow::insert(
-                    $batch
-                );
+                CatalogUploadRow::insert($batch);
             }
         );
 
         $batch = [];
     }
 
-    /**
-     * Normalize scalar values while preserving non-string types.
-     */
-    private function normalizeScalar(
-        mixed $value
-    ): mixed {
+    private function normalizeScalar(mixed $value): mixed
+    {
         return is_string($value)
-            ? $this->sanitizeValue(
-                $value
-            )
+            ? $this->sanitizeValue($value)
             : $value;
     }
 
-    /**
-     * Parse a vendor's multi-value string into canonical key/value objects.
-     *
-     * Each entry is split on the FIRST '=' only, allowing values themselves
-     * to contain '='.
-     *
-     * Empty keys and values are ignored.
-     *
-     * @return array<int, array{key: string, value: string}>
-     */
     private function parseMultiValueKeyValue(
         string $rawValue,
         string $separator
     ): array {
-        if (
-            trim($rawValue) === ''
-        ) {
+        if (trim($rawValue) === '') {
             return [];
         }
 
         $result = [];
-
-        $parts =
-            explode(
-                $separator,
-                $rawValue
-            );
+        $parts = explode($separator, $rawValue);
 
         foreach ($parts as $part) {
-            $trimmed =
-                trim($part);
+            $trimmed = trim($part);
 
-            if (
-                $trimmed === ''
-            ) {
+            if ($trimmed === '') {
                 continue;
             }
 
-            $equalsPos =
-                strpos(
-                    $trimmed,
-                    '='
-                );
+            $equalsPos = strpos($trimmed, '=');
 
-            if (
-                $equalsPos === false
-            ) {
+            if ($equalsPos === false) {
                 continue;
             }
 
-            $key =
-                $this->sanitizeValue(
-                    trim(
-                        substr(
-                            $trimmed,
-                            0,
-                            $equalsPos
-                        )
+            $key = $this->sanitizeValue(
+                trim(
+                    substr(
+                        $trimmed,
+                        0,
+                        $equalsPos
                     )
-                );
+                )
+            );
 
-            $value =
-                $this->sanitizeValue(
-                    trim(
-                        substr(
-                            $trimmed,
-                            $equalsPos + 1
-                        )
+            $value = $this->sanitizeValue(
+                trim(
+                    substr(
+                        $trimmed,
+                        $equalsPos + 1
                     )
-                );
+                )
+            );
 
-            if (
-                $key === ''
-                || $value === ''
-            ) {
+            if ($key === '' || $value === '') {
                 continue;
             }
 
@@ -1486,60 +1389,32 @@ class ProcessCatalogUploadJob implements ShouldQueue
         return $result;
     }
 
-    /**
-     * Split a vendor's multi-value string into a simple array.
-     *
-     * Used for normal array fields such as search_terms and
-     * classifications.
-     *
-     * @return array<int, string>
-     */
     private function splitMultiValue(
         string $rawValue,
         string $separator
     ): array {
-        if (
-            trim($rawValue) === ''
-        ) {
+        if (trim($rawValue) === '') {
             return [];
         }
 
         return array_values(
             array_filter(
                 array_map(
-                    fn($value) =>
-                    $this->sanitizeValue(
-                        $value
-                    ),
-                    explode(
-                        $separator,
-                        $rawValue
-                    )
+                    fn($value) => $this->sanitizeValue($value),
+                    explode($separator, $rawValue)
                 ),
-                fn($value) =>
-                $value !== ''
+                fn($value) => $value !== ''
             )
         );
     }
 
-    /**
-     * Preserve vendor content while normalizing surrounding whitespace.
-     */
-    private function sanitizeValue(
-        mixed $value
-    ): mixed {
-        if (!is_string($value)) {
-            return $value;
-        }
-
-        return trim($value);
+    private function sanitizeValue(mixed $value): mixed
+    {
+        return is_string($value)
+            ? trim($value)
+            : $value;
     }
 
-    /**
-     * Get the separator configured for the vendor's source column.
-     *
-     * If no separator is configured, preserve the existing comma fallback.
-     */
     private function getVendorSourceSeparator(
         ?object $mapping,
         object $field
@@ -1554,48 +1429,28 @@ class ProcessCatalogUploadJob implements ShouldQueue
         return ',';
     }
 
-    /**
-     * Resolve an uploaded file to a local filesystem path.
-     *
-     * Local disks use their existing path directly.
-     *
-     * Remote disks are streamed into a temporary file rather than using
-     * Storage::get(), which would load the entire file into PHP memory.
-     *
-     * @return array{
-     *     path: string,
-     *     temporary_path: string|null
-     * }
-     */
+    // File helpers
+
     private function resolveLocalPath(
         string $disk,
         string $path
     ): array {
-        $diskConfig =
-            config(
-                'filesystems.disks.' . $disk,
-                []
-            );
+        $diskConfig = config(
+            'filesystems.disks.' . $disk,
+            []
+        );
 
-        if (
-            ($diskConfig['driver'] ?? null)
-            === 'local'
-        ) {
+        if (($diskConfig['driver'] ?? null) === 'local') {
             return [
-                'path' =>
-                Storage::disk($disk)
-                    ->path($path),
-
-                'temporary_path' =>
-                null,
+                'path' => Storage::disk($disk)->path($path),
+                'temporary_path' => null,
             ];
         }
 
-        $tempPath =
-            tempnam(
-                sys_get_temp_dir(),
-                'catalog_process_'
-            );
+        $tempPath = tempnam(
+            sys_get_temp_dir(),
+            'catalog_process_'
+        );
 
         if ($tempPath === false) {
             throw new \RuntimeException(
@@ -1603,9 +1458,7 @@ class ProcessCatalogUploadJob implements ShouldQueue
             );
         }
 
-        $sourceStream =
-            Storage::disk($disk)
-            ->readStream($path);
+        $sourceStream = Storage::disk($disk)->readStream($path);
 
         if ($sourceStream === false) {
             @unlink($tempPath);
@@ -1615,15 +1468,10 @@ class ProcessCatalogUploadJob implements ShouldQueue
             );
         }
 
-        $destinationStream =
-            fopen(
-                $tempPath,
-                'wb'
-            );
+        $destinationStream = fopen($tempPath, 'wb');
 
         if ($destinationStream === false) {
             fclose($sourceStream);
-
             @unlink($tempPath);
 
             throw new \RuntimeException(
@@ -1632,11 +1480,10 @@ class ProcessCatalogUploadJob implements ShouldQueue
         }
 
         try {
-            $bytesCopied =
-                stream_copy_to_stream(
-                    $sourceStream,
-                    $destinationStream
-                );
+            $bytesCopied = stream_copy_to_stream(
+                $sourceStream,
+                $destinationStream
+            );
 
             if ($bytesCopied === false) {
                 throw new \RuntimeException(
@@ -1644,27 +1491,16 @@ class ProcessCatalogUploadJob implements ShouldQueue
                 );
             }
         } finally {
-            fclose(
-                $sourceStream
-            );
-
-            fclose(
-                $destinationStream
-            );
+            fclose($sourceStream);
+            fclose($destinationStream);
         }
 
         return [
-            'path' =>
-            $tempPath,
-
-            'temporary_path' =>
-            $tempPath,
+            'path' => $tempPath,
+            'temporary_path' => $tempPath,
         ];
     }
 
-    /**
-     * Remove a temporary remote-storage copy after processing completes.
-     */
     private function cleanupTemporaryFile(
         ?string $temporaryPath
     ): void {
@@ -1672,72 +1508,45 @@ class ProcessCatalogUploadJob implements ShouldQueue
             $temporaryPath !== null
             && is_file($temporaryPath)
         ) {
-            @unlink(
-                $temporaryPath
-            );
+            @unlink($temporaryPath);
         }
     }
 
+    // Completion and cleanup
+
     /**
-     * Persist upload counts and dispatch the item-processing job.
+     * Finalize the upload after the entire source file has been streamed and
+     * every valid row has had its individual catalog-item transaction attempted.
      *
-     * ProcessValidatedRowsJob remains responsible for converting valid
-     * CatalogUploadRow records into CatalogItem records and finalizing
-     * the upload.
+     * @param array{created: int, updated: int, unchanged: int, invalid: int} $counts
      */
     private function finalizeUpload(
         CatalogUpload $upload,
-        int $successCount,
-        int $errorCount
+        CatalogValidationReportService $reportService,
+        array $counts
     ): void {
+        $successCount = $counts['created']
+            + $counts['updated']
+            + $counts['unchanged'];
+
         $upload->update([
-            'total_rows' =>
-            $successCount + $errorCount,
-
-            'success_rows' =>
-            $successCount,
-
-            'invalid_rows' =>
-            $errorCount,
+            'total_rows' => $successCount + $counts['invalid'],
+            'success_rows' => $successCount,
+            'created_rows' => $counts['created'],
+            'updated_rows' => $counts['updated'],
+            'unchanged_rows' => $counts['unchanged'],
+            'invalid_rows' => $counts['invalid'],
         ]);
 
-        if ($successCount > 0) {
-            $upload->update([
-                'status' =>
-                CatalogUploadStatus::Processing,
-
-                'processing_completed_at' =>
-                null,
-            ]);
-
-            \App\Jobs\ProcessValidatedRowsJob::dispatch(
-                $upload->id
-            );
-
-            return;
-        }
+        // Send the validation report exactly once, after the entire file.
+        $reportService->sendValidationReportIfNeeded($upload);
 
         $upload->update([
-            'status' =>
-            CatalogUploadStatus::Completed,
-
-            'total_rows' =>
-            $successCount + $errorCount,
-
-            'success_rows' =>
-            $successCount,
-
-            'invalid_rows' =>
-            $errorCount,
-
-            'processing_completed_at' =>
-            now(),
+            'status' => CatalogUploadStatus::Completed,
+            'processing_completed_at' => now(),
         ]);
     }
 
-    /**
-     * Mark the upload as failed and record the failure reason.
-     */
     private function handleFailure(
         CatalogUpload $upload,
         Throwable $e
@@ -1745,29 +1554,19 @@ class ProcessCatalogUploadJob implements ShouldQueue
         Log::error(
             'ProcessCatalogUploadJob: upload failed',
             [
-                'upload_id' =>
-                $upload->id,
-
-                'error' =>
-                $e->getMessage(),
-
-                'trace' =>
-                $e->getTraceAsString(),
+                'upload_id' => $upload->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]
         );
 
         $upload->update([
-            'status' =>
-            CatalogUploadStatus::Failed,
-
-            'failure_reason' =>
-            Str::limit(
+            'status' => CatalogUploadStatus::Failed,
+            'failure_reason' => Str::limit(
                 $e->getMessage(),
                 5000
             ),
-
-            'processing_completed_at' =>
-            now(),
+            'processing_completed_at' => now(),
         ]);
     }
 }

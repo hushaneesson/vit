@@ -12,6 +12,7 @@ use App\Services\VitExportFileDetector;
 use App\Services\VitFieldDefinition;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
@@ -181,6 +182,9 @@ class VendorCatalogUpload extends Component
     {
         $this->validate();
 
+        $diagStart = microtime(true);
+        Log::info('DIAG uploadFile start', ['filename'=>optional($this->file)->getClientOriginalName(),'size_bytes'=>optional($this->file)->getSize(),'queue_conn'=>config('queue.default')]);
+
         $client = Auth::guard('client')->user();
 
         $extension = strtolower($this->file->getClientOriginalExtension());
@@ -203,10 +207,14 @@ class VendorCatalogUpload extends Component
             'status' => CatalogUploadStatus::Uploaded,
         ]);
 
+        Log::info('DIAG uploadFile created upload', ['elapsed_s'=>round(microtime(true)-$diagStart, 3),'mem_mb'=>round(memory_get_usage(true)/1048576, 2)]);
+
         $inspection = $inspector->inspect(self::DISK, $storedPath, $fileType);
 
         $this->catalogUploadId = $upload->id;
         $this->columns = $inspection['columns'];
+        Log::info('DIAG uploadFile after inspect', ['cols'=>count($inspection['columns']),'elapsed_s'=>round(microtime(true)-$diagStart, 3),'mem_mb'=>round(memory_get_usage(true)/1048576, 2)]);
+
         $this->sampleRows = $inspection['sample_rows'];
 
         // VIT re-upload fast path: if the uploaded workbook is a valid
@@ -221,6 +229,8 @@ class VendorCatalogUpload extends Component
         } catch (\Throwable $e) {
             $detection = null;
         }
+
+        Log::info('DIAG uploadFile detect result', ['vit_file'=>($detection!==null),'elapsed_s'=>round(microtime(true)-$diagStart, 3)]);
 
         if ($detection !== null) {
             DB::transaction(function () use ($upload, $detection) {
@@ -244,7 +254,11 @@ class VendorCatalogUpload extends Component
 
             // Detected VIT export: carry the single detection result into the
             // job so VIT values are not re-transformed (e.g. weight).
+            Log::info('DIAG uploadFile PRE VIT dispatch (sync runs job inline)', ['elapsed_s'=>round(microtime(true)-$diagStart, 3)]);
+
             ProcessCatalogUploadJob::dispatch($upload->id, true);
+
+            Log::info('DIAG uploadFile POST VIT dispatch returned', ['elapsed_s'=>round(microtime(true)-$diagStart, 3),'mem_mb'=>round(memory_get_usage(true)/1048576, 2)]);
 
             $this->step = 'processing';
 
@@ -258,7 +272,9 @@ class VendorCatalogUpload extends Component
             return;
         }
 
-        $this->currentFileSignature = $inspector->computeFileSignature(self::DISK, $storedPath, $fileType);
+                Log::info('DIAG uploadFile entering computeFileSignature', ['upload' => $upload->id, 'elapsed_s' => round(microtime(true) - $diagStart, 3), 'mem_mb' => round(memory_get_usage(true) / 1048576, 2)]);
+        $this->currentFileSignature = $inspector->computeFileSignature(self::DISK, $storedPath, $fileType, $inspection['columns']);
+        Log::info('DIAG uploadFile computeFileSignature done', ['upload' => $upload->id, 'elapsed_s' => round(microtime(true) - $diagStart, 3), 'mem_mb' => round(memory_get_usage(true) / 1048576, 2)]);
 
         $this->mapping = $this->catalogFields
             ->pluck('field_key')

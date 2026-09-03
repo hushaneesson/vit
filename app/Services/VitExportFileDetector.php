@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Reader\IReadFilter;
@@ -59,6 +60,79 @@ class VitExportFileDetector
      */
     private function hasValidVitMarker(string $disk, string $path, string $fileType): bool
     {
+        if ($fileType === 'xlsx') {
+            return $this->hasValidVitMarkerFromZip($disk, $path);
+        }
+
+        return $this->hasValidVitMarkerFromPhpSpreadsheet($disk, $path, $fileType);
+    }
+
+    /**
+     * For .xlsx files, read docProps/custom.xml directly from the zip archive.
+     * This avoids loading the whole workbook through PhpSpreadsheet just to read
+     * a couple of custom properties — constant memory regardless of sheet size.
+     */
+    private function hasValidVitMarkerFromZip(string $disk, string $path): bool
+    {
+        try {
+            $localPath = $this->resolveLocalPath($disk, $path);
+
+            $zip = new \ZipArchive();
+            if ($zip->open($localPath) !== true) {
+                return false;
+            }
+
+            $xml = $zip->getFromName('docProps/custom.xml');
+            $zip->close();
+            $this->cleanupLocalPath($localPath);
+
+            if ($xml === false) {
+                return false;
+            }
+
+            $marker = $this->extractCustomPropertyValue($xml, VitFieldDefinition::VIT_EXPORT_MARKER_KEY);
+            $version = $this->extractCustomPropertyValue($xml, VitFieldDefinition::VIT_EXPORT_VERSION_KEY);
+
+            return $marker === VitFieldDefinition::VIT_EXPORT_MARKER_VALUE
+                && (int) $version === VitFieldDefinition::VIT_EXPORT_VERSION;
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    /**
+     * Parse a single vt:lpwstr / vt:lpstr / vt:bstr value for the given property
+     * name out of docProps/custom.xml. Returns null when absent/unparseable.
+     */
+    private function extractCustomPropertyValue(string $xml, string $propertyName): ?string
+    {
+        // Match: <property name="X" fmtId="..." pid="..." vt:lpwstr>VALUE</property>
+        $pattern = '#<property\b[^>]*name="' . preg_quote($propertyName, '#') . '"[^>]*>(.*?)</property>#is';
+
+        if (! preg_match($pattern, $xml, $m)) {
+            return null;
+        }
+
+        $raw = trim($m[1]);
+
+        // The value is typically wrapped in a vt:lpwstr (or vt:lpstr) element.
+        if (preg_match('#<vt:lpwstr>(.*?)</vt:lpwstr>#is', $raw, $vm)
+            || preg_match('#<vt:lpstr>(.*?)</vt:lpstr>#is', $raw, $vm)
+            || preg_match('#<vt:bstr>(.*?)</vt:bstr>#is', $raw, $vm)) {
+            return trim(html_entity_decode($vm[1], ENT_QUOTES | ENT_XML1));
+        }
+
+        // Fallback: bare text between the property tags.
+        return trim(html_entity_decode(strip_tags($raw), ENT_QUOTES | ENT_XML1)) ?: null;
+    }
+
+    /**
+     * Original PhpSpreadsheet-based marker detection, retained as the .xls
+     * fallback (XLS is a binary OLE2 format, not a zip, so direct XML parsing
+     * is not applicable).
+     */
+    private function hasValidVitMarkerFromPhpSpreadsheet(string $disk, string $path, string $fileType): bool
+    {
         set_time_limit(300);
         ini_set('memory_limit', '512M');
 
@@ -68,8 +142,6 @@ class VitExportFileDetector
             $reader = $this->makeReader($fileType, $localPath);
             $reader->setReadDataOnly(true);
 
-            // We only need the workbook metadata for the marker, so limit cell
-            // reads to a couple of rows to keep detection cheap even on large files.
             $reader->setReadFilter(new class implements IReadFilter {
                 public function readCell(string $columnAddress, int $row, string $worksheetName = ''): bool
                 {
@@ -89,7 +161,6 @@ class VitExportFileDetector
             return $marker === VitFieldDefinition::VIT_EXPORT_MARKER_VALUE
                 && (int) $version === VitFieldDefinition::VIT_EXPORT_VERSION;
         } catch (\Throwable $e) {
-            // Unreadable/corrupt workbooks are not a VIT export -> normal mapper.
             return false;
         } finally {
             $this->cleanupLocalPath($localPath);

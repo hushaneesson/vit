@@ -14,6 +14,7 @@
         "laravel/tinker": "^2.10.1",
         "laraveljutsu/zap": "^1.15",
         "league/flysystem-sftp-v3": "^3.35",
+        "openspout/openspout": "^4.23",
         "phpoffice/phpspreadsheet": "^5.8"
     },
     "require-dev": {

@@ -145,10 +145,6 @@ class ProcessValidatedRowsJob implements ShouldQueue
     ): void {
         $vendor = $upload->vendor;
 
-        $validRows = $upload->rows()
-            ->where('status', 'valid')
-            ->cursor();
-
         $nonComparableColumns = [
             'dealer_sku',
             'vendor_id',
@@ -157,23 +153,68 @@ class ProcessValidatedRowsJob implements ShouldQueue
         $createdCount = 0;
         $updatedCount = 0;
         $unchangedCount = 0;
+        $batchNumber = 0;
 
-        DB::beginTransaction();
+        $validRows = $upload->rows()->where('status', 'valid');
 
-        foreach ($validRows as $row) {
-            $result = $itemProcessor->processRow(
-                $upload,
-                $vendor,
-                $row,
-                $nonComparableColumns
-            );
+        $validRows->chunkById(500, function ($rows) use (
+            $upload,
+            $vendor,
+            $itemProcessor,
+            $nonComparableColumns,
+            &$createdCount,
+            &$updatedCount,
+            &$unchangedCount,
+            &$batchNumber
+        ) {
+            $batchNumber++;
 
-            $createdCount += $result['created'];
-            $updatedCount += $result['updated'];
-            $unchangedCount += $result['unchanged'];
-        }
+            Log::info('DIAG ProcessValidatedRowsJob batch started', [
+                'upload' => $upload->id,
+                'batch' => $batchNumber,
+                'rows_in_batch' => count($rows),
+                'mem_mb' => round(memory_get_usage(true) / 1048576, 2),
+            ]);
 
-        DB::commit();
+            DB::beginTransaction();
+
+            try {
+                foreach ($rows as $row) {
+                    $result = $itemProcessor->processRow(
+                        $upload,
+                        $vendor,
+                        $row,
+                        $nonComparableColumns
+                    );
+
+                    $createdCount += $result['created'];
+                    $updatedCount += $result['updated'];
+                    $unchangedCount += $result['unchanged'];
+                }
+
+                DB::commit();
+
+                Log::info('DIAG ProcessValidatedRowsJob batch committed', [
+                    'upload' => $upload->id,
+                    'batch' => $batchNumber,
+                    'created' => $createdCount,
+                    'updated' => $updatedCount,
+                    'unchanged' => $unchangedCount,
+                    'mem_mb' => round(memory_get_usage(true) / 1048576, 2),
+                ]);
+            } catch (\Throwable $e) {
+                DB::rollBack();
+
+                Log::error('DIAG ProcessValidatedRowsJob batch failed/rolled back', [
+                    'upload' => $upload->id,
+                    'batch' => $batchNumber,
+                    'error' => $e->getMessage(),
+                    'mem_mb' => round(memory_get_usage(true) / 1048576, 2),
+                ]);
+
+                throw $e;
+            }
+        });
 
         $emailSent = $reportService->sendValidationReportIfNeeded($upload);
 
@@ -221,8 +262,6 @@ class ProcessValidatedRowsJob implements ShouldQueue
         CatalogUpload $upload,
         Throwable $e
     ): void {
-        DB::rollBack();
-
         Log::error(
             'ProcessValidatedRowsJob: processing failed',
             [

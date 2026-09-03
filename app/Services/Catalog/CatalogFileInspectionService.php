@@ -2,6 +2,7 @@
 
 namespace App\Services\Catalog;
 
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Reader\Csv as CsvReader;
@@ -68,7 +69,7 @@ class CatalogFileInspectionService
         ];
     }
 
-    /**
+        /**
      * Compute a stable signature for a file's column structure.
      *
      * The signature is an MD5 of the sorted, lowercased, trimmed non-empty
@@ -78,14 +79,44 @@ class CatalogFileInspectionService
      *
      * If the file has no detectable columns, returns null.
      */
-    public function computeFileSignature(string $disk, string $path, string $fileType): ?string
+    public function computeFileSignature(string $disk, string $path, string $fileType, ?array $headerRow = null): ?string
     {
+        // When headers are already available (e.g. from inspect()), compute the
+        // signature directly without loading the workbook through PhpSpreadsheet.
+        // This avoids materializing a multi-MB worksheet just to re-derive headers
+        // we already have in memory.
+        if ($headerRow !== null) {
+            $headerRow = array_map(
+                fn($value) => is_string($value) ? trim($value) : $value,
+                $headerRow
+            );
+
+            return $this->signatureFromHeaders($headerRow);
+        }
+
         $localPath = $this->resolveLocalPath($disk, $path);
 
         $reader = $this->makeReader($fileType, $localPath);
         $reader->setReadDataOnly(true);
+
+        // Only the HEADER row (row 1) is needed for the signature. Reading
+        // the whole workbook would materialize every cell of every row for
+        // large vendor exports (tens of thousands of rows), which exhausts
+        // PHP's memory_limit. Limit loading to the first row only — the same
+        // constant-memory read-filter strategy used by inspect() above.
+        $reader->setReadFilter(new class implements \PhpOffice\PhpSpreadsheet\Reader\IReadFilter {
+            public function readCell(string $columnAddress, int $row, string $worksheetName = ''): bool
+            {
+                return $row === 1;
+            }
+        });
+
         $spreadsheet = $reader->load($localPath);
-        $sheet = $spreadsheet->getActiveSheet();
+
+        // Use the first worksheet explicitly rather than getActiveSheet(), so
+        // the signature is stable regardless of which sheet the workbook marks
+        // as active (matches inspect()'s "Sheet 1 only" rule).
+        $sheet = $spreadsheet->getSheet(0);
         $rows = $sheet->toArray(null, true, true, false);
 
         $headerRow = array_map(
@@ -93,6 +124,11 @@ class CatalogFileInspectionService
             $rows[0] ?? []
         );
 
+        return $this->signatureFromHeaders($headerRow);
+    }
+
+    private function signatureFromHeaders(array $headerRow): ?string
+    {
         // Drop fully-empty trailing columns
         $lastNonEmptyIndex = $this->lastNonEmptyColumnIndex($headerRow);
         $headerRow = array_slice($headerRow, 0, $lastNonEmptyIndex + 1);
