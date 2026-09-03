@@ -59,6 +59,14 @@ class ProcessCatalogUploadJob implements ShouldQueue
 
         $this->markUploadAsProcessing($upload);
 
+        /*
+         * Remove staging rows left behind by a previous failed processing
+         * attempt so this pass starts clean. The unique constraint on
+         * (catalog_upload_id, row_number) would otherwise abort reprocessing
+         * with a duplicate-key error.
+         */
+        CatalogUploadRow::where('catalog_upload_id', $upload->id)->delete();
+
         $temporaryPath = null;
 
         try {
