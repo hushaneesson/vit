@@ -15,6 +15,11 @@ class ClientInvitationNotification extends Notification implements ShouldQueue
 {
     use Queueable;
 
+    public function __construct()
+    {
+        $this->onQueue('notifications');
+    }
+
     public function via(object $notifiable): array
     {
         return ['mail'];

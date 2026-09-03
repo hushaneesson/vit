@@ -19,7 +19,8 @@ class NewHierarchyPathNotification extends Notification implements ShouldQueue
         protected string $vendorName,
         protected string $catalogName,
         protected string $path,
-    ) {}
+    ) {
+        $this->onQueue('notifications');}
 
     public function via(object $notifiable): array
     {

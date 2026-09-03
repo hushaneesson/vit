@@ -22,7 +22,6 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use OpenSpout\Common\Entity\Cell;
 use OpenSpout\Reader\XLSX\Reader as OpenSpoutXlsxReader;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\IOFactory;
@@ -39,13 +38,15 @@ class ProcessCatalogUploadJob implements ShouldQueue
     // 30-minute ceiling for very large vendor files.
     public int $timeout = 1800;
 
-    private const BATCH_SIZE = 200;
+    /** Run on the dedicated imports queue so long uploads never block exports/notifications. */
     private const READ_CHUNK_SIZE = 500;
 
     public function __construct(
         public int $catalogUploadId,
         public bool $isVitFileImport = false
-    ) {}
+    ) {
+        $this->onQueue('imports');
+    }
 
     // Job lifecycle
 
@@ -307,6 +308,7 @@ class ProcessCatalogUploadJob implements ShouldQueue
         $invalidCount = 0;
         $batch = [];
         $sourceRowNumber = 0;
+        $lastLogicalBatchBoundary = 0;
 
         $vendor = $upload->vendor;
         $nonComparableColumns = [
@@ -386,15 +388,24 @@ class ProcessCatalogUploadJob implements ShouldQueue
                         $result
                     );
 
-                    if (count($batch) >= self::BATCH_SIZE) {
-                        $this->flushBatch($batch);
+                    // The 500-row window is a logical/progress boundary only.
+                    // Invalid-row tracking rows are persisted at each boundary;
+                    // each valid item has already been processed in its own
+                    // independent transaction.
+                    if ($sourceRowNumber - $lastLogicalBatchBoundary >= self::READ_CHUNK_SIZE) {
+                        $this->insertInvalidRows($batch);
+                        $lastLogicalBatchBoundary = $sourceRowNumber;
+
+                        Log::info('ProcessCatalogUploadJob: logical batch boundary reached', [
+                            'upload_id' => $upload->id,
+                            'rows_processed' => $sourceRowNumber,
+                            'invalid_rows_pending_insert' => count($batch),
+                        ]);
                     }
                 }
             }
 
-            if (!empty($batch)) {
-                $this->flushBatch($batch);
-            }
+            $this->insertInvalidRows($batch);
         } finally {
             fclose($handle);
         }
@@ -500,6 +511,7 @@ class ProcessCatalogUploadJob implements ShouldQueue
         $invalidCount = 0;
         $batch = [];
         $sourceRowNumber = 0;
+        $lastLogicalBatchBoundary = 0;
 
         $vendor = $upload->vendor;
         $nonComparableColumns = [
@@ -591,15 +603,24 @@ class ProcessCatalogUploadJob implements ShouldQueue
                         $result
                     );
 
-                    if (count($batch) >= self::BATCH_SIZE) {
-                        $this->flushBatch($batch);
+                    // The 500-row window is a logical/progress boundary only.
+                    // Invalid-row tracking rows are persisted at each boundary;
+                    // each valid item has already been processed in its own
+                    // independent transaction.
+                    if ($sourceRowNumber - $lastLogicalBatchBoundary >= self::READ_CHUNK_SIZE) {
+                        $this->insertInvalidRows($batch);
+                        $lastLogicalBatchBoundary = $sourceRowNumber;
+
+                        Log::info('ProcessCatalogUploadJob: logical batch boundary reached', [
+                            'upload_id' => $upload->id,
+                            'rows_processed' => $sourceRowNumber,
+                            'invalid_rows_pending_insert' => count($batch),
+                        ]);
                     }
                 }
             }
 
-            if (!empty($batch)) {
-                $this->flushBatch($batch);
-            }
+            $this->insertInvalidRows($batch);
         } finally {
             $reader->close();
         }
@@ -801,16 +822,10 @@ class ProcessCatalogUploadJob implements ShouldQueue
                     $rawData,
                     $result
                 );
-
-                if (count($batch) >= self::BATCH_SIZE) {
-                    $this->flushBatch($batch);
-                }
             }
         }
 
-        if (!empty($batch)) {
-            $this->flushBatch($batch);
-        }
+        $this->insertInvalidRows($batch);
 
         return [
             'created' => $createdCount,
@@ -1315,15 +1330,18 @@ class ProcessCatalogUploadJob implements ShouldQueue
         return strtolower(trim($value));
     }
 
-    private function flushBatch(array &$batch): void
+    /**
+     * Persist invalid-row tracking payloads. This is a single bulk INSERT
+     * statement for staging rows only — it is not a processing transaction
+     * and has no bearing on catalog-item transaction boundaries.
+     */
+    private function insertInvalidRows(array $batch): void
     {
-        DB::transaction(
-            function () use ($batch) {
-                CatalogUploadRow::insert($batch);
-            }
-        );
+        if (empty($batch)) {
+            return;
+        }
 
-        $batch = [];
+        CatalogUploadRow::insert($batch);
     }
 
     private function normalizeScalar(mixed $value): mixed

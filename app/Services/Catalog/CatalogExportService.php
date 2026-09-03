@@ -10,10 +10,11 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
-use PhpOffice\PhpSpreadsheet\Cell\DataType;
-use PhpOffice\PhpSpreadsheet\IOFactory;
-use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use OpenSpout\Common\Entity\Row;
+use OpenSpout\Common\Entity\Style\Style;
+use OpenSpout\Writer\XLSX\Options as XlsxWriterOptions;
+use OpenSpout\Writer\XLSX\Properties as XlsxWriterProperties;
+use OpenSpout\Writer\XLSX\Writer as XlsxWriter;
 
 /**
  * Generates a VIT-compliant .xlsx file from catalog submission data.
@@ -36,97 +37,252 @@ use PhpOffice\PhpSpreadsheet\Spreadsheet;
 class CatalogExportService
 {
     /**
-     * Generate an Excel spreadsheet from a collection of catalog items.
+     * Generate a VIT catalog export for the given items into a temporary
+     * local XLSX file and return its path.
+     *
+     * Support/verification entry point (used by tests and any caller that
+     * needs the raw file). It runs the exact same OpenSpout writer, VIT
+     * marker, header construction and row-writing logic as the production
+     * streaming export — there is only one export implementation.
+     *
+     * The caller is responsible for deleting the returned file.
      */
-    public function generate(
+    public function generateToTempFile(
         Vendor $vendor,
         string $catalogName,
         Collection $items
-    ): Spreadsheet {
+    ): string {
         $fields = VitFieldDefinition::exportableFields();
+        $hoisted = $this->buildHoistedExportMetadata();
 
-        $spreadsheet = new Spreadsheet();
-        $this->applyVitExportMarker($spreadsheet);
+        $tempPath = tempnam(sys_get_temp_dir(), 'catalog_export_');
 
-        $sheet = $spreadsheet->getActiveSheet();
-        $sheet->setTitle('Catalog');
-
-        $this->writeHeaderRow($sheet, $fields);
-
-        $rowNumber = 2;
-
-        foreach ($items as $item) {
-            $this->writeItemRow(
-                $sheet,
-                $fields,
-                $item,
-                $vendor,
-                $rowNumber
+        if ($tempPath === false) {
+            throw new \RuntimeException(
+                'Unable to create temporary file for catalog export.'
             );
-
-            $rowNumber++;
         }
 
-        $this->autoSizeColumns($sheet, $fields);
+        $writer = new XlsxWriter($this->buildXlsxWriterOptions());
 
-        return $spreadsheet;
+        try {
+            $writer->openToFile($tempPath);
+
+            try {
+                $writer->getCurrentSheet()->setName('Catalog');
+            } catch (\Throwable $e) {
+                // Sheet title is cosmetic; never fail an export over it.
+                unset($e);
+            }
+
+            $this->writeHeaderRowToWriter($writer, $hoisted['headers']);
+            $this->writeItemsToWriter($writer, $fields, $items, $vendor, $hoisted);
+
+            $writer->close();
+
+            return $tempPath;
+        } catch (\Throwable $e) {
+            if (is_file($tempPath)) {
+                @unlink($tempPath);
+            }
+
+            throw $e;
+        }
     }
 
     /**
-     * Generate Excel from a query cursor for memory-efficient large-catalog support.
+     * Hoist static export metadata once per export so it is not recomputed
+     * per field per row. Resolved export values are identical either way.
+     *
+     * @return array{
+     *     headers: list<string>,
+     *     multiValueFieldKeys: list<string>,
+     *     appendedFields: Collection,
+     *     unitWordField: object|null,
+     *     unitOfMeasureField: object|null
+     * }
+     */
+    private function buildHoistedExportMetadata(): array
+    {
+        $headers = [];
+
+        foreach (VitFieldDefinition::exportableFields() as $field) {
+            $headers[] = (string) ($field->vit_csv_column
+                ?? $field->web_app_label);
+        }
+
+        return [
+            'headers' => $headers,
+            'multiValueFieldKeys' => VitFieldDefinition::all()
+                ->where('is_multi_value', true)
+                ->pluck('field_key')
+                ->all(),
+            'appendedFields' => VitFieldDefinition::appendedFields(),
+            'unitWordField' => VitFieldDefinition::find('unit_word'),
+            'unitOfMeasureField' => VitFieldDefinition::find('unit_of_measure'),
+        ];
+    }
+
+    /**
+     * Write the header row: vit_csv_column (falling back to web_app_label)
+     * for every exportable field, bold via a single row style.
+     *
+     * @param list<string> $headers
+     */
+    private function writeHeaderRowToWriter(
+        XlsxWriter $writer,
+        array $headers
+    ): void {
+        $writer->addRow(
+            Row::fromValues($headers, (new Style())->setFontBold())
+        );
+    }
+
+    /**
+     * Write item rows to an open OpenSpout writer. This is the single
+     * shared row-writing implementation for the catalog export: the
+     * production query-based path and the temp-file support path both use
+     * it, so there is exactly one XLSX generation algorithm.
+     *
+     * Every exported value is cast to string, matching the previous explicit
+     * string-cell behavior (SKUs, leading zeros and numeric-looking values
+     * are never reinterpreted by Excel).
+     */
+    private function writeItemsToWriter(
+        XlsxWriter $writer,
+        Collection $fields,
+        iterable $items,
+        Vendor $vendor,
+        array $hoisted
+    ): void {
+        foreach ($items as $item) {
+            $resolvedValues = $this->resolveAllValues(
+                $fields,
+                $item,
+                $vendor,
+                $hoisted['appendedFields'],
+                $hoisted['unitWordField'],
+                $hoisted['unitOfMeasureField'],
+                $hoisted['multiValueFieldKeys']
+            );
+
+            $row = [];
+            foreach ($fields as $field) {
+                $row[] = (string) ($resolvedValues[$field->field_key] ?? '');
+            }
+
+            $writer->addRow(
+                Row::fromValues($row)
+            );
+        }
+    }
+
+    /**
+     * Generate and store the Excel export from a query using OpenSpout
+     * streaming.
+     *
+     * The XLSX is written incrementally: one row of memory is held at a time.
+     * The database is iterated with chunkById(500) so the query's eager-loaded
+     * relationships apply per chunk (cursor() would defeat eager loading and
+     * cause N+1 queries).
+     *
+     * Exports with 50,000+ rows complete with approximately constant memory.
      *
      * @param Vendor $vendor
      * @param string $catalogName
-     * @param mixed $itemsQuery
+     * @param mixed $itemsQuery Eloquent query with eager-loaded relationships
      * @param string $disk
      * @return string
      */
-    public function generateAndStoreFromQuery(
+    public function generateAndStoreStreamingFromQuery(
         Vendor $vendor,
         string $catalogName,
         $itemsQuery,
         string $disk = 'local'
     ): string {
         $fields = VitFieldDefinition::exportableFields();
+        $hoisted = $this->buildHoistedExportMetadata();
 
-        $spreadsheet = new Spreadsheet();
-
-        $this->applyVitExportMarker($spreadsheet);
-
-
-        $sheet = $spreadsheet->getActiveSheet();
-        $sheet->setTitle('Catalog');
-
-        $this->writeHeaderRow($sheet, $fields);
-
-        $rowNumber = 2;
-
-        foreach ($itemsQuery->cursor() as $item) {
-            $this->writeItemRow(
-                $sheet,
-                $fields,
-                $item,
-                $vendor,
-                $rowNumber
-            );
-
-            $rowNumber++;
-        }
-
-        $this->autoSizeColumns($sheet, $fields);
-
-        $path = $this->buildExportPath(
+        $destinationPath = $this->buildExportPath(
             $vendor,
             $catalogName
         );
 
-        $this->storeSpreadsheet(
-            $spreadsheet,
-            $path,
-            $disk
+        $tempPath = tempnam(
+            sys_get_temp_dir(),
+            'catalog_export_'
         );
 
-        return $path;
+        if ($tempPath === false) {
+            throw new \RuntimeException(
+                'Unable to create temporary file for catalog export.'
+            );
+        }
+
+        $writer = new XlsxWriter(
+            $this->buildXlsxWriterOptions()
+        );
+
+        try {
+            $writer->openToFile($tempPath);
+
+            try {
+                $writer->getCurrentSheet()->setName('Catalog');
+            } catch (\Throwable $e) {
+                // Sheet title is cosmetic; never fail an export over it.
+                unset($e);
+            }
+
+            /*
+             * Header row: same headers and order as always, bold via a
+             * single row style.
+             */
+            $this->writeHeaderRowToWriter($writer, $hoisted['headers']);
+
+            /*
+             * Stream every item into the workbook immediately.
+             * chunkById(500) keeps eager loading intact and bounds the
+             * number of hydrated models held in memory.
+             */
+            $itemsQuery->chunkById(
+                500,
+                function ($items) use ($writer, $fields, $vendor, $hoisted): void {
+                    $this->writeItemsToWriter(
+                        $writer,
+                        $fields,
+                        $items,
+                        $vendor,
+                        $hoisted
+                    );
+                }
+            );
+
+            $writer->close();
+
+            $this->storeExportFile(
+                $tempPath,
+                $destinationPath,
+                $disk
+            );
+
+            return $destinationPath;
+        } catch (\Throwable $e) {
+            /*
+             * Remove any partially written destination so the job's
+             * idempotency check cannot mistake it for a valid export.
+             */
+            try {
+                Storage::disk($disk)->delete($destinationPath);
+            } catch (\Throwable $ignored) {
+                unset($ignored);
+            }
+
+            throw $e;
+        } finally {
+            if (is_file($tempPath)) {
+                @unlink($tempPath);
+            }
+        }
     }
 
     /**
@@ -159,7 +315,7 @@ class CatalogExportService
             ->whereNull('last_submitted_at')
             ->orderBy('id');
 
-        $path = $this->generateAndStoreFromQuery(
+        $path = $this->generateAndStoreStreamingFromQuery(
             $vendor,
             $catalogName,
             $itemsQuery,
@@ -180,81 +336,6 @@ class CatalogExportService
     }
 
     /**
-     * Write the header row using vit_csv_column as the header text.
-     *
-     * Only exportable fields are written. Packed and appended fields that
-     * do not have their own output column are excluded by exportableFields().
-     */
-    private function writeHeaderRow(
-        object $sheet,
-        Collection $fields
-    ): void {
-        foreach ($fields as $index => $field) {
-            $column = $this->columnLetter($index);
-
-            $header = $field->vit_csv_column
-                ?? $field->web_app_label;
-
-            $sheet->setCellValue(
-                "{$column}1",
-                $header
-            );
-
-            $sheet
-                ->getStyle("{$column}1")
-                ->getFont()
-                ->setBold(true);
-        }
-    }
-
-    /**
-     * Write a single item row, applying packing and appended-field logic
-     * before the cell values are written.
-     */
-    private function writeItemRow(
-        object $sheet,
-        Collection $fields,
-        object $item,
-        Vendor $vendor,
-        int $rowNumber
-    ): void {
-        $resolvedValues = $this->resolveAllValues(
-            $fields,
-            $item,
-            $vendor
-        );
-
-        foreach ($fields as $index => $field) {
-            $column = $this->columnLetter($index);
-            $cell = "{$column}{$rowNumber}";
-
-            $value = $resolvedValues[$field->field_key] ?? '';
-
-            $sheet->setCellValueExplicit(
-                $cell,
-                $value,
-                DataType::TYPE_STRING
-            );
-        }
-    }
-
-    /**
-     * Automatically size all exported columns.
-     */
-    private function autoSizeColumns(
-        object $sheet,
-        Collection $fields
-    ): void {
-        foreach ($fields as $index => $field) {
-            $column = $this->columnLetter($index);
-
-            $sheet
-                ->getColumnDimension($column)
-                ->setAutoSize(true);
-        }
-    }
-
-    /**
      * Build the storage path for the generated catalog export.
      */
     private function buildExportPath(
@@ -271,120 +352,82 @@ class CatalogExportService
     }
 
     /**
-     * Stamp the workbook with custom document properties that mark it as a
-     * VIT-generated catalog export. On re-upload, the re-upload detector
-     * (VitExportFileDetector) reads these to decide whether the file is
-     * eligible for automatic column mapping.
+     * Build the XLSX writer options, including the VIT export marker as
+     * custom document properties.
+     *
+     * OpenSpout writes custom properties to docProps/custom.xml as
+     * vt:lpwstr values. The re-upload detector (VitExportFileDetector)
+     * parses vt:lpwstr and casts the version to int, so the marker stays
+     * fully compatible with the previous PhpSpreadsheet output.
      */
-    private function applyVitExportMarker(Spreadsheet $spreadsheet): void
+    private function buildXlsxWriterOptions(): XlsxWriterOptions
     {
-        $properties = $spreadsheet->getProperties();
+        $options = new XlsxWriterOptions();
 
-        $properties->setCustomProperty(
-            VitFieldDefinition::VIT_EXPORT_MARKER_KEY,
-            VitFieldDefinition::VIT_EXPORT_MARKER_VALUE,
-            's'
+        $options->setProperties(
+            new XlsxWriterProperties(
+                customProperties: [
+                    VitFieldDefinition::VIT_EXPORT_MARKER_KEY
+                        => VitFieldDefinition::VIT_EXPORT_MARKER_VALUE,
+
+                    VitFieldDefinition::VIT_EXPORT_VERSION_KEY
+                        => (string) VitFieldDefinition::VIT_EXPORT_VERSION,
+                ]
+            )
         );
 
-        $properties->setCustomProperty(
-            VitFieldDefinition::VIT_EXPORT_VERSION_KEY,
-            VitFieldDefinition::VIT_EXPORT_VERSION,
-            'i'
-        );
+        return $options;
     }
 
     /**
-     * Store the generated spreadsheet.
+     * Move/stream the completed XLSX into its storage destination.
      *
-     * Local disks are written directly to their filesystem path.
-     *
-     * Remote disks use a temporary local file and stream that file to
-     * storage so the entire XLSX does not need to be loaded into PHP memory.
+     * The temp file is never loaded into PHP memory: local disks use an
+     * atomic rename and remote disks stream the file to storage.
      */
-    private function storeSpreadsheet(
-        Spreadsheet $spreadsheet,
+    private function storeExportFile(
+        string $tempPath,
         string $path,
         string $disk
     ): void {
-        Storage::disk($disk)->makeDirectory(
+        $storage = Storage::disk($disk);
+
+        $storage->makeDirectory(
             dirname($path)
         );
 
-        $writer = IOFactory::createWriter(
-            $spreadsheet,
-            'Xlsx'
-        );
-
         if ($disk === 'local') {
-            $writer->save(
-                Storage::disk($disk)->path($path)
-            );
+            /*
+             * rename() on the same filesystem is atomic; no partial
+             * destination file can appear.
+             */
+            if (!@rename($tempPath, $storage->path($path))) {
+                throw new \RuntimeException(
+                    'Unable to store catalog export on the configured disk.'
+                );
+            }
 
             return;
         }
 
-        $this->storeRemoteSpreadsheet(
-            $writer,
-            $path,
-            $disk
-        );
-    }
+        $stream = fopen($tempPath, 'rb');
 
-    /**
-     * Store a generated spreadsheet on a remote filesystem.
-     *
-     * The XLSX is first written to a temporary local file.
-     * That file is then streamed to the configured filesystem instead
-     * of being loaded entirely into PHP memory.
-     */
-    private function storeRemoteSpreadsheet(
-        object $writer,
-        string $path,
-        string $disk
-    ): void {
-        $tempPath = tempnam(
-            sys_get_temp_dir(),
-            'catalog_export_'
-        );
-
-        if ($tempPath === false) {
+        if ($stream === false) {
             throw new \RuntimeException(
-                'Unable to create temporary file for catalog export.'
+                'Unable to open temporary catalog export for reading.'
             );
         }
 
         try {
-            $writer->save($tempPath);
+            $stored = $storage->writeStream($path, $stream);
 
-            $stream = fopen(
-                $tempPath,
-                'rb'
-            );
-
-            if ($stream === false) {
+            if ($stored === false) {
                 throw new \RuntimeException(
-                    'Unable to open temporary catalog export for reading.'
+                    'Unable to store catalog export on the configured disk.'
                 );
-            }
-
-            try {
-                $stored = Storage::disk($disk)->writeStream(
-                    $path,
-                    $stream
-                );
-
-                if ($stored === false) {
-                    throw new \RuntimeException(
-                        'Unable to store catalog export on the configured disk.'
-                    );
-                }
-            } finally {
-                fclose($stream);
             }
         } finally {
-            if (is_file($tempPath)) {
-                @unlink($tempPath);
-            }
+            fclose($stream);
         }
     }
 
@@ -397,8 +440,21 @@ class CatalogExportService
     private function resolveAllValues(
         Collection $fields,
         object $item,
-        Vendor $vendor
+        Vendor $vendor,
+        ?Collection $appendedFields = null,
+        ?object $unitWordField = null,
+        ?object $unitOfMeasureField = null,
+        ?array $multiValueFieldKeys = null
     ): array {
+        /*
+         * Fall back to resolving static metadata when the caller has not
+         * supplied hoisted values (the small in-memory path relies on
+         * these fallbacks). Resolved values are identical either way.
+         */
+        $appendedFields ??= VitFieldDefinition::appendedFields();
+        $unitWordField ??= VitFieldDefinition::find('unit_word');
+        $unitOfMeasureField ??= VitFieldDefinition::find('unit_of_measure');
+
         $values = [];
 
         /*
@@ -408,20 +464,20 @@ class CatalogExportService
             $values[$field->field_key] = $this->resolveValue(
                 $field,
                 $item,
-                $vendor
+                $vendor,
+                $multiValueFieldKeys
             );
         }
 
         /*
          * 2. Apply appended fields such as quantity_per_unit.
          */
-        $appendedFields = VitFieldDefinition::appendedFields();
-
         foreach ($appendedFields as $appended) {
             $appendedValue = $this->resolveValue(
                 $appended,
                 $item,
-                $vendor
+                $vendor,
+                $multiValueFieldKeys
             );
 
             if ($appendedValue === '') {
@@ -440,15 +496,17 @@ class CatalogExportService
              * 10 Reams/CS
              */
             $unitWord = $this->resolveValue(
-                VitFieldDefinition::find('unit_word'),
+                $unitWordField,
                 $item,
-                $vendor
+                $vendor,
+                $multiValueFieldKeys
             );
 
             $uom = $this->resolveValue(
-                VitFieldDefinition::find('unit_of_measure'),
+                $unitOfMeasureField,
                 $item,
-                $vendor
+                $vendor,
+                $multiValueFieldKeys
             );
 
             if ($unitWord !== '' && $uom !== '') {
@@ -481,7 +539,8 @@ class CatalogExportService
     private function resolveValue(
         object $field,
         object $item,
-        Vendor $vendor
+        Vendor $vendor,
+        ?array $multiValueFieldKeys = null
     ): string {
         $fieldKey = $field->field_key;
 
@@ -546,10 +605,12 @@ class CatalogExportService
          * Values are decoded and joined using the field's configured
          * export separator.
          */
-        $multiValueFieldKeys = VitFieldDefinition::all()
-            ->where('is_multi_value', true)
-            ->pluck('field_key')
-            ->all();
+        if ($multiValueFieldKeys === null) {
+            $multiValueFieldKeys = VitFieldDefinition::all()
+                ->where('is_multi_value', true)
+                ->pluck('field_key')
+                ->all();
+        }
 
         if (
             in_array(
@@ -767,16 +828,5 @@ class CatalogExportService
         }
 
         return json_encode($value);
-    }
-
-    /**
-     * Convert a zero-based field index into an Excel column letter.
-     */
-    private function columnLetter(
-        int $zeroBasedIndex
-    ): string {
-        return Coordinate::stringFromColumnIndex(
-            $zeroBasedIndex + 1
-        );
     }
 }

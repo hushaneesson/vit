@@ -33,7 +33,10 @@ class UploadCatalogSubmissionToVit implements ShouldQueue
 
     public int $tries = 1;
 
-    public function __construct(protected int $catalogSubmissionId) {}
+    public function __construct(protected int $catalogSubmissionId)
+    {
+        $this->onQueue('vit-uploads');
+    }
 
     public function handle(VitApiClient $client): void
     {

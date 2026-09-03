@@ -39,7 +39,8 @@ class CatalogUploadValidationReportNotification extends Notification implements 
         protected int $totalWarnings,
         protected Collection $errors,
         protected Collection $warnings,
-    ) {}
+    ) {
+        $this->onQueue('notifications');}
 
     public function via(object $notifiable): array
     {

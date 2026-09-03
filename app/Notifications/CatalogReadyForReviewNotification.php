@@ -23,7 +23,9 @@ class CatalogReadyForReviewNotification extends Notification implements ShouldQu
      */
     public function __construct(
         protected int $vendorId,
-    ) {}
+    ) {
+        $this->onQueue('notifications');
+    }
 
     public function via(object $notifiable): array
     {

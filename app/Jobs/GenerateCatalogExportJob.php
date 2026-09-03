@@ -4,10 +4,12 @@ namespace App\Jobs;
 
 use App\Enums\CatalogSubmissionStatus;
 use App\Models\CatalogSubmission;
+use App\Notifications\CatalogReadyForReviewNotification;
 use App\Services\Catalog\CatalogExportService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Storage;
@@ -37,11 +39,15 @@ class GenerateCatalogExportJob implements ShouldQueue
     public int $timeout = 1800; // 30 minutes for large catalogs
 
     /**
+     * Run on the dedicated exports queue so exports run concurrently with imports.
+     *
      * @param int $catalogSubmissionId The submission to process
      */
     public function __construct(
         public int $catalogSubmissionId
-    ) {}
+    ) {
+        $this->onQueue('exports');
+    }
 
     /**
      * Execute the job.
@@ -78,6 +84,21 @@ class GenerateCatalogExportJob implements ShouldQueue
                 'generated_at' => now(),
                 'status' => CatalogSubmissionStatus::ReadyForReview,
             ]);
+
+            /*
+             * Ready for Review notification is sent ONLY here — after the
+             * Excel has been generated, stored, and the submission marked
+             * ready_for_review. A failed export rethrows before this line,
+             * so the notification can never be sent for a failed export.
+             */
+            $adminEmail = config('vit.gateway_email');
+
+            if (is_string($adminEmail) && $adminEmail !== '') {
+                Notification::route('mail', $adminEmail)
+                    ->notify(new CatalogReadyForReviewNotification(
+                        vendorId: $submission->vendor_id,
+                    ));
+            }
         } catch (\Throwable $e) {
             $submission->update([
                 'processing_status' => 'failed',

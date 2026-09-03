@@ -17,6 +17,7 @@ class ClientOtpNotification extends Notification implements ShouldQueue
 
     public function __construct(protected string $code)
     {
+        $this->onQueue('notifications');
     }
 
     public function via(object $notifiable): array

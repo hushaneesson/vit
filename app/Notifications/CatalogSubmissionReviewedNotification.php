@@ -29,7 +29,8 @@ class CatalogSubmissionReviewedNotification extends Notification implements Shou
         protected string $vendorName,
         protected string $status,
         protected ?string $rejectionReason = null,
-    ) {}
+    ) {
+        $this->onQueue('notifications');}
 
     public function via(object $notifiable): array
     {
