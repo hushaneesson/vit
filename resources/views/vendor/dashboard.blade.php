@@ -28,13 +28,18 @@
                             <th class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">
                                 Status
                             </th>
+                            <th class="px-6 py-3 text-xs font-medium tracking-wider text-left text-gray-500 uppercase">
+                                Actions
+                            </th>
                         </tr>
                     </thead>
                     <tbody class="bg-white divide-y divide-gray-200">
                         @foreach ($submissions as $submission)
                             <tr class="text-sm hover:bg-gray-50 whitespace-nowrap">
                                 <td class="px-6 py-4">
-                                    Submission #{{ $submission->id }}
+                                    {{ $submission->catalog->name }}
+
+
                                 </td>
                                 <td class="px-6 py-4">
                                     {{ $submission->total_items }}
@@ -46,6 +51,14 @@
                                         class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full border {{ $submission->status->badgeClass() }}">
                                         {{ $submission->status->label() }}
                                     </span>
+                                </td>
+                                <td class="px-6 py-4">
+                                    @if ($submission->isDownloadable())
+                                        <a href="{{ route('vendor.catalog-submissions.download', $submission) }}"
+                                            class="btn btn-primary text-xs px-3 py-1.5">
+                                            Download Excel
+                                        </a>
+                                    @endif
                                 </td>
                             </tr>
                         @endforeach

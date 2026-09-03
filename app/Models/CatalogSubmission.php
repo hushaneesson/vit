@@ -30,6 +30,7 @@ class CatalogSubmission extends Model
 
     protected $fillable = [
         'vendor_id',
+        'catalog_id',
         'requested_by_client_id',
         'status',
         'total_items',
@@ -72,6 +73,11 @@ class CatalogSubmission extends Model
         return $this->belongsTo(Vendor::class);
     }
 
+    public function catalog(): BelongsTo
+    {
+        return $this->belongsTo(Catalog::class);
+    }
+
     public function catalogUpload(): BelongsTo
     {
         return $this->belongsTo(CatalogUpload::class);
@@ -90,5 +96,13 @@ class CatalogSubmission extends Model
     public function rejectedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'rejected_by');
+    }
+
+    public function isDownloadable(): bool
+    {
+        return in_array($this->status, [
+            CatalogSubmissionStatus::ReviewRequested,
+            CatalogSubmissionStatus::ReadyForReview,
+        ], true);
     }
 }

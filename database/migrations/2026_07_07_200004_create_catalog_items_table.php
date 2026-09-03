@@ -11,9 +11,10 @@ return new class extends Migration
         Schema::create('catalog_items', function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->foreignId('vendor_id')->constrained('vendors')->cascadeOnDelete();
+            $table->foreignId('catalog_id');
 
             $table->string('dealer_sku', 255);
-            $table->string('replacement_sku', 255)->nullable();
+            $table->json('replacement_sku')->nullable();
             $table->string('name', 255);
             $table->text('description')->nullable();
 
@@ -23,12 +24,10 @@ return new class extends Migration
 
             $table->json('images')->nullable();
 
-            $table->string('hierarchy', 255)->nullable();
-            $table->string('category', 255)->nullable();
+            $table->foreignId('hierarchy')->nullable();
+            $table->foreignId('category')->nullable();
 
             $table->json('classifications')->nullable();
-            $table->string('unspsc_code')->nullable();
-            $table->string('msds_link', 300)->nullable();
 
             $table->json('search_terms')->nullable();
             $table->json('specifications')->nullable();
@@ -41,7 +40,7 @@ return new class extends Migration
             $table->decimal('item_weight', 10, 2)->nullable();
             $table->string('lead_time', 20)->nullable();
 
-            $table->string('unit_of_measure', 50)->nullable();
+            $table->foreignId('unit_of_measure')->nullable();
             $table->integer('quantity_per_unit')->nullable();
             $table->integer('min_qty_per_order')->nullable();
             $table->integer('max_qty_per_order')->nullable();
@@ -52,6 +51,7 @@ return new class extends Migration
 
             $table->string('status', 20)->default('incomplete');
             $table->integer('completeness_score')->default(0);
+            $table->timestamp('last_submitted_at')->nullable();
 
             $table->timestamps();
 

@@ -23,6 +23,12 @@ class CommodityTypeResource extends Resource
 
     protected static string|UnitEnum|null $navigationGroup = 'Catalog Management';
 
+    public static function getNavigationBadge(): ?string
+    {
+        return (string) CommodityType::where('approved', false)
+            ->count();
+    }
+
 
     public static function form(Schema $schema): Schema
     {

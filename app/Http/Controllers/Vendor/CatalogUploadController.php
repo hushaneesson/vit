@@ -28,13 +28,13 @@ class CatalogUploadController extends Controller
     public function store(Request $request): JsonResponse
     {
         $request->validate([
-            'file' => ['required', 'file', 'mimes:csv,xlsx,xls', 'max:51200'], // 50MB
+            'file' => ['required', 'file', 'mimes:csv,txt,xlsx,xls', 'max:51200'], // 50MB
         ]);
 
         $client = Auth::guard('client')->user();
         $file = $request->file('file');
         $extension = strtolower($file->getClientOriginalExtension());
-        $fileType = $extension;
+        $fileType = $extension === 'txt' ? 'csv' : $extension;
 
         $storedPath = $file->store("catalog-uploads/{$client->vendor_id}", self::DISK);
 

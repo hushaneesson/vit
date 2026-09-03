@@ -14,20 +14,11 @@ return new class extends Migration
     {
         Schema::create('product_hierarchies', function (Blueprint $table) {
             $table->id();
-            $table->string('hierarchy_number')->unique();
-            $table->string('parent_id')->nullable();
+            $table->string('hierarchy_number')->unique()->nullable();
+            $table->foreignId('parent_id')->nullable();
             $table->string('name', 100);
             $table->integer('level');
             $table->timestamps();
-        });
-
-        // Add the self-referencing FK in a separate step, now that
-        // the unique index on hierarchy_number definitely exists.
-        Schema::table('product_hierarchies', function (Blueprint $table) {
-            $table->foreign('parent_id')
-                ->references('hierarchy_number')
-                ->on('product_hierarchies')
-                ->onDelete('cascade');
         });
 
         $this->insertData();
@@ -47,13 +38,13 @@ return new class extends Migration
 
         fclose($file);
 
-        $hierarchies = collect($hierarchies)->map(function ($hierarchy, $index) {
+        $hierarchies = collect($hierarchies)->map(function ($hierarchy) {
             return [
-                'id' => $index + 1,
-                'hierarchy_number' => $hierarchy[0],
-                'name' => $hierarchy[1],
-                'level' => $hierarchy[2],
-                'parent_id' => $hierarchy[3] ?: null,
+                'id' => $hierarchy[0],
+                'hierarchy_number' => $hierarchy[1],
+                'name' => $hierarchy[2],
+                'level' => $hierarchy[3],
+                'parent_id' => $hierarchy[4] ?: null,
                 'created_at' => now(),
                 'updated_at' => now(),
             ];

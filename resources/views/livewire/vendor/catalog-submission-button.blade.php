@@ -61,7 +61,7 @@
                 <span wire:loading wire:target="withdrawSubmission">Canceling&hellip;</span>
             </button>
         </div>
-    @elseif ($stats && $stats['complete'] > 0)
+    @elseif ($stats && $stats['complete'] > 0 && $stats['can_submit'])
         <div class="flex flex-col items-start gap-3 mt-6 sm:flex-row">
             <button wire:click="submitCatalog" wire:loading.attr="disabled" class="btn btn-success">
                 <span class="flex items-center gap-1" wire:loading.remove wire:target="submitCatalog">

@@ -78,6 +78,7 @@ class CatalogItemFormTest extends TestCase
         Livewire::test(CatalogItemForm::class)
             ->set('name', 'Premium Copy Paper')
             ->set('sellerSku', 'SKU-001')
+            ->set('replacementSkus', ['SKU-000', 'SKU-000A'])
             ->set('manufacturerSku', 'MFG-001')
             ->set('productTypeOrFamily', 'Paper Products')
             ->set('description', 'A long description of copy paper.')
@@ -103,6 +104,7 @@ class CatalogItemFormTest extends TestCase
         $item = CatalogItem::first();
         $this->assertSame($vendor->id, $item->vendor_id);
         $this->assertSame('SKU-001', $item->dealer_sku);
+        $this->assertSame(['SKU-000', 'SKU-000A'], $item->replacement_sku);
 
         // Standard fields
         $this->assertSame('Premium Copy Paper', $item->name);
@@ -119,6 +121,38 @@ class CatalogItemFormTest extends TestCase
         $this->assertCount(1, $item->images);
 
         Notification::assertNothingSent();
+    }
+
+    public function test_replacement_skus_are_limited_to_four_values(): void
+    {
+        Storage::fake('local');
+
+        $this->seedReferenceData();
+        $vendor = Vendor::create(['name' => 'XYZ Company', 'status' => 'active']);
+        $this->actingAsClient($vendor);
+
+        Livewire::test(CatalogItemForm::class)
+            ->set('name', 'Premium Copy Paper')
+            ->set('sellerSku', 'SKU-001')
+            ->set('replacementSkus', ['SKU-000', 'SKU-000A', 'SKU-000B', 'SKU-000C', 'SKU-000D'])
+            ->set('manufacturerSku', 'MFG-001')
+            ->set('productTypeOrFamily', 'Paper Products')
+            ->set('description', 'A long description of copy paper.')
+            ->set('unitOfMeasure', 'RM')
+            ->set('quantityPerUnit', '10')
+            ->set('newImages', [UploadedFile::fake()->image('primary.jpg')])
+            ->set('manufacturer', 'Acme Corp')
+            ->set('brandName', 'Acme')
+            ->set('searchTerms', ['paper', 'copy paper'])
+            ->set('listPrice', '19.99')
+            ->set('sellingPricePerUnit', '15.99')
+            ->set('itemWeight', '5.5')
+            ->set('sellingPoints', ['Bright white', 'Acid free'])
+            ->set('specifications', [['key' => 'Color', 'value' => 'White'], ['key' => 'Sheets', 'value' => '500']])
+            ->set('unspscCode', '14111507')
+            ->set('classifications', ['UNSPSC=14111507'])
+            ->call('save')
+            ->assertHasErrors(['replacementSkus' => 'max']);
     }
 
     public function test_new_hierarchy_path_triggers_admin_email_alert(): void

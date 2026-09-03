@@ -5,15 +5,12 @@ namespace App\Filament\Resources\CatalogSubmissions\Tables;
 use App\Enums\CatalogSubmissionStatus;
 use App\Jobs\UploadCatalogSubmissionToVit;
 use App\Models\CatalogSubmission;
-use App\Notifications\CatalogSubmissionReviewedNotification;
 use Filament\Actions\Action;
 use Filament\Actions\DeleteBulkAction;
-use Filament\Notifications\Notification;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
 
 class CatalogSubmissionsTable
 {
@@ -22,10 +19,12 @@ class CatalogSubmissionsTable
         return $table
             ->columns([
                 TextColumn::make('requestedByClient.name')
+                    ->label('Client')
                     ->description(fn($record) => $record->vendor->name)
                     ->searchable()
                     ->sortable(),
                 TextColumn::make('requested_at')
+                    ->label('Submitted At')
                     ->dateTime('F d, Y', 'America/New_York')
                     ->description(fn($record) => $record->total_items . ' items')
                     ->searchable()
@@ -34,21 +33,6 @@ class CatalogSubmissionsTable
                     ->badge()
                     ->formatStateUsing(fn($state) => $state?->label() ?? '')
                     ->color(fn($state) => $state?->filamentColor() ?? 'gray'),
-
-                // file processing status (pending, generating, completed, uploading, failed)
-                // TODO: need to refactor this to be more clear to the user what it represents
-                //and ensure a descrition error is shown when the file is missing or failed to generate
-                TextColumn::make('processing_status')
-                    ->badge()
-                    ->formatStateUsing(fn($state) => Str::headline($state ?? ''))
-                    ->color(fn($state): string => match ($state) {
-                        'pending' => 'gray',
-                        'generating' => 'warning',
-                        'completed' => 'success',
-                        'uploading' => 'info',
-                        'failed' => 'danger',
-                        default => 'gray',
-                    }),
                 TextColumn::make('generated_at')
                     ->dateTime()
                     ->toggleable(isToggledHiddenByDefault: true),
@@ -59,19 +43,17 @@ class CatalogSubmissionsTable
             ])
             ->filters([
                 SelectFilter::make('status')
-                    ->options(
-                        collect(CatalogSubmissionStatus::cases())
-                            ->mapWithKeys(fn($case) => [$case->value => $case->label()])
-                            ->all()
-                    ),
-                SelectFilter::make('vendor_id')
-                    ->label('Vendor')
-                    ->options(fn() => \App\Models\Vendor::query()->pluck('name', 'id')),
+                    ->options([
+                        'ready_for_review' => 'Pending',
+                        'approved' => 'Delivered',
+                        'withdrawn' => 'Withdrawn',
+                    ])
+                    ->default('ready_for_review'),
             ])
             ->defaultSort('requested_at', 'desc')
             ->recordActions([
                 Action::make('approve')
-                    ->label('Upload to VIT')
+                    ->label('Mark as Uploaded')
                     ->icon('heroicon-o-check-circle')
                     ->color('success')
                     ->visible(fn(CatalogSubmission $record) => $record->status === CatalogSubmissionStatus::ReadyForReview)
@@ -81,41 +63,25 @@ class CatalogSubmissionsTable
                     ->action(function (CatalogSubmission $record) {
                         // Guard: must be in ready_for_review status
                         if ($record->status !== CatalogSubmissionStatus::ReadyForReview) {
-                            Notification::make()
-                                ->title('Cannot approve')
-                                ->body('This submission is not ready for review.')
-                                ->danger()
-                                ->send();
+                            $this->getLivewire()->dispatch('notify', type: 'error', message: 'Cannot approve: This submission is not ready for review.');
                             return;
                         }
 
                         // Guard: processing_status must be completed
                         if ($record->processing_status !== 'completed') {
-                            Notification::make()
-                                ->title('Cannot approve')
-                                ->body('The Excel file has not been generated yet. Please wait for generation to complete.')
-                                ->warning()
-                                ->send();
+                            $this->getLivewire()->dispatch('notify', type: 'warning', message: 'Cannot approve: The Excel file has not been generated yet. Please wait for generation to complete.');
                             return;
                         }
 
                         // Guard: file_path must exist
                         if (!$record->file_path) {
-                            Notification::make()
-                                ->title('Cannot approve')
-                                ->body('The Excel file path is missing. Please contact support.')
-                                ->danger()
-                                ->send();
+                            $this->getLivewire()->dispatch('notify', type: 'error', message: 'Cannot approve: The Excel file path is missing. Please contact support.');
                             return;
                         }
 
                         // Guard: file must exist on storage
                         if (!Storage::disk($record->disk ?? 'local')->exists($record->file_path)) {
-                            Notification::make()
-                                ->title('Cannot approve')
-                                ->body('The generated Excel file is missing from storage.')
-                                ->danger()
-                                ->send();
+                            $this->getLivewire()->dispatch('notify', type: 'error', message: 'Cannot approve: The generated Excel file is missing from storage.');
                             return;
                         }
 
@@ -137,101 +103,24 @@ class CatalogSubmissionsTable
                             // Dispatch the FTP upload job (uploads existing file, does NOT regenerate)
                             UploadCatalogSubmissionToVit::dispatch($record->id);
 
-                            Notification::make()
-                                ->title('Submission approved')
-                                ->body('The Excel file is being uploaded to the VIT FTP server.')
-                                ->success()
-                                ->send();
+                            $this->getLivewire()->dispatch('notify', type: 'success', message: 'Submission approved: The Excel file is being uploaded to the VIT FTP server.');
                         } catch (\Throwable $e) {
-                            Notification::make()
-                                ->title('Approval failed')
-                                ->body($e->getMessage())
-                                ->danger()
-                                ->send();
+                            $this->getLivewire()->dispatch('notify', type: 'error', message: 'Approval failed: ' . $e->getMessage());
                         }
                     }),
-                Action::make('reject')
-                    ->label('Reject')
-                    ->icon('heroicon-o-x-circle')
-                    ->color('danger')
-                    ->visible(fn(CatalogSubmission $record) => in_array($record->status, [
-                        CatalogSubmissionStatus::ReviewRequested,
-                        CatalogSubmissionStatus::ReadyForReview,
-                    ]))
-                    ->requiresConfirmation()
-                    ->modalHeading('Reject catalog submission')
-                    ->modalDescription('Enter the reason for rejection. The vendor will be notified.')
-                    ->form([
-                        \Filament\Forms\Components\Textarea::make('rejection_reason')
-                            ->label('Rejection reason')
-                            ->required()
-                            ->placeholder('Explain why the submission was rejected...'),
-                    ])
-                    ->action(function (CatalogSubmission $record, array $data) {
-                        if (!in_array($record->status, [
-                            CatalogSubmissionStatus::ReviewRequested,
-                            CatalogSubmissionStatus::ReadyForReview,
-                        ])) {
-                            Notification::make()
-                                ->title('Cannot reject')
-                                ->body('This submission cannot be rejected in its current state.')
-                                ->danger()
-                                ->send();
-                            return;
-                        }
 
-                        try {
-                            $record->update([
-                                'status' => CatalogSubmissionStatus::Rejected,
-                                'rejected_by' => auth()->id(),
-                                'rejected_at' => now(),
-                                'rejection_reason' => $data['rejection_reason'],
-                            ]);
-
-                            // Notify the requesting client
-                            $client = $record->requestedByClient;
-                            if ($client && $client->email) {
-                                \Illuminate\Support\Facades\Notification::route('mail', $client->email)
-                                    ->notify(new CatalogSubmissionReviewedNotification(
-                                        vendorName: $record->vendor->name,
-                                        status: 'rejected',
-                                        rejectionReason: $data['rejection_reason'],
-                                    ));
-                            }
-
-                            Notification::make()
-                                ->title('Submission rejected')
-                                ->body('The vendor has been notified.')
-                                ->success()
-                                ->send();
-                        } catch (\Throwable $e) {
-                            Notification::make()
-                                ->title('Rejection failed')
-                                ->body($e->getMessage())
-                                ->danger()
-                                ->send();
-                        }
-                    }),
                 Action::make('downloadExcel')
                     ->label('Download File')
                     ->icon('heroicon-o-arrow-down-on-square')
                     ->color('info')
                     ->action(function (CatalogSubmission $record) {
                         if (!$record->file_path) {
-                            Notification::make()
-                                ->title('File not available')
-                                ->body('The Excel file has not been generated yet')
-                                ->warning()
-                                ->send();
+                            $this->getLivewire()->dispatch('notify', type: 'warning', message: 'File not available: The Excel file has not been generated yet.');
                             return;
                         }
 
                         if (!Storage::disk($record->disk ?? 'local')->exists($record->file_path)) {
-                            Notification::make()
-                                ->title('File not found')
-                                ->body('The generated file is missing from storage')
-                                ->danger()
-                                ->send();
+                            $this->getLivewire()->dispatch('notify', type: 'error', message: 'File not found: The generated file is missing from storage.');
                             return;
                         }
 

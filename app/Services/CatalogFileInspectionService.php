@@ -9,8 +9,6 @@ use PhpOffice\PhpSpreadsheet\Reader\IReader;
 
 class CatalogFileInspectionService
 {
-    private ?string $lastLocalPath = null;
-
     /**
      * Read just the header row + a handful of sample rows, for the
      * column-mapping screen. Does NOT load the whole file into memory -
@@ -42,6 +40,7 @@ class CatalogFileInspectionService
         });
 
         $spreadsheet = $reader->load($localPath);
+
         // Explicitly use the FIRST worksheet. Multi-sheet workbooks must be
         // processed from Sheet 1 only; getActiveSheet() could return a
         // different sheet if the workbook metadata marks another as active.
@@ -85,22 +84,8 @@ class CatalogFileInspectionService
 
         $reader = $this->makeReader($fileType, $localPath);
         $reader->setReadDataOnly(true);
-
-        // Only the header row is needed to compute the file signature. Limit
-        // the read to row 1 so a very large worksheet's data rows are never
-        // materialized into memory just to fingerprint the column structure.
-        $reader->setReadFilter(new class(1) implements \PhpOffice\PhpSpreadsheet\Reader\IReadFilter {
-            public function __construct(private int $maxRow) {}
-
-            public function readCell(string $columnAddress, int $row, string $worksheetName = ''): bool
-            {
-                return $row <= $this->maxRow;
-            }
-        });
-
         $spreadsheet = $reader->load($localPath);
-        // Explicitly use the FIRST worksheet (see inspect()).
-        $sheet = $spreadsheet->getSheet(0);
+        $sheet = $spreadsheet->getActiveSheet();
         $rows = $sheet->toArray(null, true, true, false);
 
         $headerRow = array_map(
@@ -160,23 +145,14 @@ class CatalogFileInspectionService
         // remote (DigitalOcean Spaces), pull the file down to a temp path
         // first rather than streaming, since PhpSpreadsheet's readers
         // expect seekable local files.
-        //
-        // Bug fix: the original condition was
-        //   Storage::disk($disk)->getConfig()['driver'] ?? null === 'local'
-        // which - due to `??` binding looser than `===` - actually
-        // evaluated as `... ?? (null === 'local')`, i.e. `... ?? false`.
-        // That meant the null-coalesce only ever kicked in when the config
-        // array access itself failed, and the 'local' comparison never
-        // ran, so it fell through to the temp-file path even for the
-        // local disk. Parenthesizing fixes the intended comparison.
         if ((Storage::disk($disk)->getConfig()['driver'] ?? null) === 'local') {
-            return $this->lastLocalPath = Storage::disk($disk)->path($path);
+            return Storage::disk($disk)->path($path);
         }
 
         $tempPath = tempnam(sys_get_temp_dir(), 'catalog_upload_');
         file_put_contents($tempPath, Storage::disk($disk)->get($path));
 
-        return $this->lastLocalPath = $tempPath;
+        return $tempPath;
     }
 
     private function lastNonEmptyColumnIndex(array $headerRow): int

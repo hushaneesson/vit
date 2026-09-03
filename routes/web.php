@@ -1,7 +1,7 @@
 <?php
 
 use App\Http\Controllers\Vendor\AppointmentController;
-use App\Http\Controllers\CatalogUploadController;
+use App\Http\Controllers\Vendor\CatalogController;
 use App\Http\Controllers\Vendor\CatalogItemController;
 use App\Http\Controllers\Vendor\CatalogItemImageController;
 use App\Http\Controllers\Vendor\ClientAuthController;
@@ -26,8 +26,6 @@ Route::get('/', function () {
 |
 */
 Route::prefix('vendor')->name('vendor.')->group(function () {
-    Route::get('activate/{token}', [ClientAuthController::class, 'activate'])->name('activate');
-
     Route::get('login', [ClientAuthController::class, 'showLoginForm'])->name('login');
     Route::post('login', [ClientAuthController::class, 'sendOtp'])->name('login.send');
     Route::get('login/otp', [ClientAuthController::class, 'showOtpForm'])->name('login.otp');
@@ -45,20 +43,18 @@ Route::prefix('vendor')->name('vendor.')->group(function () {
         Route::patch('appointments/{appointment}/cancel', [AppointmentController::class, 'cancel'])
             ->name('appointments.cancel');
 
-        Route::get('catalog', [CatalogItemController::class, 'index'])->name('catalog.index');
-        Route::get('catalog/create', [CatalogItemController::class, 'create'])->name('catalog.create');
+        Route::get('catalogs', [CatalogController::class, 'index'])->name('catalog.index');
+        Route::get('catalogs/create', [CatalogController::class, 'create'])->name('catalogs.create');
+        Route::post('catalogs', [CatalogController::class, 'store'])->name('catalogs.store');
 
-        Route::get('/catalog-upload', [CatalogItemController::class, 'renderUpload'])->name('catalog-upload');
-        Route::post('/', [CatalogUploadController::class, 'store']);
-        Route::post('/{catalogUpload}/mapping', [CatalogUploadController::class, 'saveMapping']);
-        Route::post('/{catalogUpload}/process', [CatalogUploadController::class, 'process']);
-        Route::get('/{catalogUpload}/status', [CatalogUploadController::class, 'status']);
-        Route::get('/{catalogUpload}/error-rows', [CatalogUploadController::class, 'errorRows']);
-
+        Route::get('catalog/{catalog}/items', [CatalogItemController::class, 'index'])->name('catalog.items');
+        Route::get('catalog/{catalog}/items/create', [CatalogItemController::class, 'create'])->name('catalog.create');
         Route::get('catalog/{catalogItem}/edit', [CatalogItemController::class, 'edit'])->name('catalog.edit');
         Route::delete('catalog/{catalogItem}', [CatalogItemController::class, 'destroy'])->name('catalog.destroy');
 
         Route::get('catalog-images/{catalogItemImage}', CatalogItemImageController::class)
             ->name('catalog-images.show');
+
+        Route::get('catalog/{catalogId}/upload', [CatalogItemController::class, 'renderUpload'])->name('catalog-upload');
     });
 });

@@ -22,6 +22,7 @@ class Vendor extends Model
         'primary_contact_phone',
         'status',
         'notes',
+        'tier',
     ];
 
     public function clients(): HasMany
@@ -32,6 +33,11 @@ class Vendor extends Model
     public function catalogItems(): HasMany
     {
         return $this->hasMany(CatalogItem::class);
+    }
+
+    public function catalogs(): HasMany
+    {
+        return $this->hasMany(Catalog::class);
     }
 
     public function fieldMappings(): HasMany

@@ -26,6 +26,11 @@ return new class extends Migration
 
             $table->foreignId('vendor_id')->constrained('vendors')->cascadeOnDelete();
 
+            $table->foreignId('catalog_id')
+                ->nullable()
+                ->constrained('catalogs')
+                ->nullOnDelete();
+
             // Client who requested the submission
             $table->foreignId('requested_by_client_id')->constrained('clients')->cascadeOnDelete();
 
@@ -43,8 +48,7 @@ return new class extends Migration
             $table->timestamp('rejected_at')->nullable();
             $table->text('rejection_reason')->nullable();
 
-            // Export file metadata (merged from CatalogExport — now stored directly on submission)
-            $table->string('file_path')->nullable();
+            $table->string('file_path', 500)->nullable();
             $table->string('disk')->default('local');
             $table->unsignedBigInteger('file_size')->nullable();
             $table->unsignedInteger('product_count')->default(0);
@@ -64,6 +68,7 @@ return new class extends Migration
             $table->timestamps();
 
             $table->index(['vendor_id', 'status']);
+            $table->index(['catalog_id', 'status']);
         });
     }
 

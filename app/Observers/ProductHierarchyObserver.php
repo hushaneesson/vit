@@ -3,6 +3,7 @@
 namespace App\Observers;
 
 use App\Models\ProductHierarchy;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Auto-computes the "!"-joined path for a hierarchy row from its ancestor
@@ -13,6 +14,12 @@ class ProductHierarchyObserver
 {
     public function saving(ProductHierarchy $hierarchy): void
     {
+        // Some environments don't have a physical `path` column.
+        // Avoid mutating an unknown column on insert/update.
+        if (! Schema::hasColumn('product_hierarchies', 'path')) {
+            return;
+        }
+
         $hierarchy->path = $this->buildPath($hierarchy);
     }
 
@@ -20,11 +27,15 @@ class ProductHierarchyObserver
     {
         $segments = [$hierarchy->name];
 
-        $parent = $hierarchy->parent_id ? ProductHierarchy::find($hierarchy->parent_id) : null;
+        $parent = $hierarchy->parent_id
+            ? ProductHierarchy::query()->find($hierarchy->parent_id)
+            : null;
 
         while ($parent) {
             array_unshift($segments, $parent->name);
-            $parent = $parent->parent_id ? ProductHierarchy::find($parent->parent_id) : null;
+            $parent = $parent->parent_id
+                ? ProductHierarchy::query()->find($parent->parent_id)
+                : null;
         }
 
         return implode('!', $segments);

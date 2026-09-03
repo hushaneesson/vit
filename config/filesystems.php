@@ -66,6 +66,17 @@ return [
             'throw' => false,
         ],
 
+        'elink' => [
+            'driver' => 'sftp',
+            'host' => env('PARTNER_SFTP_HOST'),
+            'username' => env('PARTNER_SFTP_USERNAME'),
+            'privateKey' => env('PARTNER_SFTP_PRIVATE_KEY'),
+            'passphrase' => env('PARTNER_SFTP_PASSPHRASE'),
+            'port' => (int) env('PARTNER_SFTP_PORT', 22),
+            'root' => env('PARTNER_SFTP_ROOT', ''),
+            'timeout' => 30,
+        ],
+
     ],
 
     /*

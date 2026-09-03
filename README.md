@@ -1,59 +1,118 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# VIT Vendor Portal
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+A Laravel + Filament application that lets vendors manage their product catalogs, submit them for review, and have approved catalogs uploaded to Value Innovation Tech (VIT). Admins review, approve/reject, and monitor upload delivery from a Filament admin panel.
 
-## About Laravel
+## Tech Stack
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+- PHP 8.2+, Laravel 12
+- Filament 5 (admin panel) + `bezhansalleh/filament-shield` (roles/permissions)
+- Livewire 3 (vendor-facing catalog forms/upload UI)
+- `phpoffice/phpspreadsheet` for generating/reading catalog Excel files
+- `league/flysystem-sftp-v3` for delivering files over SFTP
+- Vite, Tailwind CSS 4, Tom Select
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Requirements
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+- PHP >= 8.2 with extensions: `bcmath`, `ctype`, `curl`, `dom`, `fileinfo`, `gd`, `mbstring`, `openssl`, `pdo`, `tokenizer`, `xml`, `zip` (required by PhpSpreadsheet/Filament)
+- Composer 2
+- Node.js 18+ and npm
+- A database: SQLite (default, zero-config) or MySQL/PostgreSQL
+- A queue worker process (catalog processing, exports, and VIT uploads all run as queued jobs)
 
-## Learning Laravel
+### php.ini settings
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+Vendors can upload catalog files (CSV/XLSX/XLS) up to **50MB**, and catalog item images up to **8MB** each. Set the following in `php.ini` (or your Herd/Valet/PHP-FPM pool config) to at least:
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+| Setting               | Minimum | Why                                                                                                               |
+| --------------------- | ------- | ----------------------------------------------------------------------------------------------------------------- |
+| `upload_max_filesize` | `50M`   | Matches the catalog upload validation limit (`max:51200` KB)                                                      |
+| `post_max_size`       | `55M`   | Must be larger than `upload_max_filesize` to allow for form overhead                                              |
+| `memory_limit`        | `512M`  | Large XLSX files are parsed in memory when inspecting columns and generating exports                              |
+| `max_execution_time`  | `300`   | Column inspection and export generation raise this per-request already, but the php.ini floor should not be lower |
 
-## Laravel Sponsors
+> Local development via [Laravel Herd](https://herd.laravel.com) generally ships with generous defaults, but confirm these values in production (`php --ini` to find the loaded `php.ini`).
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+## Setup
 
-### Premium Partners
+```bash
+# 1. Clone and install PHP dependencies
+composer install
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+# 2. Copy the environment file and generate an app key
+cp .env.example .env
+php artisan key:generate
 
-## Contributing
+# 3. Setup ENV vars
+- create database and add db credentials
+- set SFTP credentials
+- set mail credentials
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+# 4. Run migrations and seed reference data (hierarchies, unit of measure, etc.)
+php artisan migrate --seed
 
-## Code of Conduct
+# 5. Install JS dependencies and build assets
+npm install
+npm run build   # or `npm run dev` while developing
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+# 6. Link the public storage disk (catalog uploads/exports/images)
+php artisan storage:link
 
-## Security Vulnerabilities
+# 7. Create the default admin user for the Filament admin panel
+php artisan elink:create-user --name='John Doe' --email=admin@example.com --password=password
+```
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+Or run everything in one shot with the Composer script:
 
-## License
+```bash
+composer setup
+```
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+### Running the app
+
+```bash
+composer dev
+```
+
+This starts, in parallel: the PHP dev server (`php artisan serve`), a queue worker (`php artisan queue:listen`), `php artisan pail` for live logs, and the Vite dev server.
+
+If running services individually instead:
+
+```bash
+php artisan serve
+php artisan queue:listen --tries=1
+npm run dev
+```
+
+### Scheduler
+
+`vit:retry-failed-uploads` runs hourly (see [routes/console.php](routes/console.php)) to retry failed VIT uploads at the intervals configured by `VIT_RETRY_AFTER_HOURS`. Make sure the Laravel scheduler is running in any long-lived environment:
+
+```bash
+* * * * * php /path-to-project/artisan schedule:run >> /dev/null 2>&1
+```
+
+## Key Environment Variables
+
+In addition to the standard Laravel `.env` values, this app uses:
+
+| Variable                             | Purpose                                                                                                                                            |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | --- |
+| `VIT_ADMIN_EMAIL`                    | Receives "catalog ready for review" notifications                                                                                                  |
+| `VIT_GATEWAY_EMAIL`                  | Receives notifications for new/unrecognized hierarchy paths, commodity types, and units of measure                                                 |     |
+| `VIT_RETRY_AFTER_HOURS`              | Comma-separated hours after which failed uploads are auto-retried (default `1,6,24`)                                                               |
+| `VIT_EXCEL_IMAGE_SIZE`               | Square pixel size images are resized to when embedded in the export Excel file                                                                     |
+| `VIT_EXCEL_IMAGE_PADDING`            | Padding (px) between stacked images in the export Excel file                                                                                       |
+| `CATALOG_PROCESSING_TIMEOUT_MINUTES` | Minutes before a stuck catalog upload job is considered stale and reclaimable                                                                      |
+| `ALLOW_PERIODIC_DB_RESET`            | When `true`, `elink:reset-database` runs weekly (via the scheduler) to wipe and reseed the database. Demo/staging only — leave unset in production |
+
+## Testing
+
+```bash
+composer test
+# or
+php artisan test
+```
+
+## Admin Panel
+
+The Filament admin panel is available at `/admin` (see [app/Providers](app/Providers)). Use `bezhansalleh/filament-shield` to manage roles/permissions; run `php artisan shield:install` if setting up roles for the first time on a fresh database.

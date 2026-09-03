@@ -19,6 +19,8 @@
 <body class="antialiased bg-gradient-to-br from-slate-100 via-blue-50 to-sky-50">
     {{ $slot }}
 
+    <x-notifications.toast />
+
     @livewireScripts
 </body>
 

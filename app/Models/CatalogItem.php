@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -13,6 +14,7 @@ class CatalogItem extends Model
 
     protected $fillable = [
         'vendor_id',
+        'catalog_id',
         'name',
         'description',
         'manufacturer_sku',
@@ -22,7 +24,6 @@ class CatalogItem extends Model
         'replacement_sku',
         'images',
         'hierarchy',
-        'unspsc_code',
         'category',
         'unit_of_measure',
         'quantity_per_unit',
@@ -36,7 +37,6 @@ class CatalogItem extends Model
         'classifications',
         'specifications',
         'selling_points',
-        'msds_link',
         'list_price',
         'selling_price',
         'is_discontinued',
@@ -45,18 +45,26 @@ class CatalogItem extends Model
         // not VIT, but useful for completeness scoring
         'status',
         'completeness_score',
+        'last_submitted_at',
     ];
 
     protected $casts = [
+        'images' => 'array',
         'search_terms' => 'array',
         'specifications' => 'array',
         'selling_points' => 'array',
         'classifications' => 'array',
+        'last_submitted_at' => 'datetime',
     ];
 
     public function vendor()
     {
         return $this->belongsTo(Vendor::class);
+    }
+
+    public function catalog()
+    {
+        return $this->belongsTo(Catalog::class);
     }
 
     public function images(): HasMany
@@ -66,17 +74,77 @@ class CatalogItem extends Model
 
     public function hierarchyInfo()
     {
-        return $this->belongsTo(ProductHierarchy::class, 'hierarchy', 'hierarchy_number');
+        return $this->belongsTo(ProductHierarchy::class, 'hierarchy', 'id');
     }
 
     public function commodityType()
     {
-        return $this->belongsTo(CommodityType::class, 'category', 'name');
+        return $this->belongsTo(CommodityType::class, 'category', 'id');
     }
 
     public function unitOfMeasure()
     {
-        return $this->belongsTo(UnitOfMeasure::class, 'unit_of_measure', 'code');
+        return $this->belongsTo(UnitOfMeasure::class, 'unit_of_measure', 'id');
+    }
+
+    /**
+     * Whether this item has never been submitted or was submitted and has
+     * not changed since. last_submitted_at is cleared whenever the item is
+     * modified, so a non-null value always means it matches what was submitted.
+     *
+     * - 'not_submitted': last_submitted_at is null.
+     * - 'submitted': last_submitted_at is set.
+     */
+    protected function submissionState(): Attribute
+    {
+        return Attribute::make(
+            get: fn() => $this->last_submitted_at === null ? 'modified' : 'submitted',
+        );
+    }
+
+    protected function replacementSku(): Attribute
+    {
+        return Attribute::make(
+            get: function ($value) {
+                if ($value === null || $value === '') {
+                    return [];
+                }
+
+                if (is_array($value)) {
+                    return $this->normalizeReplacementSkuList($value);
+                }
+
+                if (is_string($value)) {
+                    $decoded = json_decode($value, true);
+
+                    if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                        return $this->normalizeReplacementSkuList($decoded);
+                    }
+
+                    return [$value];
+                }
+
+                return [];
+            },
+            set: function ($value) {
+                $replacementSkus = is_array($value) ? $value : [$value];
+                $replacementSkus = $this->normalizeReplacementSkuList($replacementSkus);
+
+                return $replacementSkus === [] ? null : json_encode($replacementSkus);
+            },
+        );
+    }
+
+    /**
+     * @param  array<int, mixed>  $replacementSkus
+     * @return array<int, string>
+     */
+    protected function normalizeReplacementSkuList(array $replacementSkus): array
+    {
+        return array_values(array_filter(array_map(
+            fn($replacementSku) => trim((string) $replacementSku),
+            $replacementSkus,
+        ), fn($replacementSku) => $replacementSku !== ''));
     }
 
     protected static array $requiredFields = [
@@ -87,7 +155,6 @@ class CatalogItem extends Model
         'manufacturer_sku',
         'manufacturer',
         'hierarchy',
-        'unspsc_code',
         'category',
         'specifications',
         'selling_points',
@@ -101,7 +168,6 @@ class CatalogItem extends Model
         'images',
         'search_terms',
         'classifications',
-        'msds_link',
         'min_qty_per_order',
         'max_qty_per_order',
         'multiples',
@@ -116,6 +182,12 @@ class CatalogItem extends Model
             $stats = self::calculateCompleteness($item->toArray());
             $item->completeness_score = $stats['score'];
             $item->status = $stats['status'];
+
+            // Any change other than an explicit last_submitted_at update means
+            // the item no longer matches what was last submitted.
+            if ($item->exists && $item->isDirty() && ! $item->isDirty('last_submitted_at')) {
+                $item->last_submitted_at = null;
+            }
         });
     }
 
@@ -145,6 +217,7 @@ class CatalogItem extends Model
         $score = (int) round(($filledCount / count($allFields)) * 100);
 
         $status = 'acceptable';
+
         foreach (self::$requiredFields as $field) {
             if (empty($data[$field])) {
                 $status = 'incomplete';

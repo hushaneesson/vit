@@ -37,11 +37,10 @@ class ClientForm
                     ->label('Job Title'),
                 Select::make('status')
                     ->options([
-                        'invited' => 'Invited (not yet activated)',
                         'active' => 'Active',
                         'disabled' => 'Disabled',
                     ])
-                    ->default('invited')
+                    ->default('active')
                     ->required()
                     ->helperText('Clients cannot log in via OTP until their status is Active.'),
             ]);

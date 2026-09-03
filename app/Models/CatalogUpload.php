@@ -16,6 +16,7 @@ class CatalogUpload extends Model
     protected $fillable = [
         'client_id',
         'vendor_id',
+        'catalog_id',
         'original_filename',
         'file_path',
         'disk',

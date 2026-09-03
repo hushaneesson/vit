@@ -6,50 +6,66 @@ use App\Models\CatalogItem;
 use App\Models\CatalogSubmission;
 use App\Models\Vendor;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
-use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
 /**
  * Generates a VIT-compliant .xlsx file from catalog submission data.
  *
  * Column headers and order are driven by VitFieldDefinition::exportableFields(),
  * which returns only fields that get their own column in the output Excel file.
- * The header text uses vit_csv_column (the VIT spec's exact column name), not
- * web_app_label. Values are resolved from CatalogItem using model_attribute
- * (falling back to field_key) so that name mismatches between field_key and
- * the model column are handled in one place (VitFieldDefinition).
  *
- * Fields that pack into the classifications column (unspsc_code, msds_link,
- * country_of_origin) are merged into classifications at write time, not
- * written as their own columns. Quantity_per_unit is appended onto the end
- * of the name (shortdescription) value rather than getting its own column,
- * formatted as "10 Reams/CS" (quantity + unit_word + "/" + UOM).
+ * Header text uses vit_csv_column, falling back to web_app_label.
+ *
+ * Values are resolved from CatalogItem using model_attribute, falling back
+ * to field_key when no model_attribute is defined.
+ *
+ * Special handling includes:
+ * - System-derived fields such as vendor_name, catalog_name and type.
+ * - SKU fields that resolve from dealer_sku.
+ * - Multi-value fields.
+ * - Key/value fields such as specifications.
+ * - Appended fields such as quantity_per_unit.
  */
 class CatalogExportService
 {
-    public function generate(Vendor $vendor, string $catalogName, Collection $items): Spreadsheet
-    {
+    /**
+     * Generate an Excel spreadsheet from a collection of catalog items.
+     */
+    public function generate(
+        Vendor $vendor,
+        string $catalogName,
+        Collection $items
+    ): Spreadsheet {
         $fields = VitFieldDefinition::exportableFields();
 
         $spreadsheet = new Spreadsheet();
+        $this->applyVitExportMarker($spreadsheet);
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Catalog');
 
         $this->writeHeaderRow($sheet, $fields);
 
         $rowNumber = 2;
+
         foreach ($items as $item) {
-            $this->writeItemRow($sheet, $fields, $item, $vendor, $rowNumber);
+            $this->writeItemRow(
+                $sheet,
+                $fields,
+                $item,
+                $vendor,
+                $rowNumber
+            );
+
             $rowNumber++;
         }
 
-        foreach ($fields as $index => $field) {
-            $column = $this->columnLetter($index);
-            $sheet->getColumnDimension($column)->setAutoSize(true);
-        }
+        $this->autoSizeColumns($sheet, $fields);
 
         return $spreadsheet;
     }
@@ -57,406 +73,743 @@ class CatalogExportService
     /**
      * Generate Excel from a query cursor for memory-efficient large-catalog support.
      *
-     * @param  Vendor                       $vendor
-     * @param  string                       $catalogName
-     * @param  \Illuminate\Database\Query\Builder  $itemsQuery
-     * @param  string                       $disk
+     * @param Vendor $vendor
+     * @param string $catalogName
+     * @param mixed $itemsQuery
+     * @param string $disk
      * @return string
      */
-    public function generateAndStoreFromQuery(Vendor $vendor, string $catalogName, $itemsQuery, string $disk = 'local'): string
-    {
+    public function generateAndStoreFromQuery(
+        Vendor $vendor,
+        string $catalogName,
+        $itemsQuery,
+        string $disk = 'local'
+    ): string {
+        $fields = VitFieldDefinition::exportableFields();
+
         $spreadsheet = new Spreadsheet();
+        $this->applyVitExportMarker($spreadsheet);
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Catalog');
 
-        $fields = VitFieldDefinition::exportableFields();
         $this->writeHeaderRow($sheet, $fields);
 
         $rowNumber = 2;
+
         foreach ($itemsQuery->cursor() as $item) {
-            $this->writeItemRow($sheet, $fields, $item, $vendor, $rowNumber);
+            $this->writeItemRow(
+                $sheet,
+                $fields,
+                $item,
+                $vendor,
+                $rowNumber
+            );
+
             $rowNumber++;
         }
 
-        foreach ($fields as $index => $field) {
-            $column = $this->columnLetter($index);
-            $sheet->getColumnDimension($column)->setAutoSize(true);
-        }
+        $this->autoSizeColumns($sheet, $fields);
 
-        $safeCatalogName = Str::slug($catalogName);
-        $path = "exports/vendor-{$vendor->id}/catalog-{$safeCatalogName}-" . now()->format('Ymd-His') . '.xlsx';
+        $path = $this->buildExportPath(
+            $vendor,
+            $catalogName
+        );
 
-        Storage::disk($disk)->makeDirectory(dirname($path));
-
-        if ($disk === 'local') {
-            $fullPath = Storage::disk($disk)->path($path);
-            $writer = \PhpOffice\PhpSpreadsheet\IOFactory::createWriter($spreadsheet, 'Xlsx');
-            $writer->save($fullPath);
-        } else {
-            $tempPath = tempnam(sys_get_temp_dir(), 'catalog_export_');
-            $writer = \PhpOffice\PhpSpreadsheet\IOFactory::createWriter($spreadsheet, 'Xlsx');
-            $writer->save($tempPath);
-            Storage::disk($disk)->put($path, file_get_contents($tempPath));
-            unlink($tempPath);
-        }
-
-        return $path;
-    }
-
-    public function generateAndStore(Vendor $vendor, string $catalogName, Collection $items, string $disk = 'local'): string
-    {
-        $spreadsheet = $this->generate($vendor, $catalogName, $items);
-
-        $safeCatalogName = Str::slug($catalogName);
-        $path = "exports/vendor-{$vendor->id}/catalog-{$safeCatalogName}-" . now()->format('Ymd-His') . '.xlsx';
-
-        Storage::disk($disk)->makeDirectory(dirname($path));
-
-        if ($disk === 'local') {
-            $fullPath = Storage::disk($disk)->path($path);
-            $writer = \PhpOffice\PhpSpreadsheet\IOFactory::createWriter($spreadsheet, 'Xlsx');
-            $writer->save($fullPath);
-        } else {
-            $tempPath = tempnam(sys_get_temp_dir(), 'catalog_export_');
-            $writer = \PhpOffice\PhpSpreadsheet\IOFactory::createWriter($spreadsheet, 'Xlsx');
-            $writer->save($tempPath);
-            Storage::disk($disk)->put($path, file_get_contents($tempPath));
-            unlink($tempPath);
-        }
+        $this->storeSpreadsheet(
+            $spreadsheet,
+            $path,
+            $disk
+        );
 
         return $path;
     }
 
     /**
-     * Generate Excel file from ALL current CatalogItems belonging to the
-     * submission's vendor.
-     *
-     * @param  CatalogSubmission  $submission
-     * @return string  Relative storage path to the generated .xlsx
+     * Stamp the workbook with custom document properties that mark it as a
+     * VIT-generated catalog export. On re-upload, CatalogFileInspectionService
+     * / the re-upload detector reads these to decide whether the file is
+     * eligible for automatic column mapping.
      */
-    public function generateFromSubmission(CatalogSubmission $submission): string
+    private function applyVitExportMarker(Spreadsheet $spreadsheet): void
     {
-        $vendor = $submission->vendor;
-        $vendorName = is_string($vendor->name) ? $vendor->name : 'Unknown';
-        $catalogName = 'Export ' . $vendorName . ' ' . now()->format('M j, Y g:i A');
-        $disk = $submission->disk ?? 'local';
+        $properties = $spreadsheet->getProperties();
 
-        $itemsQuery = CatalogItem::where('vendor_id', $vendor->id)
+        $properties->setCustomProperty(
+            VitFieldDefinition::VIT_EXPORT_MARKER_KEY,
+            VitFieldDefinition::VIT_EXPORT_MARKER_VALUE,
+            's'
+        );
+
+        $properties->setCustomProperty(
+            VitFieldDefinition::VIT_EXPORT_VERSION_KEY,
+            VitFieldDefinition::VIT_EXPORT_VERSION,
+            'i'
+        );
+    }
+
+    public function generateFromSubmission(
+        CatalogSubmission $submission
+    ): string {
+        $vendor = $submission->vendor;
+        $catalog = $submission->catalog;
+
+        $vendorName = $this->resolveVendorFolderName($vendor);
+
+        $catalogName = $submission->catalog?->name;
+
+        if (! is_string($catalogName) || $catalogName === '') {
+            $catalogName = $vendorName;
+        }
+
+        $catalogName = $vendorName . '-' . $catalog->name;
+        $disk = $submission->disk ?? config('filesystems.default');
+
+        $itemsQuery = CatalogItem::with([
+            'commodityType',
+            'hierarchyInfo',
+            'unitOfMeasure',
+            'catalog',
+        ])
+            ->where('vendor_id', $vendor->id)
             ->whereIn('status', ['acceptable', 'excellent'])
+            ->whereNull('last_submitted_at')
             ->orderBy('id');
 
-        return $this->generateAndStoreFromQuery($vendor, $catalogName, $itemsQuery, $disk);
+        $path = $this->generateAndStoreFromQuery(
+            $vendor,
+            $catalogName,
+            $itemsQuery,
+            $disk
+        );
+
+        // Stamp the submitted items directly (bypassing the updated_at
+        // timestamp) so their submission state can be tracked without
+        // being flagged as "modified" by the stamp itself.
+        DB::table('catalog_items')
+            ->where('vendor_id', $vendor->id)
+            ->where('catalog_id', $submission->catalog_id)
+            ->whereIn('status', ['acceptable', 'excellent'])
+            ->whereNull('last_submitted_at')
+            ->update(['last_submitted_at' => now()]);
+
+        return $path;
     }
 
     /**
      * Write the header row using vit_csv_column as the header text.
-     * Only exportable fields are written (packed and appended fields are
-     * excluded since they don't get their own column).
+     *
+     * Only exportable fields are written. Packed and appended fields that
+     * do not have their own output column are excluded by exportableFields().
      */
-    private function writeHeaderRow($sheet, Collection $fields): void
-    {
+    private function writeHeaderRow(
+        object $sheet,
+        Collection $fields
+    ): void {
         foreach ($fields as $index => $field) {
             $column = $this->columnLetter($index);
-            $header = $field->vit_csv_column ?? $field->web_app_label;
-            $sheet->setCellValue("{$column}1", $header);
-            $sheet->getStyle("{$column}1")->getFont()->setBold(true);
+
+            $header = $field->vit_csv_column
+                ?? $field->web_app_label;
+
+            $sheet->setCellValue(
+                "{$column}1",
+                $header
+            );
+
+            $sheet
+                ->getStyle("{$column}1")
+                ->getFont()
+                ->setBold(true);
         }
     }
 
     /**
-     * Write a single item row, applying packing and appending logic before
-     * the cell values are written.
+     * Write a single item row, applying packing and appended-field logic
+     * before the cell values are written.
      */
-    private function writeItemRow($sheet, Collection $fields, object $item, Vendor $vendor, int $rowNumber): void
-    {
-        $resolvedValues = $this->resolveAllValues($fields, $item, $vendor);
+    private function writeItemRow(
+        object $sheet,
+        Collection $fields,
+        object $item,
+        Vendor $vendor,
+        int $rowNumber
+    ): void {
+        $resolvedValues = $this->resolveAllValues(
+            $fields,
+            $item,
+            $vendor
+        );
 
         foreach ($fields as $index => $field) {
             $column = $this->columnLetter($index);
             $cell = "{$column}{$rowNumber}";
 
-            try {
-                $value = $resolvedValues[$field->field_key] ?? '';
-            } catch (\Throwable $e) {
-                Log::error('Failed to resolve field value while writing item row', [
-                    'field_key' => $field->field_key,
-                    'item_id' => $item->id ?? null,
-                    'row_number' => $rowNumber,
-                    'error' => $e->getMessage(),
-                    'trace' => $e->getTraceAsString(),
-                ]);
+            $value = $resolvedValues[$field->field_key] ?? '';
 
-                $value = '';
-            }
-
-            $sheet->setCellValueExplicit($cell, $value, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit(
+                $cell,
+                $value,
+                DataType::TYPE_STRING
+            );
         }
     }
 
     /**
-     * Resolve all field values for a single row, applying:
-     *  - model_attribute mapping (field_key -> Eloquent attribute name)
-     *  - packed fields (UNSPSC, MSDS Link, Country of Origin -> classifications)
-     *  - appended fields (quantity_per_unit -> appended to shortdescription's value)
-     *
-     * quantity_per_unit append format: "{quantity} {unit_word}/{unit_of_measure}"
-     * e.g. "10 Reams/CS". The unit_word comes from the CatalogItem::unit_word
-     * column (defined as a separate VIT field at sort_order 211). If unit_word
-     * is not provided but the UOM is, falls back to "{quantity} {uom}".
+     * Automatically size all exported columns.
      */
-    private function resolveAllValues(Collection $fields, object $item, Vendor $vendor): array
-    {
-        $values = [];
+    private function autoSizeColumns(
+        object $sheet,
+        Collection $fields
+    ): void {
+        foreach ($fields as $index => $field) {
+            $column = $this->columnLetter($index);
 
-        // 1. Collect raw values for all exportable fields.
-        // Hierarchy is a selected leaf in the product_hierarchies table. The
-        // CatalogItem stores the chosen hierarchy_number (the VIT value) in
-        // the scalar hierarchy column, so resolveValue() reads that string
-        // directly rather than inventing a display path from unrelated data.
-        foreach ($fields as $field) {
-            $values[$field->field_key] = $this->resolveValue($field, $item, $vendor);
+            $sheet
+                ->getColumnDimension($column)
+                ->setAutoSize(true);
+        }
+    }
+
+    /**
+     * Resolve the vendor name to use for the export folder, falling back to
+     * the vendor id when the name is missing/blank so folders never collide
+     * under a generic placeholder like "Unknown".
+     */
+    private function resolveVendorFolderName(Vendor $vendor): string
+    {
+        if (is_string($vendor->name) && trim($vendor->name) !== '') {
+            return $vendor->name;
         }
 
-        // 2. Merge packed fields into their target (classifications).
-        $packedFields = VitFieldDefinition::packedFields()
-            ->where('packs_into_field', 'classifications');
+        return (string) $vendor->id;
+    }
 
-        if ($packedFields->isNotEmpty()) {
-            $classificationsRaw = $values['classifications'] ?? '';
-            $classificationParts = $this->extractClassificationParts($classificationsRaw);
+    /**
+     * Sanitize a vendor or catalog name so it is safe to use as a
+     * filesystem path / file-name component.
+     */
+    private function sanitizeNameComponent(string $name): string
+    {
+        $name = preg_replace('/[\\\\\/:*?"<>|]/', '', $name);
+        $name = preg_replace('/\s+/', ' ', trim($name));
 
-            foreach ($packedFields as $packed) {
-                $packedValue = $this->resolveValue($packed, $item, $vendor);
+        // Windows silently strips trailing dots/spaces from path components,
+        // which desyncs the path PHP thinks it wrote from what's actually on
+        // disk. Strip them ourselves so both sides agree.
+        $name = rtrim($name, " .");
 
-                // MSDS link is conditional on Hazmat — only pack if the item
-                // is flagged Hazmat. If not Hazmat, skip the MSDS field entirely.
-                if ($packed->field_key === 'msds_link') {
-                    $isHazmat = $this->hasHazmatClassification($classificationParts);
-                    if (! $isHazmat) {
-                        continue;
-                    }
-                }
+        return $name !== '' ? $name : 'Unnamed';
+    }
 
-                if ($packedValue !== '') {
-                    $classificationParts[] = "{$packed->packs_into_key}={$packedValue}";
-                }
+    /**
+     * Build the storage path for the generated catalog export.
+     *
+     * Files are stored inside a folder named after the vendor, with a
+     * filename of "{vendor} - {catalog} - {human-readable timestamp}.xlsx".
+     */
+    private function buildExportPath(
+        Vendor $vendor,
+        string $catalogName
+    ): string {
+
+        $folderName = Str::slug($vendor->name);
+
+        return "inbound/{$folderName}/"
+            . "{$catalogName}-"
+            . now()->format('Ymd-His')
+            . '.xlsx';
+    }
+
+    /**
+     * Store the generated spreadsheet.
+     *
+     * Local disks are written directly to their filesystem path.
+     *
+     * Remote disks use a temporary local file and stream that file to
+     * storage so the entire XLSX does not need to be loaded into PHP memory.
+     */
+    private function storeSpreadsheet(
+        Spreadsheet $spreadsheet,
+        string $path,
+        string $disk
+    ): void {
+        Storage::disk($disk)->makeDirectory(
+            dirname($path)
+        );
+
+        $writer = IOFactory::createWriter(
+            $spreadsheet,
+            'Xlsx'
+        );
+
+        if ($disk === 'local') {
+            $writer->save(
+                Storage::disk($disk)->path($path)
+            );
+
+            return;
+        }
+
+        $this->storeRemoteSpreadsheet(
+            $writer,
+            $path,
+            $disk
+        );
+    }
+
+    /**
+     * Store a generated spreadsheet on a remote filesystem.
+     *
+     * The XLSX is first written to a temporary local file.
+     * That file is then streamed to the configured filesystem instead
+     * of being loaded entirely into PHP memory.
+     */
+    private function storeRemoteSpreadsheet(
+        object $writer,
+        string $path,
+        string $disk
+    ): void {
+        $tempPath = tempnam(
+            sys_get_temp_dir(),
+            'catalog_export_'
+        );
+
+        if ($tempPath === false) {
+            throw new \RuntimeException(
+                'Unable to create temporary file for catalog export.'
+            );
+        }
+
+        try {
+            $writer->save($tempPath);
+
+            $stream = fopen(
+                $tempPath,
+                'rb'
+            );
+
+            if ($stream === false) {
+                throw new \RuntimeException(
+                    'Unable to open temporary catalog export for reading.'
+                );
             }
 
-            $classificationsDefinition = VitFieldDefinition::find('classifications');
-            $classificationSeparator = $classificationsDefinition?->join_separator ?? '|';
+            try {
+                $stored = Storage::disk($disk)->writeStream(
+                    $path,
+                    $stream
+                );
 
-            $values['classifications'] = implode($classificationSeparator, $classificationParts);
+                if ($stored === false) {
+                    throw new \RuntimeException(
+                        'Unable to store catalog export on the configured disk.'
+                    );
+                }
+            } finally {
+                fclose($stream);
+            }
+        } finally {
+            if (is_file($tempPath)) {
+                @unlink($tempPath);
+            }
+        }
+    }
+
+    /**
+     * Resolve all field values for a single catalog item.
+     *
+     * Appended fields are applied after the normal field values have been
+     * resolved so they can modify their target field.
+     */
+    private function resolveAllValues(
+        Collection $fields,
+        object $item,
+        Vendor $vendor
+    ): array {
+        $values = [];
+
+        /*
+         * 1. Collect raw values for all exportable fields.
+         */
+        foreach ($fields as $field) {
+            $values[$field->field_key] = $this->resolveValue(
+                $field,
+                $item,
+                $vendor
+            );
         }
 
-        // 3. Apply appended fields (quantity_per_unit onto shortdescription).
+        /*
+         * 2. Apply appended fields such as quantity_per_unit.
+         */
         $appendedFields = VitFieldDefinition::appendedFields();
 
         foreach ($appendedFields as $appended) {
-            $appendedValue = $this->resolveValue($appended, $item, $vendor);
+            $appendedValue = $this->resolveValue(
+                $appended,
+                $item,
+                $vendor
+            );
 
-            if ($appendedValue !== '') {
-                $targetKey = $appended->append_to_field;
-                $targetValue = $values[$targetKey] ?? '';
-
-                // Resolve unit_word and unit_of_measure for the full VIT format:
-                // "{quantity} {unit_word}/{uom}" e.g. "10 Reams/CS"
-                $unitWord = $this->resolveValue(VitFieldDefinition::find('unit_word'), $item, $vendor);
-                $uom = $this->resolveValue(VitFieldDefinition::find('unit_of_measure'), $item, $vendor);
-
-                if ($unitWord !== '' && $uom !== '') {
-                    $formattedAppend = "{$appendedValue} {$unitWord}/{$uom}";
-                } elseif ($uom !== '') {
-                    // Fallback: no unit_word provided, just use quantity + UOM
-                    $formattedAppend = "{$appendedValue} {$uom}";
-                } else {
-                    $formattedAppend = (string) $appendedValue;
-                }
-
-                $values[$targetKey] = $targetValue !== ''
-                    ? "{$targetValue}, {$formattedAppend}"
-                    : $formattedAppend;
+            if ($appendedValue === '') {
+                continue;
             }
 
-            // The appended field does NOT get its own column (excluded from
-            // exportableFields() because vit_csv_column is null).
-            $values[$appended->field_key] = '';
+            $targetKey = $appended->append_to_field;
+            $targetValue = $values[$targetKey] ?? '';
+
+            /*
+             * Resolve unit_word and unit_of_measure for the full VIT format:
+             *
+             * {quantity} {unit_word}/{uom}
+             *
+             * Example:
+             * 10 Reams/CS
+             */
+            $unitWord = $this->resolveValue(
+                VitFieldDefinition::find('unit_word'),
+                $item,
+                $vendor
+            );
+
+            $uom = $this->resolveValue(
+                VitFieldDefinition::find('unit_of_measure'),
+                $item,
+                $vendor
+            );
+
+            if ($unitWord !== '' && $uom !== '') {
+                $formattedAppend =
+                    "{$appendedValue} {$unitWord}/{$uom}";
+            } elseif ($uom !== '') {
+                /*
+                 * Fallback when no unit_word is available.
+                 */
+                $formattedAppend =
+                    "{$appendedValue} {$uom}";
+            } else {
+                $formattedAppend =
+                    (string) $appendedValue;
+            }
+
+            $values[$targetKey] = $targetValue !== ''
+                ? "{$targetValue}, {$formattedAppend}"
+                : $formattedAppend;
         }
 
         return $values;
     }
 
     /**
-     * Split the raw classifications value into individual parts.
-     * Handles JSON-encoded arrays, pipe-separated strings, and empty values.
-     */
-    private function extractClassificationParts(string $rawValue): array
-    {
-        if ($rawValue === '') {
-            return [];
-        }
-
-        $maybeJson = json_decode($rawValue, true);
-        if (is_array($maybeJson)) {
-            return array_values(array_filter($maybeJson, fn($part) => trim((string) $part) !== ''));
-        }
-
-        if ($rawValue === '' || $rawValue === '[]') {
-            return [];
-        }
-
-        $classificationSeparator = VitFieldDefinition::find('classifications')?->join_separator ?? '|';
-
-        return array_values(array_filter(explode($classificationSeparator, $rawValue), fn($part) => trim((string) $part) !== ''));
-    }
-
-    /**
-     * Check whether the classifications data includes "Hazmat".
-     */
-    private function hasHazmatClassification(array $classificationParts): bool
-    {
-        foreach ($classificationParts as $part) {
-            if (trim((string) $part) === 'Hazmat') {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * Resolve a single VIT field value from the CatalogItem + Vendor.
+     * Resolve a single VIT field value from CatalogItem and Vendor.
      *
-     * Reads from the model attribute specified by model_attribute
-     * (falling back to field_key). System-derived fields like vendor_name
-     * are handled specially.
+     * System-derived fields such as vendor_name are handled specially.
      */
-    private function resolveValue(object $field, object $item, Vendor $vendor): string
-    {
+    private function resolveValue(
+        object $field,
+        object $item,
+        Vendor $vendor
+    ): string {
         $fieldKey = $field->field_key;
 
-        // System-derived fields: generate at export time, not from database
+        /*
+         * System-derived fields are generated during export rather than
+         * read directly from the database.
+         */
         if ($fieldKey === 'vendor_name') {
             return $vendor->name ?? '';
+        }
+
+        if ($fieldKey === 'catalog_name') {
+            return $item->catalog?->name ?? '';
         }
 
         if ($fieldKey === 'type') {
             return 'ELINK';
         }
 
-        if ($fieldKey === 'customer_sku' || $fieldKey === 'vendor_sku' || $fieldKey === 'search_sku') {
+        /*
+         * These three VIT fields intentionally all use dealer_sku.
+         */
+        if (
+            $fieldKey === 'customer_sku'
+            || $fieldKey === 'vendor_sku'
+            || $fieldKey === 'search_sku'
+        ) {
             return $item->dealer_sku ?? '';
         }
 
-        // Determine the Eloquent attribute to read from CatalogItem.
-        // model_attribute in the DEFINITIONS handles all overrides (e.g.
-        // shortdescription -> name, image_urls -> images, etc.).
-        $attr = $field->model_attribute ?? $fieldKey;
+        /*
+         * model_attribute in VitFieldDefinition handles field-specific
+         * model relationships and attribute overrides.
+         *
+         * Examples:
+         * - shortdescription -> name
+         * - image_urls -> images
+         * - hierarchy -> hierarchyInfo.hierarchy_number
+         * - unit_of_measure -> unitOfMeasure.code
+         * - product_commodity_type -> commodityType.name
+         * - item_weight_in_pounds -> item_weight
+         * - country_of_origin -> countryOfOrigin accessor
+         */
+        $attribute = $field->model_attribute
+            ?? $fieldKey;
 
-        // TODO: remove this special case for hierarchy once the field def is updated to use model_attribute
-        if ($fieldKey === 'hierarchy') {
-            $rawValue = $item->hierarchy ?? $item->{$fieldKey} ?? null;
-        } else {
-            $rawValue = $item->{$attr} ?? $item->{$fieldKey} ?? null;
-        }
+        $rawValue = data_get(
+            $item,
+            $attribute
+        );
 
-        if (is_null($rawValue) || $rawValue === '' || $rawValue === []) {
+        if (
+            is_null($rawValue)
+            || $rawValue === ''
+            || $rawValue === []
+        ) {
             return '';
         }
 
-        // Multi-value columns are defined in VitFieldDefinition; decode and
-        // join them with the field's own separator at export time.
+        /*
+         * Multi-value columns are defined by VitFieldDefinition.
+         * Values are decoded and joined using the field's configured
+         * export separator.
+         */
         $multiValueFieldKeys = VitFieldDefinition::all()
             ->where('is_multi_value', true)
             ->pluck('field_key')
             ->all();
 
-        if (in_array($fieldKey, $multiValueFieldKeys, true)) {
-            $decoded = is_string($rawValue) ? json_decode($rawValue, true) : $rawValue;
-
-            if (! is_array($decoded) || empty($decoded)) {
-                return '';
-            }
-
-            $separator = $field->join_separator ?? ',';
-
-            // Check if this is a key/value field (specifications) or normal array
-            $isKeyValue = $field->is_key_value ?? false;
-
-            if ($isKeyValue) {
-                // Specifications: convert key/value objects to "key=value" strings
-                $stringParts = [];
-                foreach ($decoded as $entry) {
-                    if (is_array($entry) && isset($entry['key']) && isset($entry['value'])) {
-                        $key = (string) $entry['key'];
-                        $value = $entry['value'];
-
-                        if (is_array($value)) {
-                            $stringParts[] = $key . '=' . $this->flattenValueForDisplay($value);
-                        } elseif (is_bool($value)) {
-                            $stringParts[] = $key . '=' . ($value ? 'TRUE' : 'FALSE');
-                        } else {
-                            $stringParts[] = $key . '=' . (string) $value;
-                        }
-                    } elseif (is_array($entry) && array_keys($entry) !== range(0, count($entry) - 1)) {
-                        // Legacy associative format
-                        foreach ($entry as $key => $value) {
-                            if (is_array($value)) {
-                                $stringParts[] = (string) $key . '=' . $this->flattenValueForDisplay($value);
-                            } elseif (is_bool($value)) {
-                                $stringParts[] = (string) $key . '=' . ($value ? 'TRUE' : 'FALSE');
-                            } else {
-                                $stringParts[] = (string) $key . '=' . (string) $value;
-                            }
-                        }
-                    } elseif (is_string($entry) && str_contains($entry, '=')) {
-                        // Legacy indexed "key=value" string
-                        $stringParts[] = $entry;
-                    }
-                }
-
-                return implode($separator, $stringParts);
-            } else {
-                // Normal array fields: just join the values
-                $stringParts = [];
-                foreach ($decoded as $entry) {
-                    if (is_string($entry)) {
-                        $stringParts[] = $entry;
-                    } elseif (is_int($entry) || is_float($entry)) {
-                        $stringParts[] = (string) $entry;
-                    }
-                }
-
-                return implode($separator, $stringParts);
-            }
+        if (
+            in_array(
+                $fieldKey,
+                $multiValueFieldKeys,
+                true
+            )
+        ) {
+            return $this->formatMultiValueValue(
+                $field,
+                $rawValue
+            );
         }
 
         if (is_bool($rawValue)) {
-            return $rawValue ? 'TRUE' : 'FALSE';
+            return $rawValue
+                ? 'TRUE'
+                : 'FALSE';
         }
+
+        /*
+         * lead_time is stored as a string in the application (matching the
+         * Catalog Item form's string buckets such as "0-3 days"), so it is
+         * exported exactly as stored and validated as text on re-import.
+         */
 
         return (string) $rawValue;
     }
 
     /**
-     * Convert a nested array/object value into a readable string
-     * instead of letting implode() choke on it.
+     * Format a multi-value field according to its definition.
+     *
+     * Key/value fields such as specifications are converted to:
+     *
+     * key=value
+     *
+     * Normal array fields are simply joined using the field's configured
+     * separator.
      */
-    private function flattenValueForDisplay(array $value): string
-    {
-        // Legacy CatalogItem form object format: ['key' => 'Size', 'value' => 'Large']
-        // -> "Size=Large" (the canonical "Key=Value" representation).
-        if (array_key_exists('key', $value) && array_key_exists('value', $value)) {
-            return (string) $value['key'] . '=' . (string) $value['value'];
+    private function formatMultiValueValue(
+        object $field,
+        mixed $rawValue
+    ): string {
+        $decoded = is_string($rawValue)
+            ? json_decode($rawValue, true)
+            : $rawValue;
+
+        if (
+            !is_array($decoded)
+            || empty($decoded)
+        ) {
+            return '';
         }
 
-        // Any other array shape is not a recognized specification format. Fall
-        // back to JSON so it is visibly not a valid "Key=Value" cell value
-        // rather than silently emitting a spec-incorrect string.
+        $separator = $field->join_separator ?? ',';
+
+        if ($field->is_key_value ?? false) {
+            return $this->formatKeyValueValues(
+                $decoded,
+                $separator
+            );
+        }
+
+        return $this->formatArrayValues(
+            $decoded,
+            $separator
+        );
+    }
+
+    /**
+     * Format a normal array-based multi-value field.
+     */
+    private function formatArrayValues(
+        array $values,
+        string $separator
+    ): string {
+        $stringParts = [];
+
+        foreach ($values as $entry) {
+            if (is_string($entry)) {
+                $stringParts[] = $entry;
+
+                continue;
+            }
+
+            if (
+                is_int($entry)
+                || is_float($entry)
+            ) {
+                $stringParts[] = (string) $entry;
+            }
+        }
+
+        return implode(
+            $separator,
+            $stringParts
+        );
+    }
+
+    /**
+     * Format a key/value field such as specifications.
+     *
+     * Supports:
+     *
+     * 1. Canonical:
+     *    ['key' => 'Size', 'value' => 'Large']
+     *
+     * 2. Legacy associative arrays.
+     *
+     * 3. Legacy "key=value" strings.
+     */
+    private function formatKeyValueValues(
+        array $values,
+        string $separator
+    ): string {
+        $stringParts = [];
+
+        foreach ($values as $entry) {
+            /*
+             * Canonical key/value object.
+             */
+            if (
+                is_array($entry)
+                && isset(
+                    $entry['key'],
+                    $entry['value']
+                )
+            ) {
+                $key = (string) $entry['key'];
+                $value = $entry['value'];
+
+                if (is_array($value)) {
+                    $value = $this->flattenValueForDisplay(
+                        $value
+                    );
+                } elseif (is_bool($value)) {
+                    $value = $value
+                        ? 'TRUE'
+                        : 'FALSE';
+                } else {
+                    $value = (string) $value;
+                }
+
+                $stringParts[] =
+                    $key . '=' . $value;
+
+                continue;
+            }
+
+            /*
+             * Legacy associative format.
+             */
+            if (
+                is_array($entry)
+                && array_keys($entry) !== range(
+                    0,
+                    count($entry) - 1
+                )
+            ) {
+                foreach ($entry as $key => $value) {
+                    if (is_array($value)) {
+                        $value =
+                            $this->flattenValueForDisplay(
+                                $value
+                            );
+                    } elseif (is_bool($value)) {
+                        $value = $value
+                            ? 'TRUE'
+                            : 'FALSE';
+                    } else {
+                        $value = (string) $value;
+                    }
+
+                    $stringParts[] =
+                        (string) $key . '=' . $value;
+                }
+
+                continue;
+            }
+
+            /*
+             * Legacy indexed "key=value" string.
+             */
+            if (
+                is_string($entry)
+                && str_contains($entry, '=')
+            ) {
+                $stringParts[] = $entry;
+            }
+        }
+
+        return implode(
+            $separator,
+            $stringParts
+        );
+    }
+
+    /**
+     * Convert a nested array/object value into a readable string.
+     *
+     * Canonical format:
+     *
+     * ['key' => 'Size', 'value' => 'Large']
+     *
+     * becomes:
+     *
+     * Size=Large
+     *
+     * Unknown array structures are preserved as JSON.
+     */
+    private function flattenValueForDisplay(
+        array $value
+    ): string {
+        if (
+            array_key_exists('key', $value)
+            && array_key_exists('value', $value)
+        ) {
+            return (string) $value['key']
+                . '='
+                . (string) $value['value'];
+        }
+
         return json_encode($value);
     }
 
-    private function columnLetter(int $zeroBasedIndex): string
-    {
-        return \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($zeroBasedIndex + 1);
+    /**
+     * Convert a zero-based field index into an Excel column letter.
+     */
+    private function columnLetter(
+        int $zeroBasedIndex
+    ): string {
+        return Coordinate::stringFromColumnIndex(
+            $zeroBasedIndex + 1
+        );
     }
 }
