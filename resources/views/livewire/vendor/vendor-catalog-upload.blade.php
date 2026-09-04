@@ -609,6 +609,12 @@
                                                 @endif
                                             </div>
                                         @endif
+
+                                        @if (isset($this->separatorValidationErrors[$field->field_key]))
+                                            <p class="mt-1 text-xs text-rose-600">
+                                                {{ $this->separatorValidationErrors[$field->field_key] }}
+                                            </p>
+                                        @endif
                                     </td>
 
                                 </tr>

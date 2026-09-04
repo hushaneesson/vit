@@ -183,7 +183,7 @@ class VendorCatalogUpload extends Component
         $this->validate();
 
         $diagStart = microtime(true);
-        Log::info('DIAG uploadFile start', ['filename'=>optional($this->file)->getClientOriginalName(),'size_bytes'=>optional($this->file)->getSize(),'queue_conn'=>config('queue.default')]);
+        Log::info('DIAG uploadFile start', ['filename' => optional($this->file)->getClientOriginalName(), 'size_bytes' => optional($this->file)->getSize(), 'queue_conn' => config('queue.default')]);
 
         $client = Auth::guard('client')->user();
 
@@ -207,13 +207,13 @@ class VendorCatalogUpload extends Component
             'status' => CatalogUploadStatus::Uploaded,
         ]);
 
-        Log::info('DIAG uploadFile created upload', ['elapsed_s'=>round(microtime(true)-$diagStart, 3),'mem_mb'=>round(memory_get_usage(true)/1048576, 2)]);
+        Log::info('DIAG uploadFile created upload', ['elapsed_s' => round(microtime(true) - $diagStart, 3), 'mem_mb' => round(memory_get_usage(true) / 1048576, 2)]);
 
         $inspection = $inspector->inspect(self::DISK, $storedPath, $fileType);
 
         $this->catalogUploadId = $upload->id;
         $this->columns = $inspection['columns'];
-        Log::info('DIAG uploadFile after inspect', ['cols'=>count($inspection['columns']),'elapsed_s'=>round(microtime(true)-$diagStart, 3),'mem_mb'=>round(memory_get_usage(true)/1048576, 2)]);
+        Log::info('DIAG uploadFile after inspect', ['cols' => count($inspection['columns']), 'elapsed_s' => round(microtime(true) - $diagStart, 3), 'mem_mb' => round(memory_get_usage(true) / 1048576, 2)]);
 
         $this->sampleRows = $inspection['sample_rows'];
 
@@ -230,7 +230,7 @@ class VendorCatalogUpload extends Component
             $detection = null;
         }
 
-        Log::info('DIAG uploadFile detect result', ['vit_file'=>($detection!==null),'elapsed_s'=>round(microtime(true)-$diagStart, 3)]);
+        Log::info('DIAG uploadFile detect result', ['vit_file' => ($detection !== null), 'elapsed_s' => round(microtime(true) - $diagStart, 3)]);
 
         if ($detection !== null) {
             DB::transaction(function () use ($upload, $detection) {
@@ -254,11 +254,11 @@ class VendorCatalogUpload extends Component
 
             // Detected VIT export: carry the single detection result into the
             // job so VIT values are not re-transformed (e.g. weight).
-            Log::info('DIAG uploadFile PRE VIT dispatch (sync runs job inline)', ['elapsed_s'=>round(microtime(true)-$diagStart, 3)]);
+            Log::info('DIAG uploadFile PRE VIT dispatch (sync runs job inline)', ['elapsed_s' => round(microtime(true) - $diagStart, 3)]);
 
             ProcessCatalogUploadJob::dispatch($upload->id, true);
 
-            Log::info('DIAG uploadFile POST VIT dispatch returned', ['elapsed_s'=>round(microtime(true)-$diagStart, 3),'mem_mb'=>round(memory_get_usage(true)/1048576, 2)]);
+            Log::info('DIAG uploadFile POST VIT dispatch returned', ['elapsed_s' => round(microtime(true) - $diagStart, 3), 'mem_mb' => round(memory_get_usage(true) / 1048576, 2)]);
 
             $this->step = 'processing';
 
@@ -272,7 +272,7 @@ class VendorCatalogUpload extends Component
             return;
         }
 
-                Log::info('DIAG uploadFile entering computeFileSignature', ['upload' => $upload->id, 'elapsed_s' => round(microtime(true) - $diagStart, 3), 'mem_mb' => round(memory_get_usage(true) / 1048576, 2)]);
+        Log::info('DIAG uploadFile entering computeFileSignature', ['upload' => $upload->id, 'elapsed_s' => round(microtime(true) - $diagStart, 3), 'mem_mb' => round(memory_get_usage(true) / 1048576, 2)]);
         $this->currentFileSignature = $inspector->computeFileSignature(self::DISK, $storedPath, $fileType, $inspection['columns']);
         Log::info('DIAG uploadFile computeFileSignature done', ['upload' => $upload->id, 'elapsed_s' => round(microtime(true) - $diagStart, 3), 'mem_mb' => round(memory_get_usage(true) / 1048576, 2)]);
 
@@ -446,6 +446,16 @@ class VendorCatalogUpload extends Component
     public function confirmMapping(): void
     {
         $this->separatorValidationErrors = [];
+
+        // Item Name (short_description) is required to proceed.
+        $itemNameMapping = $this->mapping['short_description'] ?? null;
+
+        if ($itemNameMapping === null || $itemNameMapping === '') {
+            $this->separatorValidationErrors['short_description'] =
+                'Please select a source column for Item Name before continuing.';
+
+            return;
+        }
 
         foreach ($this->catalogFields as $field) {
             if (! $field->is_multi_value) {
