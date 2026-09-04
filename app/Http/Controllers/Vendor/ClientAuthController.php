@@ -16,6 +16,27 @@ use Illuminate\Validation\ValidationException;
  */
 class ClientAuthController extends Controller
 {
+    /**
+     * Landing page for an invitation link. Marks the client active so they
+     * can proceed to request an OTP and log in.
+     */
+    public function activate(string $token): RedirectResponse
+    {
+        $client = Client::where('invitation_token', $token)->firstOrFail();
+
+        $client->forceFill([
+            'status' => 'active',
+            'activated_at' => $client->activated_at ?? now(),
+        ])->save();
+
+        return redirect()
+            ->route('vendor.login')
+            ->with('notify', [
+                'type' => 'success',
+                'message' => 'Your account is now active. Enter your email below to receive a login code.',
+            ]);
+    }
+
     public function showLoginForm()
     {
         return view('vendor.auth.login');
@@ -50,7 +71,10 @@ class ClientAuthController extends Controller
 
         return redirect()
             ->route('vendor.login.otp', ['email' => $request->email])
-            ->with('status', 'If that email address is registered, a login code has been sent.');
+            ->with('notify', [
+                'type' => 'info',
+                'message' => 'If that email address is registered and active, a login code has been sent.',
+            ]);
     }
 
     public function showOtpForm(Request $request)

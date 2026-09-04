@@ -5,7 +5,6 @@ namespace App\Filament\Resources\CommodityTypes\Tables;
 use App\Models\CommodityType;
 use Filament\Actions\Action;
 use Filament\Actions\EditAction;
-use Filament\Notifications\Notification;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
@@ -45,20 +44,14 @@ class CommodityTypesTable
                     ->modalDescription('This will allow vendors to submit catalogs including this commodity type.')
                     ->action(function (CommodityType $record): void {
                         if ($record->approved) {
-                            Notification::make()
-                                ->title('Commodity type is already approved.')
-                                ->warning()
-                                ->send();
+                            $this->getLivewire()->dispatch('notify', type: 'warning', message: 'Commodity type is already approved.');
 
                             return;
                         }
 
                         $record->update(['approved' => true]);
 
-                        Notification::make()
-                            ->title('Commodity type approved.')
-                            ->success()
-                            ->send();
+                        $this->getLivewire()->dispatch('notify', type: 'success', message: 'Commodity type approved.');
                     }),
                 EditAction::make(),
             ])

@@ -116,9 +116,11 @@ class VitExportFileDetector
         $raw = trim($m[1]);
 
         // The value is typically wrapped in a vt:lpwstr (or vt:lpstr) element.
-        if (preg_match('#<vt:lpwstr>(.*?)</vt:lpwstr>#is', $raw, $vm)
+        if (
+            preg_match('#<vt:lpwstr>(.*?)</vt:lpwstr>#is', $raw, $vm)
             || preg_match('#<vt:lpstr>(.*?)</vt:lpstr>#is', $raw, $vm)
-            || preg_match('#<vt:bstr>(.*?)</vt:bstr>#is', $raw, $vm)) {
+            || preg_match('#<vt:bstr>(.*?)</vt:bstr>#is', $raw, $vm)
+        ) {
             return trim(html_entity_decode($vm[1], ENT_QUOTES | ENT_XML1));
         }
 

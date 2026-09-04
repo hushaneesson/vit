@@ -51,7 +51,10 @@ class AppointmentController extends Controller
         $reason = trim($validated['cancellation_reason']);
 
         if (! $appointment->is_active) {
-            return back()->with('status', 'This appointment is already cancelled.');
+            return back()->with('notify', [
+                'type' => 'info',
+                'message' => 'This appointment is already cancelled.',
+            ]);
         }
 
         $client = auth('client')->user();
@@ -92,7 +95,10 @@ class AppointmentController extends Controller
             ));
         }
 
-        return back()->with('status', 'Appointment cancelled successfully.');
+        return back()->with('notify', [
+            'type' => 'success',
+            'message' => 'Appointment cancelled successfully.',
+        ]);
     }
 
 

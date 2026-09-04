@@ -4,7 +4,7 @@ A Laravel + Filament application that lets vendors manage their product catalogs
 
 ## Tech Stack
 
-- PHP 8.2+, Laravel 12
+- PHP 8.3+, Laravel 12
 - Filament 5 (admin panel) + `bezhansalleh/filament-shield` (roles/permissions)
 - Livewire 3 (vendor-facing catalog forms/upload UI)
 - `phpoffice/phpspreadsheet` for generating/reading catalog Excel files
@@ -13,15 +13,16 @@ A Laravel + Filament application that lets vendors manage their product catalogs
 
 ## Requirements
 
-- PHP >= 8.2 with extensions: `bcmath`, `ctype`, `curl`, `dom`, `fileinfo`, `gd`, `mbstring`, `openssl`, `pdo`, `tokenizer`, `xml`, `zip` (required by PhpSpreadsheet/Filament)
-- Composer 2
-- Node.js 18+ and npm
-- A database: SQLite (default, zero-config) or MySQL/PostgreSQL
+- PHP >= 8.3 with extensions: `bcmath`, `ctype`, `curl`, `dom`, `fileinfo`, `gd`, `mbstring`, `openssl`, `pdo`, `tokenizer`, `xml`, `zip` (required by PhpSpreadsheet/Filament)
+- Composer 2+
+- Node.js 20+ and npm
+- A database: MySQL 8+
+- Apache 2.4+
 - A queue worker process (catalog processing, exports, and VIT uploads all run as queued jobs)
 
 ### php.ini settings
 
-Vendors can upload catalog files (CSV/XLSX/XLS) up to **50MB**, and catalog item images up to **8MB** each. Set the following in `php.ini` (or your Herd/Valet/PHP-FPM pool config) to at least:
+Vendors can upload catalog files (CSV/XLSX/XLS) up to **50MB**, and catalog item images up to **5MB** each. Set the following in `php.ini` (or your PHP-FPM pool config) to at least:
 
 | Setting               | Minimum | Why                                                                                                               |
 | --------------------- | ------- | ----------------------------------------------------------------------------------------------------------------- |
@@ -43,16 +44,17 @@ cp .env.example .env
 php artisan key:generate
 
 # 3. Setup ENV vars
-- create database and add db credentials
+- set database credentials
 - set SFTP credentials
 - set mail credentials
+- set app url
 
 # 4. Run migrations and seed reference data (hierarchies, unit of measure, etc.)
 php artisan migrate --seed
 
 # 5. Install JS dependencies and build assets
 npm install
-npm run build   # or `npm run dev` while developing
+npm run build
 
 # 6. Link the public storage disk (catalog uploads/exports/images)
 php artisan storage:link
@@ -90,29 +92,3 @@ npm run dev
 ```bash
 * * * * * php /path-to-project/artisan schedule:run >> /dev/null 2>&1
 ```
-
-## Key Environment Variables
-
-In addition to the standard Laravel `.env` values, this app uses:
-
-| Variable                             | Purpose                                                                                                                                            |
-| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | --- |
-| `VIT_ADMIN_EMAIL`                    | Receives "catalog ready for review" notifications                                                                                                  |
-| `VIT_GATEWAY_EMAIL`                  | Receives notifications for new/unrecognized hierarchy paths, commodity types, and units of measure                                                 |     |
-| `VIT_RETRY_AFTER_HOURS`              | Comma-separated hours after which failed uploads are auto-retried (default `1,6,24`)                                                               |
-| `VIT_EXCEL_IMAGE_SIZE`               | Square pixel size images are resized to when embedded in the export Excel file                                                                     |
-| `VIT_EXCEL_IMAGE_PADDING`            | Padding (px) between stacked images in the export Excel file                                                                                       |
-| `CATALOG_PROCESSING_TIMEOUT_MINUTES` | Minutes before a stuck catalog upload job is considered stale and reclaimable                                                                      |
-| `ALLOW_PERIODIC_DB_RESET`            | When `true`, `elink:reset-database` runs weekly (via the scheduler) to wipe and reseed the database. Demo/staging only — leave unset in production |
-
-## Testing
-
-```bash
-composer test
-# or
-php artisan test
-```
-
-## Admin Panel
-
-The Filament admin panel is available at `/admin` (see [app/Providers](app/Providers)). Use `bezhansalleh/filament-shield` to manage roles/permissions; run `php artisan shield:install` if setting up roles for the first time on a fresh database.

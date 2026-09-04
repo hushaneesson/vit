@@ -120,7 +120,7 @@ class ProcessCatalogUploadJob implements ShouldQueue
         $rangeFieldKeys = $this->buildRangeFieldKeys($upload);
         $lookupMaps = $this->buildLookupMaps();
 
-                $pathResult = $this->resolveLocalPath(
+        $pathResult = $this->resolveLocalPath(
             $upload->disk,
             $upload->file_path
         );
@@ -158,6 +158,28 @@ class ProcessCatalogUploadJob implements ShouldQueue
         if (
             $weightMapping
             && !empty($weightMapping->source_separator)
+        ) {
+            $weightUnit = (string) $weightMapping->source_separator;
+        }
+
+        /*
+         * Whether this upload was detected as a genuine VIT-generated export.
+         * The single detection happens in VendorCatalogUpload (via
+         * VitExportFileDetector::detect) and is carried into the job so that
+         * already-normalized VIT values are not transformed again (e.g. item
+         * weight is already pounds in a VIT file).
+         */
+
+        // Weight unit is mapper configuration carried on the item_weight
+        // mapping row. Default to pounds when not present.
+        $weightUnit = WeightUnitConverter::DEFAULT_UNIT;
+
+        $weightMapping = $upload->columnMappings
+            ->firstWhere('field_key', 'item_weight_in_pounds');
+
+        if (
+            $weightMapping
+            && ! empty($weightMapping->source_separator)
         ) {
             $weightUnit = (string) $weightMapping->source_separator;
         }

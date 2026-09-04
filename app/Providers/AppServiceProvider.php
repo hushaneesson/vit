@@ -6,6 +6,9 @@ use App\Models\Client;
 use App\Models\ProductHierarchy;
 use App\Observers\ClientObserver;
 use App\Observers\ProductHierarchyObserver;
+use Filament\Support\Facades\FilamentView;
+use Filament\View\PanelsRenderHook;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -25,5 +28,10 @@ class AppServiceProvider extends ServiceProvider
     {
         Client::observe(ClientObserver::class);
         ProductHierarchy::observe(ProductHierarchyObserver::class);
+
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::BODY_START,
+            fn (): string => Blade::render('<x-notifications.toast />'),
+        );
     }
 }

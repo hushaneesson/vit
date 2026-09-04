@@ -368,10 +368,10 @@ class CatalogExportService
             new XlsxWriterProperties(
                 customProperties: [
                     VitFieldDefinition::VIT_EXPORT_MARKER_KEY
-                        => VitFieldDefinition::VIT_EXPORT_MARKER_VALUE,
+                    => VitFieldDefinition::VIT_EXPORT_MARKER_VALUE,
 
                     VitFieldDefinition::VIT_EXPORT_VERSION_KEY
-                        => (string) VitFieldDefinition::VIT_EXPORT_VERSION,
+                    => (string) VitFieldDefinition::VIT_EXPORT_VERSION,
                 ]
             )
         );
