@@ -19,7 +19,8 @@ class ClientAppointmentCancelledNotification extends Notification implements Sho
         protected string $endsAt,
         protected string $cancelledByName,
         protected string $cancellationReason,
-    ) {}
+    ) {
+        $this->onQueue('notifications');}
 
     public function via(object $notifiable): array
     {

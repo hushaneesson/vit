@@ -7,7 +7,7 @@ use App\Jobs\ProcessCatalogUploadJob;
 use App\Models\CatalogUpload;
 use App\Models\CatalogUploadColumnMapping;
 use App\Models\VendorMappingTemplate;
-use App\Services\CatalogFileInspectionService;
+use App\Services\Catalog\CatalogFileInspectionService;
 use App\Services\VitFieldDefinition;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;

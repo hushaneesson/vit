@@ -6,9 +6,11 @@ use App\Enums\CatalogUploadStatus;
 use App\Models\CatalogItem;
 use App\Models\CatalogUpload;
 use App\Models\ClassificationType;
-use App\Models\ProductHierarchy;
 use App\Models\CountryCode;
+use App\Models\ProductHierarchy;
 use App\Notifications\CatalogUploadValidationReportNotification;
+use App\Services\Catalog\CatalogItemProcessor;
+use App\Services\Catalog\CatalogValidationReportService;
 use App\Services\VitFieldDefinition;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -22,18 +24,21 @@ use Illuminate\Support\Str;
 use Throwable;
 
 /**
- * Consumes validated CatalogUploadRow records from ProcessCatalogUploadJob
- * and creates/updates CatalogItem rows in the vendor's catalog.
+ * Orchestrates the upload lifecycle for validated CatalogUploadRow records.
  *
- * Matching strategy:
- *   1. dealer_sku
+ * Consumes validated rows produced by ProcessCatalogUploadJob and creates or
+ * updates CatalogItem rows in the vendor's catalog.
  *
- * dealer_sku is the unique identifier for catalog items. The schema
- * enforces a unique constraint on (vendor_id, dealer_sku).
- *
+ * Matching strategy: dealer_sku (globally unique via (vendor_id, dealer_sku)).
  * When updating an existing CatalogItem, blank CSV values are not written
- * back to the database. Only non-blank values from the CSV overwrite
- * existing data.
+ * back to the database. Only non-blank values overwrite existing data.
+ *
+ * Detailed item construction, comparison, classification, and validation-report
+ * logic lives in the App\Services\Catalog services. This job only drives the
+ * workflow:
+ *
+ * load upload -> should process -> claim -> process rows -> commit
+ * -> validation report email (if required) -> complete upload
  */
 class ProcessValidatedRowsJob implements ShouldQueue
 {
@@ -51,8 +56,10 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
     public function __construct(public int $catalogUploadId) {}
 
-    public function handle(): void
-    {
+    public function handle(
+        CatalogItemProcessor $itemProcessor,
+        CatalogValidationReportService $reportService
+    ): void {
         $upload = $this->loadUpload();
 
         if (!$this->shouldProcess($upload)) {
@@ -64,7 +71,7 @@ class ProcessValidatedRowsJob implements ShouldQueue
         }
 
         try {
-            $this->processUpload($upload);
+            $this->processUpload($upload, $itemProcessor, $reportService);
         } catch (Throwable $e) {
             $this->handleProcessingFailure($upload, $e);
 
@@ -114,7 +121,6 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
         return true;
     }
-
     /**
      * Atomically claim the upload for item processing.
      */
@@ -136,15 +142,15 @@ class ProcessValidatedRowsJob implements ShouldQueue
     }
 
     /**
-     * Process all valid rows and complete the upload.
+     * Process all valid rows, commit the transaction, then complete the
+     * upload (sending the validation report email first if required).
      */
-    private function processUpload(CatalogUpload $upload): void
-    {
+    private function processUpload(
+        CatalogUpload $upload,
+        CatalogItemProcessor $itemProcessor,
+        CatalogValidationReportService $reportService
+    ): void {
         $vendor = $upload->vendor;
-
-        $validRows = $upload->rows()
-            ->where('status', 'valid')
-            ->cursor();
 
         $nonComparableColumns = [
             'dealer_sku',
@@ -154,25 +160,70 @@ class ProcessValidatedRowsJob implements ShouldQueue
         $createdCount = 0;
         $updatedCount = 0;
         $unchangedCount = 0;
+        $batchNumber = 0;
 
-        DB::beginTransaction();
+        $validRows = $upload->rows()->where('status', 'valid');
 
-        foreach ($validRows as $row) {
-            $result = $this->processRow(
-                $upload,
-                $vendor,
-                $row,
-                $nonComparableColumns
-            );
+        $validRows->chunkById(500, function ($rows) use (
+            $upload,
+            $vendor,
+            $itemProcessor,
+            $nonComparableColumns,
+            &$createdCount,
+            &$updatedCount,
+            &$unchangedCount,
+            &$batchNumber
+        ) {
+            $batchNumber++;
 
-            $createdCount += $result['created'];
-            $updatedCount += $result['updated'];
-            $unchangedCount += $result['unchanged'];
-        }
+            Log::info('DIAG ProcessValidatedRowsJob batch started', [
+                'upload' => $upload->id,
+                'batch' => $batchNumber,
+                'rows_in_batch' => count($rows),
+                'mem_mb' => round(memory_get_usage(true) / 1048576, 2),
+            ]);
 
-        DB::commit();
+            DB::beginTransaction();
 
-        $emailSent = $this->sendValidationReportIfNeeded($upload);
+            try {
+                foreach ($rows as $row) {
+                    $result = $itemProcessor->processRow(
+                        $upload,
+                        $vendor,
+                        $row,
+                        $nonComparableColumns
+                    );
+
+                    $createdCount += $result['created'];
+                    $updatedCount += $result['updated'];
+                    $unchangedCount += $result['unchanged'];
+                }
+
+                DB::commit();
+
+                Log::info('DIAG ProcessValidatedRowsJob batch committed', [
+                    'upload' => $upload->id,
+                    'batch' => $batchNumber,
+                    'created' => $createdCount,
+                    'updated' => $updatedCount,
+                    'unchanged' => $unchangedCount,
+                    'mem_mb' => round(memory_get_usage(true) / 1048576, 2),
+                ]);
+            } catch (\Throwable $e) {
+                DB::rollBack();
+
+                Log::error('DIAG ProcessValidatedRowsJob batch failed/rolled back', [
+                    'upload' => $upload->id,
+                    'batch' => $batchNumber,
+                    'error' => $e->getMessage(),
+                    'mem_mb' => round(memory_get_usage(true) / 1048576, 2),
+                ]);
+
+                throw $e;
+            }
+        });
+
+        $emailSent = $reportService->sendValidationReportIfNeeded($upload);
 
         if ($emailSent) {
             $this->completeUpload(
@@ -1077,8 +1128,6 @@ class ProcessValidatedRowsJob implements ShouldQueue
         CatalogUpload $upload,
         Throwable $e
     ): void {
-        DB::rollBack();
-
         Log::error(
             'ProcessValidatedRowsJob: processing failed',
             [
@@ -1096,528 +1145,5 @@ class ProcessValidatedRowsJob implements ShouldQueue
             ),
             'processing_completed_at' => now(),
         ]);
-    }
-
-    /**
-     * Normalize multi-value data into the canonical key/value object format.
-     *
-     * Used by specifications.
-     *
-     * @param array<int, mixed> $parts
-     * @return array<int, array{key: string, value: string}>
-     */
-    private function normalizeKeyValueMultiValue(array $parts): array
-    {
-        $normalized = [];
-
-        foreach ($parts as $entry) {
-            // Already canonical.
-            if (
-                is_array($entry)
-                && isset($entry['key'])
-                && isset($entry['value'])
-            ) {
-                $key = trim((string) $entry['key']);
-                $value = trim((string) $entry['value']);
-
-                if ($key !== '' && $value !== '') {
-                    $normalized[] = [
-                        'key' => $key,
-                        'value' => $value,
-                    ];
-                }
-
-                continue;
-            }
-
-            // Associative array: ['Color' => 'Silver'].
-            if (
-                is_array($entry)
-                && array_keys($entry) !== range(
-                    0,
-                    count($entry) - 1
-                )
-            ) {
-                foreach ($entry as $key => $value) {
-                    $key = trim((string) $key);
-                    $value = trim((string) $value);
-
-                    if ($key !== '' && $value !== '') {
-                        $normalized[] = [
-                            'key' => $key,
-                            'value' => $value,
-                        ];
-                    }
-                }
-
-                continue;
-            }
-
-            // Indexed string: "Color=Silver".
-            if (
-                is_string($entry)
-                && str_contains($entry, '=')
-            ) {
-                $equalsPos = strpos($entry, '=');
-
-                $key = trim(
-                    substr($entry, 0, $equalsPos)
-                );
-
-                $value = trim(
-                    substr($entry, $equalsPos + 1)
-                );
-
-                if ($key !== '' && $value !== '') {
-                    $normalized[] = [
-                        'key' => $key,
-                        'value' => $value,
-                    ];
-                }
-            }
-        }
-
-        return $normalized;
-    }
-
-    /**
-     * Normalize the final classifications value into:
-     *
-     * [
-     *     ['key' => 'Color', 'value' => 'gray'],
-     *     ['key' => 'Size', 'value' => 'Small'],
-     * ]
-     *
-     * This must run only after all classification sources have contributed.
-     *
-     * Supported input formats include:
-     *
-     * - null / empty
-     * - KEY=value strings
-     * - key/value objects
-     * - associative arrays
-     * - JSON representations
-     * - mixtures of the above
-     *
-     * No fixed classification key list is assumed.
-     *
-     * Duplicate keys are case-insensitive. The first position is preserved,
-     * while the last processed value wins.
-     *
-     * @return array<int, array{key: string, value: string}>|null
-     */
-    private function normalizeClassifications(
-        mixed $value
-    ): ?array {
-        if ($value === null || $value === '') {
-            return null;
-        }
-
-        if (is_string($value)) {
-            $decoded = json_decode($value, true);
-
-            $parts =
-                json_last_error() === JSON_ERROR_NONE
-                && is_array($decoded)
-                ? $decoded
-                : [$value];
-        } else {
-            $parts = is_array($value)
-                ? $value
-                : [];
-        }
-
-        $normalized = [];
-        $seenKeys = [];
-
-        foreach ($parts as $entry) {
-            $key = null;
-            $entryValue = null;
-
-            // Already canonical.
-            if (
-                is_array($entry)
-                && isset($entry['key'])
-                && isset($entry['value'])
-            ) {
-                $key = trim((string) $entry['key']);
-                $entryValue = trim((string) $entry['value']);
-            }
-
-            // Associative array: ['Color' => 'Silver'].
-            elseif (
-                is_array($entry)
-                && array_keys($entry) !== range(
-                    0,
-                    count($entry) - 1
-                )
-            ) {
-                foreach ($entry as $assocKey => $assocValue) {
-                    $key = trim((string) $assocKey);
-                    $entryValue = trim((string) $assocValue);
-
-                    break;
-                }
-            }
-
-            // Indexed string: "Color=Silver".
-            elseif (
-                is_string($entry)
-                && str_contains($entry, '=')
-            ) {
-                $equalsPos = strpos($entry, '=');
-
-                $key = trim(
-                    substr($entry, 0, $equalsPos)
-                );
-
-                $entryValue = trim(
-                    substr($entry, $equalsPos + 1)
-                );
-            }
-
-            if ($key === null || $entryValue === null) {
-                continue;
-            }
-
-            if ($key === '' || $entryValue === '') {
-                continue;
-            }
-
-            $lookupKey = strtoupper($key);
-
-            if (array_key_exists($lookupKey, $seenKeys)) {
-                /*
-                 * Preserve the original position but allow the latest
-                 * value to replace the previous value.
-                 */
-                $normalized[$seenKeys[$lookupKey]]['value'] = $entryValue;
-
-                continue;
-            }
-
-            $seenKeys[$lookupKey] = count($normalized);
-
-            $normalized[] = [
-                'key' => $key,
-                'value' => $entryValue,
-            ];
-        }
-
-        return $normalized === []
-            ? null
-            : $normalized;
-    }
-
-    /**
-     * Normalize incoming CSV values for comparison against database values.
-     *
-     * This ensures consistent comparison regardless of how CSV values
-     * were typed.
-     */
-    private function normalizeForComparison(
-        array $attrs
-    ): array {
-        $normalized = [];
-
-        foreach ($attrs as $key => $value) {
-            /*
-             * Treat the default item_weight fallback as blank.
-             */
-            if (
-                $key === 'item_weight'
-                && $value === 0.01
-            ) {
-                continue;
-            }
-
-            /*
-             * Normalize numeric strings to floats.
-             */
-            if (is_numeric($value)) {
-                $normalized[$key] = (float) $value;
-
-                continue;
-            }
-
-            /*
-             * Empty strings and arrays are treated as blank.
-             */
-            if ($value === '' || $value === []) {
-                continue;
-            }
-
-            $normalized[$key] = $value;
-        }
-
-        return $normalized;
-    }
-
-    /**
-     * Compare incoming values against an existing CatalogItem.
-     *
-     * Multi-value fields are compared structurally rather than as raw
-     * JSON strings.
-     */
-    private function hasMeaningfulChanges(
-        CatalogItem $existing,
-        array $newAttrs,
-        array $nonComparableColumns,
-        ?string $sku = null
-    ): bool {
-        $detectedChanges = [];
-
-        /*
-         * Load the multi-value field definitions once rather than repeatedly
-         * resolving them inside the field loop.
-         */
-        $multiValueFields = VitFieldDefinition::all()
-            ->where('is_multi_value', true)
-            ->pluck('field_key')
-            ->values()
-            ->all();
-
-        foreach ($newAttrs as $column => $newValue) {
-            if (
-                in_array(
-                    $column,
-                    $nonComparableColumns,
-                    true
-                )
-            ) {
-                continue;
-            }
-
-            $oldValue = $existing->getRawOriginal($column);
-
-            $oldValue =
-                $this->normalizeValueForComparison($oldValue);
-
-            $newValue =
-                $this->normalizeValueForComparison($newValue);
-
-            /*
-             * Both values are empty.
-             */
-            if (
-                $oldValue === null
-                && $newValue === null
-            ) {
-                continue;
-            }
-
-            /*
-             * Treat null and empty string as equivalent.
-             */
-            if (
-                $oldValue === null
-                && $newValue === ''
-            ) {
-                continue;
-            }
-
-            if (
-                $newValue === null
-                && $oldValue === ''
-            ) {
-                continue;
-            }
-
-            /*
-             * Multi-value fields require structural comparison.
-             */
-            if (
-                in_array(
-                    $column,
-                    $multiValueFields,
-                    true
-                )
-            ) {
-                if (
-                    !$this->multiValueValuesAreEqual(
-                        $column,
-                        $oldValue,
-                        $newValue
-                    )
-                ) {
-                    $detectedChanges[$column] = [
-                        'old' => $this->decodeComparisonValue(
-                            $oldValue
-                        ),
-                        'new' => $this->decodeComparisonValue(
-                            $newValue
-                        ),
-                    ];
-                }
-
-                continue;
-            }
-
-            /*
-             * Numeric values are compared numerically.
-             */
-            if (
-                is_numeric($oldValue)
-                && is_numeric($newValue)
-            ) {
-                if (
-                    (float) $oldValue
-                    !== (float) $newValue
-                ) {
-                    $detectedChanges[$column] = [
-                        'old' => $oldValue,
-                        'new' => $newValue,
-                    ];
-                }
-
-                continue;
-            }
-
-            /*
-             * Arrays that reach this point are compared as JSON.
-             */
-            if (
-                is_array($oldValue)
-                || is_array($newValue)
-            ) {
-                $oldValue = json_encode(
-                    $oldValue ?? []
-                );
-
-                $newValue = json_encode(
-                    $newValue ?? []
-                );
-            }
-
-            /*
-             * Final string comparison.
-             */
-            if (
-                trim((string) $oldValue)
-                !== trim((string) $newValue)
-            ) {
-                $detectedChanges[$column] = [
-                    'old' => $oldValue,
-                    'new' => $newValue,
-                ];
-            }
-        }
-
-        if (!empty($detectedChanges)) {
-            Log::info(
-                'Catalog import: detected changes for SKU',
-                [
-                    'sku' => $sku,
-                    'changes' => $detectedChanges,
-                ]
-            );
-
-            return true;
-        }
-
-        return false;
-    }
-
-    /**
-     * Compare two multi-value fields according to their definition.
-     */
-    private function multiValueValuesAreEqual(
-        string $column,
-        mixed $oldValue,
-        mixed $newValue
-    ): bool {
-        $decodedOld =
-            $this->decodeComparisonValue($oldValue);
-
-        $decodedNew =
-            $this->decodeComparisonValue($newValue);
-
-        $fieldDefinition =
-            VitFieldDefinition::find($column);
-
-        if (
-            $fieldDefinition
-            && $fieldDefinition->is_key_value
-        ) {
-            /*
-             * Specifications/classifications are key/value structures.
-             *
-             * Sort by key so ordering differences do not produce false
-             * updates.
-             */
-            if (is_array($decodedOld)) {
-                usort(
-                    $decodedOld,
-                    fn($a, $b) => ($a['key'] ?? '')
-                        <=>
-                        ($b['key'] ?? '')
-                );
-            }
-
-            if (is_array($decodedNew)) {
-                usort(
-                    $decodedNew,
-                    fn($a, $b) => ($a['key'] ?? '')
-                        <=>
-                        ($b['key'] ?? '')
-                );
-            }
-        } else {
-            /*
-             * Normal arrays are order-independent.
-             */
-            if (is_array($decodedOld)) {
-                sort($decodedOld);
-            }
-
-            if (is_array($decodedNew)) {
-                sort($decodedNew);
-            }
-        }
-
-        return $decodedOld === $decodedNew;
-    }
-
-    /**
-     * Decode a JSON value for structural comparison.
-     */
-    private function decodeComparisonValue(
-        mixed $value
-    ): mixed {
-        if (is_array($value)) {
-            return $value;
-        }
-
-        $decoded = json_decode(
-            (string) $value,
-            true
-        );
-
-        return is_array($decoded)
-            ? $decoded
-            : $value;
-    }
-
-    /**
-     * Normalize a single value for comparison.
-     *
-     * Trims whitespace and converts empty strings to null.
-     */
-    private function normalizeValueForComparison(
-        mixed $value
-    ): mixed {
-        if ($value === null) {
-            return null;
-        }
-
-        if (is_string($value)) {
-            $trimmed = trim($value);
-
-            return $trimmed === ''
-                ? null
-                : $trimmed;
-        }
-
-        return $value;
     }
 }

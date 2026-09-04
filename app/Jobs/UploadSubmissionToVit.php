@@ -26,7 +26,10 @@ class UploadSubmissionToVit implements ShouldQueue
 
     public int $tries = 1; // retries are modeled explicitly via upload_attempts + scheduler, not queue retries
 
-    public function __construct(protected int $submissionId) {}
+    public function __construct(protected int $submissionId)
+    {
+        $this->onQueue('vit-uploads');
+    }
 
     public function handle(VitApiClient $client): void
     {

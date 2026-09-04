@@ -6,11 +6,9 @@ use App\Enums\CatalogSubmissionStatus;
 use App\Jobs\GenerateCatalogExportJob;
 use App\Models\CatalogItem;
 use App\Models\CatalogSubmission;
-use App\Notifications\CatalogReadyForReviewNotification;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Notification;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 
@@ -183,18 +181,16 @@ class CatalogSubmissionButton extends Component
 
             if ($submission) {
                 try {
+                    /*
+                     * Only the export job is dispatched here. The
+                     * Ready for Review notification is sent by
+                     * GenerateCatalogExportJob after the Excel file has
+                     * been successfully generated AND stored, so a failed
+                     * export can never produce the notification.
+                     */
                     GenerateCatalogExportJob::dispatch($submission->id);
-
-                    $adminEmail = config('vit.gateway_email');
-
-                    if (is_string($adminEmail) && $adminEmail !== '') {
-                        Notification::route('mail', $adminEmail)
-                            ->notify(new CatalogReadyForReviewNotification(
-                                vendorId: $vendorId,
-                            ));
-                    }
                 } catch (\Throwable $e) {
-                    Log::error('Catalog admin notification failed', [
+                    Log::error('Catalog export job dispatch failed', [
                         'submission_id' => $submission->id,
                         'vendor_id' => $vendorId,
                         'error' => $e->getMessage(),

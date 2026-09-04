@@ -20,7 +20,8 @@ class AppointmentBookedWithYouNotification extends Notification implements Shoul
         protected string $startsAt,
         protected string $endsAt,
         protected string $appointmentReason,
-    ) {}
+    ) {
+        $this->onQueue('notifications');}
 
     public function via(object $notifiable): array
     {

@@ -20,7 +20,8 @@ class NewClassificationTypeNotification extends Notification implements ShouldQu
         protected string $catalogName,
         protected string $classificationKey,
         protected string $classificationValue,
-    ) {}
+    ) {
+        $this->onQueue('notifications');}
 
     public function via(object $notifiable): array
     {

@@ -16,7 +16,8 @@ class CatalogUploadedNotification extends Notification implements ShouldQueue
 {
     use Queueable;
 
-    public function __construct(protected CatalogSubmission $submission) {}
+    public function __construct(protected CatalogSubmission $submission) {
+        $this->onQueue('notifications');}
 
     public function via(object $notifiable): array
     {

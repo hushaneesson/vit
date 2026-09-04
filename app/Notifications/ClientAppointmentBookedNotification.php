@@ -19,7 +19,8 @@ class ClientAppointmentBookedNotification extends Notification implements Should
         protected string $startsAt,
         protected string $endsAt,
         protected string $appointmentReason,
-    ) {}
+    ) {
+        $this->onQueue('notifications');}
 
     public function via(object $notifiable): array
     {
