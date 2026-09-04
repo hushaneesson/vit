@@ -161,29 +161,6 @@ class ProcessCatalogUploadJob implements ShouldQueue
         ) {
             $weightUnit = (string) $weightMapping->source_separator;
         }
-
-        /*
-         * Whether this upload was detected as a genuine VIT-generated export.
-         * The single detection happens in VendorCatalogUpload (via
-         * VitExportFileDetector::detect) and is carried into the job so that
-         * already-normalized VIT values are not transformed again (e.g. item
-         * weight is already pounds in a VIT file).
-         */
-
-        // Weight unit is mapper configuration carried on the item_weight
-        // mapping row. Default to pounds when not present.
-        $weightUnit = WeightUnitConverter::DEFAULT_UNIT;
-
-        $weightMapping = $upload->columnMappings
-            ->firstWhere('field_key', 'item_weight_in_pounds');
-
-        if (
-            $weightMapping
-            && ! empty($weightMapping->source_separator)
-        ) {
-            $weightUnit = (string) $weightMapping->source_separator;
-        }
-
         return [
             'columnToFieldKey' => $columnToFieldKey,
             'activeFields' => $activeFields,
@@ -418,19 +395,20 @@ class ProcessCatalogUploadJob implements ShouldQueue
                         $result
                     );
 
+                    Log::info('ProcessCatalogUploadJob: logical batch boundary reached', [
+                        'upload_id' => $upload->id,
+                        'rows_processed' => $sourceRowNumber,
+                        'invalid_rows_pending_insert' => count($batch),
+                    ]);
+
                     // The 500-row window is a logical/progress boundary only.
                     // Invalid-row tracking rows are persisted at each boundary;
                     // each valid item has already been processed in its own
                     // independent transaction.
                     if ($sourceRowNumber - $lastLogicalBatchBoundary >= self::READ_CHUNK_SIZE) {
                         $this->insertInvalidRows($batch);
+                        $batch = []; // Clear the batch to prevent duplicate inserts
                         $lastLogicalBatchBoundary = $sourceRowNumber;
-
-                        Log::info('ProcessCatalogUploadJob: logical batch boundary reached', [
-                            'upload_id' => $upload->id,
-                            'rows_processed' => $sourceRowNumber,
-                            'invalid_rows_pending_insert' => count($batch),
-                        ]);
                     }
                 }
             }
@@ -639,6 +617,7 @@ class ProcessCatalogUploadJob implements ShouldQueue
                     // independent transaction.
                     if ($sourceRowNumber - $lastLogicalBatchBoundary >= self::READ_CHUNK_SIZE) {
                         $this->insertInvalidRows($batch);
+                        $batch = []; // Clear the batch to prevent duplicate inserts
                         $lastLogicalBatchBoundary = $sourceRowNumber;
 
                         Log::info('ProcessCatalogUploadJob: logical batch boundary reached', [
