@@ -2,7 +2,6 @@
 
 namespace App\Services\Catalog;
 
-use App\Jobs\ProcessValidatedRowsJob;
 use App\Models\CatalogItem;
 use App\Models\CatalogUpload;
 use Illuminate\Database\QueryException;
@@ -23,6 +22,23 @@ use Illuminate\Support\Str;
  */
 class CatalogItemProcessor
 {
+    /**
+     * Blocking error used when an upload row references a SKU that already
+     * belongs to a different catalog. SKU is globally unique and must never
+     * be moved between catalogs by an upload.
+     */
+    public const CROSS_CATALOG_SKU_ERROR =
+        'SKU already belongs to another catalog.';
+
+    /**
+     * Fields excluded from change-detection when deciding whether a catalog
+     * item should be treated as created / updated / unchanged.
+     */
+    public const NON_COMPARABLE_COLUMNS = [
+        'dealer_sku',
+        'vendor_id',
+    ];
+
     public function __construct(
         protected CatalogItemAttributeBuilder $attributeBuilder,
         protected CatalogClassificationProcessor $classificationProcessor,
@@ -38,12 +54,11 @@ class CatalogItemProcessor
     public function processRow(
         CatalogUpload $upload,
         $vendor,
-        $row,
-        array $nonComparableColumns
+        $row
     ): array {
         $data = $this->attributeBuilder->prepareRowData($row);
 
-        Log::info('ProcessValidatedRowsJob: processing row', [
+        Log::info('CatalogItemProcessor: processing row', [
             'upload_id' => $upload->id,
             'row_number' => $row->row_number,
             'row_status' => $row->status,
@@ -104,7 +119,7 @@ class CatalogItemProcessor
                                 [
                                     'field_key' => 'dealer_sku',
                                     'message' =>
-                                        ProcessValidatedRowsJob::CROSS_CATALOG_SKU_ERROR,
+                                    self::CROSS_CATALOG_SKU_ERROR,
                                 ],
                             ],
                         ],
@@ -120,7 +135,6 @@ class CatalogItemProcessor
                 return $this->updateExistingItem(
                     $existing,
                     $updateAttrs,
-                    $nonComparableColumns,
                     $sellerSku
                 );
             }
@@ -169,7 +183,7 @@ class CatalogItemProcessor
             ->where('dealer_sku', $sellerSku)
             ->first();
     }
-/**
+    /**
      * Update an existing CatalogItem if meaningful changes are detected.
      *
      * @return array{created: int, updated: int, unchanged: int}
@@ -177,7 +191,6 @@ class CatalogItemProcessor
     protected function updateExistingItem(
         CatalogItem $existing,
         array $updateAttrs,
-        array $nonComparableColumns,
         string $sellerSku
     ): array {
         $normalizedUpdateAttrs =
@@ -187,7 +200,7 @@ class CatalogItemProcessor
             $this->comparator->hasMeaningfulChanges(
                 $existing,
                 $normalizedUpdateAttrs,
-                $nonComparableColumns,
+                self::NON_COMPARABLE_COLUMNS,
                 $sellerSku
             )
         ) {
@@ -270,7 +283,7 @@ class CatalogItemProcessor
                                 [
                                     'field_key' => 'dealer_sku',
                                     'message' =>
-                                        ProcessValidatedRowsJob::CROSS_CATALOG_SKU_ERROR,
+                                    self::CROSS_CATALOG_SKU_ERROR,
                                 ],
                             ],
                         ],

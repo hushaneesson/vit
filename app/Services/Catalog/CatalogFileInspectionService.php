@@ -2,12 +2,14 @@
 
 namespace App\Services\Catalog;
 
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use OpenSpout\Reader\CSV\Options as CsvOptions;
 use OpenSpout\Reader\CSV\Reader as OpenSpoutCsvReader;
-use OpenSpout\Reader\XLSX\Reader as OpenSpoutXlsxReader;
 use OpenSpout\Reader\ReaderInterface;
+use OpenSpout\Reader\XLSX\Reader as OpenSpoutXlsxReader;
+use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Reader\IReadFilter;
+use PhpOffice\PhpSpreadsheet\Reader\IReader;
 
 class CatalogFileInspectionService
 {
@@ -20,17 +22,32 @@ class CatalogFileInspectionService
     {
         // Large vendor files (e.g. multi-MB XLSX) can take longer than the
         // default 30s max_execution_time and 128M memory_limit to parse.
-        // Raise both for this request only â€” the rest of the app keeps its
-        // normal limits.
+        // Raise both for this request only — the rest of the app keeps its
+        // normal limits. previousMemoryLimit is restored in the finally
+        // block below since this service can run inside a long-lived queue
+        // worker process, where ini_set() would otherwise persist across
+        // unrelated jobs instead of resetting the way it would per-request
+        // under PHP-FPM.
+        $previousMemoryLimit = ini_get('memory_limit');
+
         set_time_limit(300);
         ini_set('memory_limit', '512M');
 
-        $localPath = $this->resolveLocalPath($disk, $path);
+        $pathResult = $this->resolveLocalPath($disk, $path);
+        $localPath = $pathResult['path'];
 
-        // All supported formats (XLSX, CSV) are read through OpenSpout's
-        // streaming reader. Constant memory: only the header row + the
-        // requested sample rows are ever read, then iteration stops.
-        return $this->inspectOpenSpout($localPath, $fileType, $sampleRows);
+        try {
+            return match ($fileType) {
+                'xlsx', 'csv' => $this->inspectOpenSpout($localPath, $fileType, $sampleRows),
+                'xls' => $this->inspectLegacy($localPath, $sampleRows),
+                default => throw new \InvalidArgumentException(
+                    "Unsupported file type: {$fileType}"
+                ),
+            };
+        } finally {
+            $this->cleanupTemporaryFile($pathResult['temporary_path']);
+            ini_set('memory_limit', $previousMemoryLimit);
+        }
     }
 
     /**
@@ -58,14 +75,25 @@ class CatalogFileInspectionService
             return $this->signatureFromHeaders($headerRow);
         }
 
-        $localPath = $this->resolveLocalPath($disk, $path);
+        $pathResult = $this->resolveLocalPath($disk, $path);
+        $localPath = $pathResult['path'];
 
-        $headerRow = $this->readHeaderRowOpenSpout(
-            $localPath,
-            $fileType
-        );
+        try {
+            // Reader selection by format:
+            //   xlsx, csv → OpenSpout (streaming, constant memory)
+            //   xls       → PhpSpreadsheet (binary BIFF)
+            $headerRow = match ($fileType) {
+                'xlsx', 'csv' => $this->readHeaderRowOpenSpout($localPath, $fileType),
+                'xls' => $this->readHeaderRowLegacy($localPath),
+                default => throw new \InvalidArgumentException(
+                    "Unsupported file type: {$fileType}"
+                ),
+            };
 
-        return $this->signatureFromHeaders($headerRow);
+            return $this->signatureFromHeaders($headerRow);
+        } finally {
+            $this->cleanupTemporaryFile($pathResult['temporary_path']);
+        }
     }
 
     /**
@@ -96,14 +124,12 @@ class CatalogFileInspectionService
         $headerWidth = 0;
         $rowCount = 0;
 
-        $reader = $this->makeOpenSpoutReader($fileType, $localPath);
+        $reader = $this->makeOpenSpoutReader($fileType);
 
         try {
             $reader->open($localPath);
 
-            $sheetIterator = $reader->getSheetIterator();
-            $sheetIterator->rewind();
-            $sheet = $sheetIterator->current();
+            $sheet = $this->openFirstSheet($reader);
 
             if ($sheet === null) {
                 return ['columns' => [], 'sample_rows' => []];
@@ -158,6 +184,108 @@ class CatalogFileInspectionService
         ];
     }
 
+    /**
+     * Inspect a legacy .xls file using PhpSpreadsheet (the same read-filter
+     * strategy as before; only the first N+1 rows are loaded).
+     *
+     * .xls is the binary BIFF format — OpenSpout has no reader for it.
+     *
+     * @param string $localPath
+     * @param int $sampleRows
+     * @return array{columns: list<mixed>, sample_rows: list<array<int,mixed>>}
+     */
+    private function inspectLegacy(string $localPath, int $sampleRows): array
+    {
+        $reader = $this->makeReader('xls');
+        $reader->setReadDataOnly(true);
+
+        // Only read the first N+1 rows (header + samples) to keep this fast
+        // even on large .xls files.
+        $reader->setReadFilter(
+            $this->createRowRangeFilter(1, $sampleRows + 1)
+        );
+
+        $spreadsheet = $reader->load($localPath);
+
+        // Explicitly use the FIRST worksheet. Multi-sheet workbooks must be
+        // processed from Sheet 1 only; getActiveSheet() could return a
+        // different sheet.
+        $sheet = $spreadsheet->getSheet(0);
+        $rows = $sheet->toArray(null, true, true, false);
+
+        $headerRow = array_map(
+            fn($value) => is_string($value) ? trim($value) : $value,
+            $rows[0] ?? []
+        );
+
+        $sampleData = array_slice($rows, 1, $sampleRows);
+
+        // Drop fully-empty trailing columns some Excel exports leave behind.
+        $lastNonEmptyIndex = $this->lastNonEmptyColumnIndex($headerRow);
+        $headerRow = array_slice($headerRow, 0, $lastNonEmptyIndex + 1);
+        $sampleData = array_map(
+            fn($row) => array_slice($row, 0, $lastNonEmptyIndex + 1),
+            $sampleData
+        );
+
+        return [
+            'columns' => $headerRow,
+            'sample_rows' => $sampleData,
+        ];
+    }
+
+    /**
+     * Read only the header row (row 1) of a legacy .xls file using
+     * PhpSpreadsheet's read-filter (only that row is ever loaded).
+     *
+     * @param string $localPath
+     * @return list<mixed>
+     */
+    private function readHeaderRowLegacy(string $localPath): array
+    {
+        $reader = $this->makeReader('xls');
+        $reader->setReadDataOnly(true);
+
+        $reader->setReadFilter(
+            $this->createRowRangeFilter(1, 1)
+        );
+
+        $spreadsheet = $reader->load($localPath);
+
+        // Use the first worksheet explicitly rather than getActiveSheet(),
+        // so the signature is stable regardless of which sheet the workbook
+        // marks as active.
+        $sheet = $spreadsheet->getSheet(0);
+        $row = $sheet->toArray(null, true, true, false)[0] ?? [];
+
+        return array_map(
+            fn($value) => is_string($value) ? trim($value) : $value,
+            $row
+        );
+    }
+
+    /**
+     * Build a PhpSpreadsheet read filter limited to an inclusive row range.
+     * Shared by inspectLegacy() (header + sample rows) and
+     * readHeaderRowLegacy() (row 1 only), so there's a single filter
+     * implementation for "only read these rows" rather than two
+     * hand-written copies.
+     */
+    private function createRowRangeFilter(int $minRow, int $maxRow): IReadFilter
+    {
+        return new class($minRow, $maxRow) implements IReadFilter {
+            public function __construct(
+                private int $minRow,
+                private int $maxRow
+            ) {}
+
+            public function readCell(string $columnAddress, int $row, string $worksheetName = ''): bool
+            {
+                return $row >= $this->minRow && $row <= $this->maxRow;
+            }
+        };
+    }
+
     private function signatureFromHeaders(array $headerRow): ?string
     {
         // Drop fully-empty trailing columns
@@ -180,46 +308,59 @@ class CatalogFileInspectionService
     }
 
     /**
-     * Bug fix: previously called CsvReader::guessEncoding() with
-     * $this->lastLocalPath before it had ever been set (resolveLocalPath
-     * runs AFTER makeReader in the original code path), so encoding
-     * detection silently ran against an empty string every time. Now the
-     * local path is resolved first and passed straight in.
+     * Instantiate the PhpSpreadsheet reader for .xls (binary BIFF).
+     *
+     * CSV and XLSX are handled by OpenSpout (see makeOpenSpoutReader).
+     * OpenSpout has no .xls reader, so PhpSpreadsheet is required here.
+     *
+     * @param string $fileType 'xls'
+     * @return IReader
+     *
+     * @throws \InvalidArgumentException For unsupported file types.
      */
-    private function makeReader(string $fileType, ?string $localPath = null): IReader
+    private function makeReader(string $fileType): IReader
     {
-        $reader = match ($fileType) {
-            'csv' => new CsvReader(),
+        return match ($fileType) {
             'xls' => IOFactory::createReader('Xls'),
-            default => throw new \InvalidArgumentException("Unsupported file type: {$fileType}"),
+            default => throw new \InvalidArgumentException(
+                "Unsupported file type: {$fileType}"
+            ),
         };
-
-        if ($reader instanceof CsvReader) {
-            $reader->setDelimiter(',');
-            $reader->setEnclosure('"');
-
-            if ($localPath) {
-                $reader->setInputEncoding(CsvReader::guessEncoding($localPath));
-            }
-        }
-
-        return $reader;
     }
 
-    private function resolveLocalPath(string $disk, string $path): string
+    /**
+     * Resolve a disk-relative path to a local filesystem path.
+     *
+     * PhpSpreadsheet and OpenSpout both need a local, seekable file.
+     * If the disk is remote (e.g. DigitalOcean Spaces), the file is copied
+     * to a temp path first. Callers MUST pass 'temporary_path' to
+     * cleanupTemporaryFile() when done, or the temp file is leaked.
+     *
+     * @return array{path: string, temporary_path: ?string}
+     */
+    private function resolveLocalPath(string $disk, string $path): array
     {
-        // PhpSpreadsheet needs a local filesystem path. If the disk is
-        // remote (DigitalOcean Spaces), pull the file down to a temp path
-        // first rather than streaming, since PhpSpreadsheet's readers
-        // expect seekable local files.
         if ((Storage::disk($disk)->getConfig()['driver'] ?? null) === 'local') {
-            return Storage::disk($disk)->path($path);
+            return [
+                'path' => Storage::disk($disk)->path($path),
+                'temporary_path' => null,
+            ];
         }
 
         $tempPath = tempnam(sys_get_temp_dir(), 'catalog_upload_');
         file_put_contents($tempPath, Storage::disk($disk)->get($path));
 
-        return $tempPath;
+        return [
+            'path' => $tempPath,
+            'temporary_path' => $tempPath,
+        ];
+    }
+
+    private function cleanupTemporaryFile(?string $temporaryPath): void
+    {
+        if ($temporaryPath !== null && is_file($temporaryPath)) {
+            @unlink($temporaryPath);
+        }
     }
 
     private function lastNonEmptyColumnIndex(array $headerRow): int
@@ -246,14 +387,12 @@ class CatalogFileInspectionService
         string $localPath,
         string $fileType
     ): array {
-        $reader = $this->makeOpenSpoutReader($fileType, $localPath);
+        $reader = $this->makeOpenSpoutReader($fileType);
 
         try {
             $reader->open($localPath);
 
-            $sheetIterator = $reader->getSheetIterator();
-            $sheetIterator->rewind();
-            $sheet = $sheetIterator->current();
+            $sheet = $this->openFirstSheet($reader);
 
             if ($sheet === null) {
                 return [];
@@ -280,6 +419,20 @@ class CatalogFileInspectionService
     }
 
     /**
+     * Return the first worksheet of an already-open OpenSpout reader, or
+     * null if the workbook has no worksheets. Centralizes the "always
+     * Sheet 1" rule so inspectOpenSpout() and readHeaderRowOpenSpout()
+     * don't each re-implement the sheet-iterator boilerplate.
+     */
+    private function openFirstSheet(ReaderInterface $reader): ?object
+    {
+        $sheetIterator = $reader->getSheetIterator();
+        $sheetIterator->rewind();
+
+        return $sheetIterator->current();
+    }
+
+    /**
      * Instantiate the correct OpenSpout reader for the file type and apply
      * the options needed to reproduce the previous PhpSpreadsheet behavior:
      *
@@ -288,15 +441,12 @@ class CatalogFileInspectionService
      *        explicitly here for clarity.
      *
      * @param string $fileType 'xlsx' | 'csv'
-     * @param string $localPath
      * @return ReaderInterface
      *
      * @throws \InvalidArgumentException For unsupported file types.
      */
-    private function makeOpenSpoutReader(
-        string $fileType,
-        ?string $localPath = null
-    ): ReaderInterface {
+    private function makeOpenSpoutReader(string $fileType): ReaderInterface
+    {
         return match ($fileType) {
             'csv' => (function () {
                 $options = new CsvOptions();

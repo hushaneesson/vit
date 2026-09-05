@@ -154,7 +154,7 @@ class VitFieldDefinition
             'requirement_type' => 'recommended',
             'field_type' => 'text',
             'is_system_derived' => true,
-            'system_source' => 'vendor.name',
+            'system_source' => 'catalog.name',
             'is_multi_value' => false,
             'join_separator' => null,
             'max_length' => 255,

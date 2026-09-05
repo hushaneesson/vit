@@ -2,7 +2,10 @@
 
 namespace App\Jobs;
 
+use App\Enums\CatalogSubmissionStatus;
 use App\Models\CatalogSubmission;
+use App\Notifications\CatalogUploadedNotification;
+use App\Notifications\CatalogUploadFailedNotification;
 use App\Services\VitApiClient;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -10,27 +13,18 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Notification;
 use Throwable;
 
 /**
  * Uploads a catalog submission's generated Excel file to the VIT API/FTP server.
- *
- * This is a dedicated job for the CatalogSubmission workflow — it does NOT
- * reuse the old UploadSubmissionToVit job (which works with the legacy
- * Submission model). The old Submission workflow remains untouched.
- *
- * Triggered when an admin approves a submission that has a completed Excel
- * export. The job uploads the existing file (does NOT regenerate it).
- *
- * On success: sets submission status to 'uploaded', processing_status to
- * 'completed', and records the upload timestamp.
- * On failure: sets processing_status to 'failed' with the error message.
- * The submission status stays 'approved' so the admin can retry.
  */
+
 class UploadCatalogSubmissionToVit implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    // Retries are modeled explicitly via upload_attempts + scheduler, not queue retries.
     public int $tries = 1;
 
     public function __construct(protected int $catalogSubmissionId)
@@ -46,29 +40,37 @@ class UploadCatalogSubmissionToVit implements ShouldQueue
             return;
         }
 
-        // Guard: only upload approved submissions with uploading status
-        if ($submission->status !== 'approved' || $submission->processing_status !== 'uploading') {
+        if ($submission->status !== CatalogSubmissionStatus::Approved) {
             return;
         }
+
+        $submission->update(['processing_status' => 'uploading']);
 
         try {
             $response = $client->uploadCatalogSubmission($submission);
 
             if ($response->successful()) {
                 $submission->update([
-                    'status' => 'uploaded',
+                    'status' => CatalogSubmissionStatus::Uploaded,
                     'processing_status' => 'completed',
                     'uploaded_at' => now(),
+                    'vit_api_response' => $response->json() ?? ['raw' => $response->body()],
                 ]);
 
                 Log::info('VIT upload completed for catalog submission ' . $submission->id);
 
+                $this->notifySuccess($submission);
+
                 return;
             }
 
-            $this->recordFailure($submission, 'HTTP ' . $response->status() . ': ' . $response->body());
+            $this->recordFailure(
+                $submission,
+                'HTTP ' . $response->status() . ': ' . $response->body()
+            );
         } catch (Throwable $e) {
             Log::error('VIT upload failed for catalog submission ' . $submission->id, ['error' => $e->getMessage()]);
+
             $this->recordFailure($submission, $e->getMessage());
         }
     }
@@ -77,9 +79,30 @@ class UploadCatalogSubmissionToVit implements ShouldQueue
     {
         $submission->update([
             'processing_status' => 'failed',
+            'upload_attempts' => $submission->upload_attempts + 1,
+            'last_upload_error' => $error,
             'failure_reason' => $error,
         ]);
 
-        Log::error('VIT upload failed for catalog submission ' . $submission->id, ['error' => $error]);
+        $this->notifyFailure($submission);
+    }
+
+    protected function notifySuccess(CatalogSubmission $submission): void
+    {
+        $client = $submission->requestedByClient;
+
+        if ($client && $client->email) {
+            Notification::route('mail', $client->email)
+                ->notify(new CatalogUploadedNotification($submission));
+        }
+
+        Notification::route('mail', config('vit.gateway_email'))
+            ->notify(new CatalogUploadedNotification($submission));
+    }
+
+    protected function notifyFailure(CatalogSubmission $submission): void
+    {
+        Notification::route('mail', config('vit.gateway_email'))
+            ->notify(new CatalogUploadFailedNotification($submission));
     }
 }

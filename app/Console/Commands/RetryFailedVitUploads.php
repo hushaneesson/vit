@@ -2,7 +2,7 @@
 
 namespace App\Console\Commands;
 
-use App\Jobs\UploadSubmissionToVit;
+use App\Jobs\UploadCatalogSubmissionToVit;
 use App\Models\CatalogSubmission;
 use Illuminate\Console\Command;
 
@@ -38,7 +38,7 @@ class RetryFailedVitUploads extends Command
                 ->contains(fn($threshold) => $hoursSinceUpdate >= $threshold);
 
             if ($shouldRetry) {
-                UploadSubmissionToVit::dispatch($submission->id);
+                UploadCatalogSubmissionToVit::dispatch($submission->id);
                 $dispatched++;
             }
         }

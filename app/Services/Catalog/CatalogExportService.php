@@ -37,60 +37,6 @@ use OpenSpout\Writer\XLSX\Writer as XlsxWriter;
 class CatalogExportService
 {
     /**
-     * Generate a VIT catalog export for the given items into a temporary
-     * local XLSX file and return its path.
-     *
-     * Support/verification entry point (used by tests and any caller that
-     * needs the raw file). It runs the exact same OpenSpout writer, VIT
-     * marker, header construction and row-writing logic as the production
-     * streaming export — there is only one export implementation.
-     *
-     * The caller is responsible for deleting the returned file.
-     */
-    public function generateToTempFile(
-        Vendor $vendor,
-        string $catalogName,
-        Collection $items
-    ): string {
-        $fields = VitFieldDefinition::exportableFields();
-        $hoisted = $this->buildHoistedExportMetadata();
-
-        $tempPath = tempnam(sys_get_temp_dir(), 'catalog_export_');
-
-        if ($tempPath === false) {
-            throw new \RuntimeException(
-                'Unable to create temporary file for catalog export.'
-            );
-        }
-
-        $writer = new XlsxWriter($this->buildXlsxWriterOptions());
-
-        try {
-            $writer->openToFile($tempPath);
-
-            try {
-                $writer->getCurrentSheet()->setName('Catalog');
-            } catch (\Throwable $e) {
-                // Sheet title is cosmetic; never fail an export over it.
-                unset($e);
-            }
-
-            $this->writeHeaderRowToWriter($writer, $hoisted['headers']);
-            $this->writeItemsToWriter($writer, $fields, $items, $vendor, $hoisted);
-
-            $writer->close();
-
-            return $tempPath;
-        } catch (\Throwable $e) {
-            if (is_file($tempPath)) {
-                @unlink($tempPath);
-            }
-
-            throw $e;
-        }
-    }
-
-    /**
      * Hoist static export metadata once per export so it is not recomputed
      * per field per row. Resolved export values are identical either way.
      *
@@ -139,14 +85,10 @@ class CatalogExportService
     }
 
     /**
-     * Write item rows to an open OpenSpout writer. This is the single
-     * shared row-writing implementation for the catalog export: the
-     * production query-based path and the temp-file support path both use
-     * it, so there is exactly one XLSX generation algorithm.
-     *
-     * Every exported value is cast to string, matching the previous explicit
-     * string-cell behavior (SKUs, leading zeros and numeric-looking values
-     * are never reinterpreted by Excel).
+     * Write item rows to an open OpenSpout writer. Values are resolved and
+     * written one item at a time, matching the previous explicit string-cell
+     * behavior (SKUs, leading zeros and numeric-looking values are never
+     * reinterpreted by Excel).
      */
     private function writeItemsToWriter(
         XlsxWriter $writer,
@@ -181,10 +123,11 @@ class CatalogExportService
      * Generate and store the Excel export from a query using OpenSpout
      * streaming.
      *
-     * The XLSX is written incrementally: one row of memory is held at a time.
-     * The database is iterated with chunkById(500) so the query's eager-loaded
-     * relationships apply per chunk (cursor() would defeat eager loading and
-     * cause N+1 queries).
+     * The XLSX is written incrementally by OpenSpout, which streams rows to
+     * disk rather than buffering the whole workbook in memory. The database
+     * is iterated with chunkById(500) so only one chunk of hydrated models
+     * and their eager-loaded relations is held in memory at a time, keeping
+     * memory bounded regardless of catalog size.
      *
      * Exports with 50,000+ rows complete with approximately constant memory.
      *
@@ -208,16 +151,10 @@ class CatalogExportService
             $catalogName
         );
 
-        $tempPath = tempnam(
-            sys_get_temp_dir(),
-            'catalog_export_'
+        $tempPath = $this->createTempFilePath(
+            $destinationPath,
+            $disk
         );
-
-        if ($tempPath === false) {
-            throw new \RuntimeException(
-                'Unable to create temporary file for catalog export.'
-            );
-        }
 
         $writer = new XlsxWriter(
             $this->buildXlsxWriterOptions()
@@ -286,8 +223,8 @@ class CatalogExportService
     }
 
     /**
-     * Generate Excel file from all current CatalogItems belonging to the
-     * submission's vendor.
+     * Generate the VIT Excel file from the current CatalogItems belonging to
+     * the submission's catalog.
      *
      * @return string Relative storage path to the generated .xlsx
      */
@@ -304,6 +241,12 @@ class CatalogExportService
         $catalogName = $vendorName . '-' . $catalog->name;
         $disk = $submission->disk ?? config('filesystems.default');
 
+        /*
+         * Export only items belonging to the submission's catalog. The
+         * catalog-scoped architecture is the source of truth: submissions
+         * are always created against a single catalog, and exporting
+         * vendor-wide could leak a sibling catalog's items into this file.
+         */
         $itemsQuery = CatalogItem::with([
             'commodityType',
             'hierarchyInfo',
@@ -311,6 +254,7 @@ class CatalogExportService
             'catalog',
         ])
             ->where('vendor_id', $vendor->id)
+            ->where('catalog_id', $submission->catalog_id)
             ->whereIn('status', ['acceptable', 'excellent'])
             ->whereNull('last_submitted_at')
             ->orderBy('id');
@@ -322,33 +266,86 @@ class CatalogExportService
             $disk
         );
 
-        // Stamp the submitted items directly (bypassing the updated_at
-        // timestamp) so their submission state can be tracked without
-        // being flagged as "modified" by the stamp itself.
-        DB::table('catalog_items')
-            ->where('vendor_id', $vendor->id)
-            ->where('catalog_id', $submission->catalog_id)
-            ->whereIn('status', ['acceptable', 'excellent'])
-            ->whereNull('last_submitted_at')
-            ->update(['last_submitted_at' => now()]);
+        /*
+         * Stamp the same item set that was exported. This runs after the
+         * file is stored; if it fails, remove the just-created export so a
+         * later retry regenerates it cleanly and the items are not re-sent
+         * to VIT.
+         */
+        try {
+            DB::table('catalog_items')
+                ->where('vendor_id', $vendor->id)
+                ->where('catalog_id', $submission->catalog_id)
+                ->whereIn('status', ['acceptable', 'excellent'])
+                ->whereNull('last_submitted_at')
+                ->update(['last_submitted_at' => now()]);
+        } catch (\Throwable $e) {
+            try {
+                Storage::disk($disk)->delete($path);
+            } catch (\Throwable $ignored) {
+                unset($ignored);
+            }
+
+            throw $e;
+        }
 
         return $path;
     }
 
     /**
      * Build the storage path for the generated catalog export.
+     *
+     * Both the vendor folder and the file stem are slugified so raw vendor/
+     * catalog names cannot introduce path separators, traversal (..), or
+     * other filesystem-sensitive characters. A short random suffix keeps
+     * same-second exports for the same vendor/catalog from colliding.
      */
     private function buildExportPath(
         Vendor $vendor,
         string $catalogName
     ): string {
+        $folderName = Str::slug($vendor->name) ?: 'vendor-' . $vendor->id;
 
-        $folderName = Str::slug($vendor->name);
+        $fileStem = Str::slug($catalogName) ?: 'catalog';
 
         return "inbound/{$folderName}/"
-            . "{$catalogName}-"
+            . "{$fileStem}-"
             . now()->format('Ymd-His')
+            . '-' . Str::lower(Str::random(8))
             . '.xlsx';
+    }
+
+    /**
+     * Create a temporary file for the export that ends up on the same
+     * filesystem as its final destination when possible, so the final
+     * rename() in storeExportFile() stays atomic even when the OS temp
+     * directory lives on a different filesystem (e.g. Docker/Kubernetes
+     * mounted volumes). Remote disks have no local destination path, so
+     * the OS temp directory is used and the file is streamed instead.
+     */
+    private function createTempFilePath(
+        string $destinationPath,
+        string $disk
+    ): string {
+        $directory = sys_get_temp_dir();
+
+        if ($disk === 'local') {
+            $destinationDir = dirname($destinationPath);
+
+            Storage::disk($disk)->makeDirectory($destinationDir);
+
+            $directory = Storage::disk($disk)->path($destinationDir);
+        }
+
+        $tempPath = tempnam($directory, 'catalog_export_');
+
+        if ($tempPath === false) {
+            throw new \RuntimeException(
+                'Unable to create temporary file for catalog export.'
+            );
+        }
+
+        return $tempPath;
     }
 
     /**
@@ -441,20 +438,11 @@ class CatalogExportService
         Collection $fields,
         object $item,
         Vendor $vendor,
-        ?Collection $appendedFields = null,
-        ?object $unitWordField = null,
-        ?object $unitOfMeasureField = null,
-        ?array $multiValueFieldKeys = null
+        Collection $appendedFields,
+        object $unitWordField,
+        object $unitOfMeasureField,
+        array $multiValueFieldKeys
     ): array {
-        /*
-         * Fall back to resolving static metadata when the caller has not
-         * supplied hoisted values (the small in-memory path relies on
-         * these fallbacks). Resolved values are identical either way.
-         */
-        $appendedFields ??= VitFieldDefinition::appendedFields();
-        $unitWordField ??= VitFieldDefinition::find('unit_word');
-        $unitOfMeasureField ??= VitFieldDefinition::find('unit_of_measure');
-
         $values = [];
 
         /*
@@ -540,7 +528,7 @@ class CatalogExportService
         object $field,
         object $item,
         Vendor $vendor,
-        ?array $multiValueFieldKeys = null
+        array $multiValueFieldKeys
     ): string {
         $fieldKey = $field->field_key;
 
@@ -605,13 +593,6 @@ class CatalogExportService
          * Values are decoded and joined using the field's configured
          * export separator.
          */
-        if ($multiValueFieldKeys === null) {
-            $multiValueFieldKeys = VitFieldDefinition::all()
-                ->where('is_multi_value', true)
-                ->pluck('field_key')
-                ->all();
-        }
-
         if (
             in_array(
                 $fieldKey,
@@ -707,14 +688,9 @@ class CatalogExportService
     /**
      * Format a key/value field such as specifications.
      *
-     * Supports:
-     *
-     * 1. Canonical:
-     *    ['key' => 'Size', 'value' => 'Large']
-     *
-     * 2. Legacy associative arrays.
-     *
-     * 3. Legacy "key=value" strings.
+     * The processing pipeline always normalizes key/value fields into the
+     * canonical ['key' => .., 'value' => ..] structure before storage, so
+     * only that structure is handled here.
      */
     private function formatKeyValueValues(
         array $values,
@@ -724,7 +700,10 @@ class CatalogExportService
 
         foreach ($values as $entry) {
             /*
-             * Canonical key/value object.
+             * Canonical key/value structure. The processing pipeline always
+             * stores key/value fields (e.g. specifications, classifications)
+             * in this normalized form, so no legacy formats need to be parsed
+             * here.
              */
             if (
                 is_array($entry)
@@ -750,49 +729,6 @@ class CatalogExportService
 
                 $stringParts[] =
                     $key . '=' . $value;
-
-                continue;
-            }
-
-            /*
-             * Legacy associative format.
-             */
-            if (
-                is_array($entry)
-                && array_keys($entry) !== range(
-                    0,
-                    count($entry) - 1
-                )
-            ) {
-                foreach ($entry as $key => $value) {
-                    if (is_array($value)) {
-                        $value =
-                            $this->flattenValueForDisplay(
-                                $value
-                            );
-                    } elseif (is_bool($value)) {
-                        $value = $value
-                            ? 'TRUE'
-                            : 'FALSE';
-                    } else {
-                        $value = (string) $value;
-                    }
-
-                    $stringParts[] =
-                        (string) $key . '=' . $value;
-                }
-
-                continue;
-            }
-
-            /*
-             * Legacy indexed "key=value" string.
-             */
-            if (
-                is_string($entry)
-                && str_contains($entry, '=')
-            ) {
-                $stringParts[] = $entry;
             }
         }
 

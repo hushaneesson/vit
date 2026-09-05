@@ -22,10 +22,11 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use OpenSpout\Reader\CSV\Options as CsvOptions;
+use OpenSpout\Reader\CSV\Reader as OpenSpoutCsvReader;
 use OpenSpout\Reader\XLSX\Reader as OpenSpoutXlsxReader;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\IOFactory;
-use PhpOffice\PhpSpreadsheet\Reader\Csv as CsvReader;
 use PhpOffice\PhpSpreadsheet\Reader\IReadFilter;
 use Throwable;
 
@@ -131,14 +132,10 @@ class ProcessCatalogUploadJob implements ShouldQueue
         $allowedColumns = [];
         $totalRows = PHP_INT_MAX;
 
-        if ($upload->file_type === 'csv') {
-            $reader = $this->createReader('csv');
-            $totalRows = $this->determineTotalRows($reader, $localPath);
-        } elseif ($upload->file_type === 'xlsx') {
-            // Streaming path: OpenSpout handles the workbook without loading
-            // sharedStrings.xml into memory. No PhpSpreadsheet reader needed.
-            $totalRows = PHP_INT_MAX;
-        } else {
+        // Reader selection by format:
+        //   xlsx, csv → OpenSpout streaming (no PhpSpreadsheet reader needed)
+        //   xls       → PhpSpreadsheet (binary BIFF — OpenSpout has no reader)
+        if ($upload->file_type === 'xls') {
             $reader = $this->createReader($upload->file_type);
             $this->configureExcelReader(
                 $reader,
@@ -212,14 +209,18 @@ class ProcessCatalogUploadJob implements ShouldQueue
         ];
     }
 
+    /**
+     * Instantiate the PhpSpreadsheet reader for .xls (binary BIFF).
+     *
+     * CSV and XLSX are handled by OpenSpout (see processOpenSpoutStreaming).
+     * OpenSpout has no .xls reader, so PhpSpreadsheet is required here.
+     *
+     * @param string $fileType 'xls'
+     * @return object
+     */
     private function createReader(string $fileType): object
     {
-        $reader = $fileType === 'csv'
-            ? new CsvReader()
-            : IOFactory::createReader(
-                $fileType === 'xls' ? 'Xls' : 'Xlsx'
-            );
-
+        $reader = IOFactory::createReader('Xls');
         $reader->setReadDataOnly(true);
 
         return $reader;
@@ -269,21 +270,16 @@ class ProcessCatalogUploadJob implements ShouldQueue
         CatalogValidationReportService $reportService,
         array $context
     ): array {
-        if ($upload->file_type === 'csv') {
-            return $this->processCsvFile(
+        // Reader selection by format:
+        //   xlsx, csv → OpenSpout streaming (unified pipeline)
+        //   xls       → PhpSpreadsheet (binary BIFF)
+        if (in_array($upload->file_type, ['xlsx', 'csv'], true)) {
+            return $this->processOpenSpoutStreaming(
                 $upload,
                 $validator,
                 $itemProcessor,
-                $context
-            );
-        }
-
-        if ($upload->file_type === 'xlsx') {
-            return $this->processExcelFileStreaming(
-                $upload,
-                $validator,
-                $itemProcessor,
-                $context
+                $context,
+                $upload->file_type
             );
         }
 
@@ -293,148 +289,6 @@ class ProcessCatalogUploadJob implements ShouldQueue
             $itemProcessor,
             $context
         );
-    }
-
-    private function processCsvFile(
-        CatalogUpload $upload,
-        CatalogRowValidator $validator,
-        CatalogItemProcessor $itemProcessor,
-        array $context
-    ): array {
-        $handle = fopen($context['localPath'], 'rb');
-
-        if ($handle === false) {
-            throw new \RuntimeException(
-                'Unable to open CSV file for processing.'
-            );
-        }
-
-        $createdCount = 0;
-        $updatedCount = 0;
-        $unchangedCount = 0;
-        $invalidCount = 0;
-        $batch = [];
-        $sourceRowNumber = 0;
-        $lastLogicalBatchBoundary = 0;
-
-        $vendor = $upload->vendor;
-        $nonComparableColumns = [
-            'dealer_sku',
-            'vendor_id',
-        ];
-
-        try {
-            while (($rowCells = fgetcsv($handle)) !== false) {
-                $sourceRowNumber++;
-
-                // Row 1 is the header.
-                if ($sourceRowNumber === 1) {
-                    continue;
-                }
-
-                $rowCells = $this->indexCsvRow($rowCells);
-
-                if (
-                    empty($rowCells)
-                    || $this->rowIsBlank($rowCells)
-                ) {
-                    continue;
-                }
-
-                [$mappedData, $rawData] = $this->mapRow(
-                    $rowCells,
-                    $context['columnToFieldKey'],
-                    $context['activeFields'],
-                    $upload->columnMappings,
-                    $context['rangeFieldKeys'],
-                    $context['lookupMaps'],
-                    $context['is_vit_export'],
-                    $context['weight_unit']
-                );
-
-                $result = $this->validateMappedRow(
-                    $upload,
-                    $validator,
-                    $context['activeFields'],
-                    $mappedData,
-                    $sourceRowNumber
-                );
-
-                if ($result['status'] === 'valid') {
-                    $catalogUploadRow = $this->persistValidRow(
-                        $upload,
-                        $sourceRowNumber,
-                        $mappedData,
-                        $rawData,
-                        $result
-                    );
-
-                    $itemResult = $this->processValidRow(
-                        $upload,
-                        $vendor,
-                        $itemProcessor,
-                        $nonComparableColumns,
-                        $catalogUploadRow
-                    );
-
-                    if (!empty($itemResult['cross_catalog_rejected'])) {
-                        $invalidCount++;
-                    } else {
-                        $createdCount += $itemResult['created'];
-                        $updatedCount += $itemResult['updated'];
-                        $unchangedCount += $itemResult['unchanged'];
-                    }
-                } else {
-                    $invalidCount++;
-
-                    $batch[] = $this->buildRowPayload(
-                        $upload,
-                        $sourceRowNumber,
-                        $mappedData,
-                        $rawData,
-                        $result
-                    );
-
-                    Log::info('ProcessCatalogUploadJob: logical batch boundary reached', [
-                        'upload_id' => $upload->id,
-                        'rows_processed' => $sourceRowNumber,
-                        'invalid_rows_pending_insert' => count($batch),
-                    ]);
-
-                    // The 500-row window is a logical/progress boundary only.
-                    // Invalid-row tracking rows are persisted at each boundary;
-                    // each valid item has already been processed in its own
-                    // independent transaction.
-                    if ($sourceRowNumber - $lastLogicalBatchBoundary >= self::READ_CHUNK_SIZE) {
-                        $this->insertInvalidRows($batch);
-                        $batch = []; // Clear the batch to prevent duplicate inserts
-                        $lastLogicalBatchBoundary = $sourceRowNumber;
-                    }
-                }
-            }
-
-            $this->insertInvalidRows($batch);
-        } finally {
-            fclose($handle);
-        }
-
-        return [
-            'created' => $createdCount,
-            'updated' => $updatedCount,
-            'unchanged' => $unchangedCount,
-            'invalid' => $invalidCount,
-        ];
-    }
-
-    private function indexCsvRow(array $row): array
-    {
-        $indexed = [];
-
-        foreach ($row as $index => $value) {
-            $indexed[(int) $index] = $value;
-        }
-
-        return $indexed;
     }
 
     private function processExcelFile(
@@ -450,10 +304,6 @@ class ProcessCatalogUploadJob implements ShouldQueue
         $totalRows = $context['totalRows'];
 
         $vendor = $upload->vendor;
-        $nonComparableColumns = [
-            'dealer_sku',
-            'vendor_id',
-        ];
 
         // Load the workbook once; the reader already limits it to mapped columns.
         $spreadsheet = $context['reader']->load(
@@ -462,12 +312,25 @@ class ProcessCatalogUploadJob implements ShouldQueue
 
         try {
             $sheet = $spreadsheet->getSheet(0);
+
+            // Real, authoritative bound on how far this sheet's data goes.
+            // $totalRows (from worksheet info) is normally the same value,
+            // but falls back to PHP_INT_MAX when PhpSpreadsheet can't
+            // determine it (e.g. certain malformed/legacy .xls files) —
+            // without this, the chunk loop below would run until the job
+            // timeout instead of stopping at the real end of the data.
+            $highestRow = $sheet->getHighestDataRow();
+
             $chunkStartRow = 2;
 
-            while ($chunkStartRow <= $totalRows) {
+            while (
+                $chunkStartRow <= $totalRows
+                && $chunkStartRow <= $highestRow
+            ) {
                 $chunkEndRow = min(
                     $chunkStartRow + self::READ_CHUNK_SIZE - 1,
-                    $totalRows
+                    $totalRows,
+                    $highestRow
                 );
 
                 $chunkResult = $this->processExcelRows(
@@ -478,8 +341,7 @@ class ProcessCatalogUploadJob implements ShouldQueue
                     $sheet,
                     $chunkStartRow,
                     $chunkEndRow,
-                    $vendor,
-                    $nonComparableColumns
+                    $vendor
                 );
 
                 $createdCount += $chunkResult['created'];
@@ -507,11 +369,20 @@ class ProcessCatalogUploadJob implements ShouldQueue
         ];
     }
 
-    private function processExcelFileStreaming(
+    /**
+     * Unified OpenSpout streaming processor for XLSX and CSV.
+     *
+     * Both formats flow through the same reader pipeline. The reader is
+     * selected by file type via makeStreamingReader().
+     *
+     * @param string $fileType 'xlsx' | 'csv'
+     */
+    private function processOpenSpoutStreaming(
         CatalogUpload $upload,
         CatalogRowValidator $validator,
         CatalogItemProcessor $itemProcessor,
-        array $context
+        array $context,
+        string $fileType
     ): array {
         $createdCount = 0;
         $updatedCount = 0;
@@ -522,23 +393,20 @@ class ProcessCatalogUploadJob implements ShouldQueue
         $lastLogicalBatchBoundary = 0;
 
         $vendor = $upload->vendor;
-        $nonComparableColumns = [
-            'dealer_sku',
-            'vendor_id',
-        ];
 
-        $reader = new OpenSpoutXlsxReader();
+        $reader = $this->makeStreamingReader($fileType);
 
         try {
             $reader->open($context['localPath']);
 
             $sheetIterator = $reader->getSheetIterator();
-
             $sheetIterator->rewind();
             $sheet = $sheetIterator->current();
 
             if ($sheet === null) {
-                throw new \RuntimeException('XLSX file has no worksheets.');
+                throw new \RuntimeException(
+                    "File has no worksheets: {$upload->original_filename}"
+                );
             }
 
             $rowIterator = $sheet->getRowIterator();
@@ -546,7 +414,6 @@ class ProcessCatalogUploadJob implements ShouldQueue
             foreach ($rowIterator as $row) {
                 $sourceRowNumber++;
 
-                // Row 1 is the header.
                 if ($sourceRowNumber === 1) {
                     continue;
                 }
@@ -557,67 +424,27 @@ class ProcessCatalogUploadJob implements ShouldQueue
                     continue;
                 }
 
-                [$mappedData, $rawData] = $this->mapRow(
-                    $rowCells,
-                    $context['columnToFieldKey'],
-                    $context['activeFields'],
-                    $upload->columnMappings,
-                    $context['rangeFieldKeys'],
-                    $context['lookupMaps'],
-                    $context['is_vit_export'],
-                    $context['weight_unit']
-                );
-
-                $result = $this->validateMappedRow(
+                $rowResult = $this->processMappedRow(
                     $upload,
                     $validator,
-                    $context['activeFields'],
-                    $mappedData,
+                    $itemProcessor,
+                    $context,
+                    $vendor,
+                    $rowCells,
                     $sourceRowNumber
                 );
 
-                if ($result['status'] === 'valid') {
-                    $catalogUploadRow = $this->persistValidRow(
-                        $upload,
-                        $sourceRowNumber,
-                        $mappedData,
-                        $rawData,
-                        $result
-                    );
+                $createdCount += $rowResult['created'];
+                $updatedCount += $rowResult['updated'];
+                $unchangedCount += $rowResult['unchanged'];
+                $invalidCount += $rowResult['invalid'];
 
-                    $itemResult = $this->processValidRow(
-                        $upload,
-                        $vendor,
-                        $itemProcessor,
-                        $nonComparableColumns,
-                        $catalogUploadRow
-                    );
+                if ($rowResult['invalid_payload'] !== null) {
+                    $batch[] = $rowResult['invalid_payload'];
 
-                    if (!empty($itemResult['cross_catalog_rejected'])) {
-                        $invalidCount++;
-                    } else {
-                        $createdCount += $itemResult['created'];
-                        $updatedCount += $itemResult['updated'];
-                        $unchangedCount += $itemResult['unchanged'];
-                    }
-                } else {
-                    $invalidCount++;
-
-                    $batch[] = $this->buildRowPayload(
-                        $upload,
-                        $sourceRowNumber,
-                        $mappedData,
-                        $rawData,
-                        $result
-                    );
-
-                    // The 500-row window is a logical/progress boundary only.
-                    // Invalid-row tracking rows are persisted at each boundary;
-                    // each valid item has already been processed in its own
-                    // independent transaction.
                     if ($sourceRowNumber - $lastLogicalBatchBoundary >= self::READ_CHUNK_SIZE) {
                         $this->insertInvalidRows($batch);
-                        $batch = []; // Clear the batch to prevent duplicate inserts
+                        $batch = [];
                         $lastLogicalBatchBoundary = $sourceRowNumber;
 
                         Log::info('ProcessCatalogUploadJob: logical batch boundary reached', [
@@ -639,6 +466,116 @@ class ProcessCatalogUploadJob implements ShouldQueue
             'updated' => $updatedCount,
             'unchanged' => $unchangedCount,
             'invalid' => $invalidCount,
+        ];
+    }
+
+    /**
+     * Instantiate the correct OpenSpout reader for the streaming pipeline.
+     *
+     * @param string $fileType 'xlsx' | 'csv'
+     */
+    private function makeStreamingReader(string $fileType): \OpenSpout\Reader\ReaderInterface
+    {
+        return match ($fileType) {
+            'csv' => (function () {
+                $options = new CsvOptions();
+                $options->FIELD_DELIMITER = ',';
+                $options->FIELD_ENCLOSURE = '"';
+                $options->ENCODING = 'UTF-8';
+
+                return new OpenSpoutCsvReader($options);
+            })(),
+            'xlsx' => new OpenSpoutXlsxReader(),
+            default => throw new \InvalidArgumentException(
+                "Unsupported file type for streaming: {$fileType}"
+            ),
+        };
+    }
+
+    /**
+     * Map, validate, and (if valid) persist + process a single source row.
+     *
+     * Shared by both the OpenSpout streaming path (.xlsx/.csv) and the
+     * PhpSpreadsheet path (.xls) so the created/updated/unchanged/invalid
+     * decision logic lives in exactly one place.
+     *
+     * @return array{created: int, updated: int, unchanged: int, invalid: int, invalid_payload: ?array}
+     */
+    private function processMappedRow(
+        CatalogUpload $upload,
+        CatalogRowValidator $validator,
+        CatalogItemProcessor $itemProcessor,
+        array $context,
+        $vendor,
+        array $rowCells,
+        int $sourceRowNumber
+    ): array {
+        [$mappedData, $rawData] = $this->mapRow(
+            $rowCells,
+            $context['columnToFieldKey'],
+            $context['activeFields'],
+            $upload->columnMappings,
+            $context['rangeFieldKeys'],
+            $context['lookupMaps'],
+            $context['is_vit_export'],
+            $context['weight_unit']
+        );
+
+        $result = $this->validateMappedRow(
+            $upload,
+            $validator,
+            $context['activeFields'],
+            $mappedData,
+            $sourceRowNumber
+        );
+
+        if ($result['status'] !== 'valid') {
+            return [
+                'created' => 0,
+                'updated' => 0,
+                'unchanged' => 0,
+                'invalid' => 1,
+                'invalid_payload' => $this->buildRowPayload(
+                    $upload,
+                    $sourceRowNumber,
+                    $mappedData,
+                    $rawData,
+                    $result
+                ),
+            ];
+        }
+
+        $catalogUploadRow = $this->persistValidRow(
+            $upload,
+            $sourceRowNumber,
+            $mappedData,
+            $rawData,
+            $result
+        );
+
+        $itemResult = $this->processValidRow(
+            $upload,
+            $vendor,
+            $itemProcessor,
+            $catalogUploadRow
+        );
+
+        if (!empty($itemResult['cross_catalog_rejected'])) {
+            return [
+                'created' => 0,
+                'updated' => 0,
+                'unchanged' => 0,
+                'invalid' => 1,
+                'invalid_payload' => null,
+            ];
+        }
+
+        return [
+            'created' => $itemResult['created'],
+            'updated' => $itemResult['updated'],
+            'unchanged' => $itemResult['unchanged'],
+            'invalid' => 0,
+            'invalid_payload' => null,
         ];
     }
 
@@ -683,7 +620,6 @@ class ProcessCatalogUploadJob implements ShouldQueue
         CatalogUpload $upload,
         $vendor,
         CatalogItemProcessor $itemProcessor,
-        array $nonComparableColumns,
         CatalogUploadRow $catalogUploadRow
     ): array {
         $dealerSku = $catalogUploadRow->data['dealer_sku'] ?? null;
@@ -695,12 +631,11 @@ class ProcessCatalogUploadJob implements ShouldQueue
                 'dealer_sku' => $dealerSku,
             ]);
 
-            $result = DB::transaction(function () use ($upload, $vendor, $itemProcessor, $nonComparableColumns, $catalogUploadRow) {
+            $result = DB::transaction(function () use ($upload, $vendor, $itemProcessor, $catalogUploadRow) {
                 return $itemProcessor->processRow(
                     $upload,
                     $vendor,
-                    $catalogUploadRow,
-                    $nonComparableColumns
+                    $catalogUploadRow
                 );
             });
 
@@ -754,8 +689,7 @@ class ProcessCatalogUploadJob implements ShouldQueue
         object $sheet,
         int $chunkStartRow,
         int $chunkEndRow,
-        $vendor,
-        array $nonComparableColumns
+        $vendor
     ): array {
         $highestRow = $sheet->getHighestDataRow();
         $effectiveStartRow = max(2, $chunkStartRow);
@@ -778,59 +712,23 @@ class ProcessCatalogUploadJob implements ShouldQueue
                 continue;
             }
 
-            [$mappedData, $rawData] = $this->mapRow(
-                $rowCells,
-                $context['columnToFieldKey'],
-                $context['activeFields'],
-                $upload->columnMappings,
-                $context['rangeFieldKeys'],
-                $context['lookupMaps'],
-                $context['is_vit_export'],
-                $context['weight_unit']
-            );
-
-            $result = $this->validateMappedRow(
+            $rowResult = $this->processMappedRow(
                 $upload,
                 $validator,
-                $context['activeFields'],
-                $mappedData,
+                $itemProcessor,
+                $context,
+                $vendor,
+                $rowCells,
                 $rowIndex
             );
 
-            if ($result['status'] === 'valid') {
-                $catalogUploadRow = $this->persistValidRow(
-                    $upload,
-                    $rowIndex,
-                    $mappedData,
-                    $rawData,
-                    $result
-                );
+            $createdCount += $rowResult['created'];
+            $updatedCount += $rowResult['updated'];
+            $unchangedCount += $rowResult['unchanged'];
+            $invalidCount += $rowResult['invalid'];
 
-                $itemResult = $this->processValidRow(
-                    $upload,
-                    $vendor,
-                    $itemProcessor,
-                    $nonComparableColumns,
-                    $catalogUploadRow
-                );
-
-                if (!empty($itemResult['cross_catalog_rejected'])) {
-                    $invalidCount++;
-                } else {
-                    $createdCount += $itemResult['created'];
-                    $updatedCount += $itemResult['updated'];
-                    $unchangedCount += $itemResult['unchanged'];
-                }
-            } else {
-                $invalidCount++;
-
-                $batch[] = $this->buildRowPayload(
-                    $upload,
-                    $rowIndex,
-                    $mappedData,
-                    $rawData,
-                    $result
-                );
+            if ($rowResult['invalid_payload'] !== null) {
+                $batch[] = $rowResult['invalid_payload'];
             }
         }
 
@@ -904,7 +802,7 @@ class ProcessCatalogUploadJob implements ShouldQueue
             $blockingErrors[] = [
                 'field_key' => 'dealer_sku',
                 'message' =>
-                ProcessValidatedRowsJob::CROSS_CATALOG_SKU_ERROR,
+                CatalogItemProcessor::CROSS_CATALOG_SKU_ERROR,
             ];
 
             $status = 'invalid';
@@ -1236,8 +1134,7 @@ class ProcessCatalogUploadJob implements ShouldQueue
 
         $vendorSeparator =
             $this->getVendorSourceSeparator(
-                $mapping,
-                $field
+                $mapping
             );
 
         if ($field->is_key_value) {
@@ -1443,8 +1340,7 @@ class ProcessCatalogUploadJob implements ShouldQueue
     }
 
     private function getVendorSourceSeparator(
-        ?object $mapping,
-        object $field
+        ?object $mapping
     ): string {
         if (
             $mapping
