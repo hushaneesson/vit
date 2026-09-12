@@ -23,6 +23,9 @@
             </div>
         </div>
 
+        {{-- Catalog processing status banner --}}
+        @livewire('vendor.catalog-processing-banner', ['catalogId' => $catalog->id])
+
         {{-- Catalog submission status and button --}}
         @livewire('vendor.catalog-submission-button', ['catalogId' => $catalog->id])
 

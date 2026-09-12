@@ -3,244 +3,913 @@
 namespace App\Jobs;
 
 use App\Enums\CatalogUploadStatus;
+use App\Models\CatalogItem;
 use App\Models\CatalogUpload;
+use App\Models\CatalogUploadRow;
+use App\Models\CommodityType;
+use App\Models\UnitOfMeasure;
 use App\Services\Catalog\CatalogItemProcessor;
+use App\Services\Catalog\CatalogRowValidator;
 use App\Services\Catalog\CatalogValidationReportService;
+use App\Services\VitFieldDefinition;
+use App\Services\WeightUnitConverter;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 use Throwable;
 
-/**
- * Orchestrates the upload lifecycle for validated CatalogUploadRow records.
- *
- * Consumes validated rows produced by ProcessCatalogUploadJob and creates or
- * updates CatalogItem rows in the vendor's catalog.
- *
- * Matching strategy: dealer_sku (globally unique via (vendor_id, dealer_sku)).
- * When updating an existing CatalogItem, blank CSV values are not written
- * back to the database. Only non-blank values overwrite existing data.
- *
- * Detailed item construction, comparison, classification, and validation-report
- * logic lives in the App\Services\Catalog services. This job only drives the
- * workflow:
- *
- * load upload -> should process -> claim -> process rows -> commit
- * -> validation report email (if required) -> complete upload
- */
 class ProcessValidatedRowsJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 1;
 
-    public function __construct(public int $catalogUploadId) {}
+    private int $catalogUploadId;
 
-    public function handle(
-        CatalogItemProcessor $itemProcessor,
-        CatalogValidationReportService $reportService
-    ): void {
-        $upload = $this->loadUpload();
+    private int $firstRowId;
 
-        if (!$this->shouldProcess($upload)) {
-            return;
-        }
+    private int $lastRowId;
 
-        if (!$this->claimUpload($upload)) {
-            return;
-        }
+    private bool $isVitFileImport;
 
-        try {
-            $this->processUpload($upload, $itemProcessor, $reportService);
-        } catch (Throwable $e) {
-            $this->handleProcessingFailure($upload, $e);
+    private Collection $columnToFieldKey;
 
-            throw $e;
-        }
+    private Collection $activeFields;
+
+    private array $rangeFieldKeys;
+
+    private array $lookupMaps;
+
+    private string $weightUnit;
+
+    public function __construct(
+
+        int $catalogUploadId,
+
+        int $firstRowId,
+
+        int $lastRowId,
+
+        bool $isVitFileImport = false
+
+    ) {
+
+        $this->catalogUploadId = $catalogUploadId;
+
+        $this->firstRowId = $firstRowId;
+
+        $this->lastRowId = $lastRowId;
+
+        $this->isVitFileImport = $isVitFileImport;
     }
 
-    /**
-     * Load the upload and the relationships required during processing.
-     */
+    public function handle(
+
+        CatalogItemProcessor $itemProcessor,
+
+        CatalogRowValidator $validator
+
+    ): void {
+
+        $upload = $this->loadUpload();
+
+        if ($upload->status === CatalogUploadStatus::Completed) {
+
+            return;
+        }
+
+        $this->buildContext($upload);
+
+        $stagedRows = $this->loadStagedRows();
+
+        $counts = [
+
+            'created' => 0,
+
+            'updated' => 0,
+
+            'unchanged' => 0,
+
+            'success' => 0,
+
+            'invalid' => 0,
+
+        ];
+
+        foreach ($stagedRows as $stagedRow) {
+
+            $rowCells = $stagedRow->raw_data ?? [];
+
+            $rowCounts = $this->processRow(
+
+                $upload,
+
+                $itemProcessor,
+
+                $validator,
+
+                $stagedRow,
+
+                $rowCells
+
+            );
+
+            $counts['created'] += $rowCounts['created'];
+
+            $counts['updated'] += $rowCounts['updated'];
+
+            $counts['unchanged'] += $rowCounts['unchanged'];
+
+            $counts['success'] += $rowCounts['success'];
+
+            $counts['invalid'] += $rowCounts['invalid'];
+        }
+
+        $this->finalizeChunk($upload, $counts);
+    }
+
     private function loadUpload(): CatalogUpload
     {
+
         return CatalogUpload::with([
+
             'vendor',
+
             'columnMappings',
+
         ])->findOrFail($this->catalogUploadId);
     }
 
-    /**
-     * Determine whether the upload should be processed.
-     *
-     * Completed uploads are always skipped.
-     * ProcessingItems uploads are skipped unless their processing lock
-     * has become stale.
-     */
-    private function shouldProcess(CatalogUpload $upload): bool
+    private function loadStagedRows(): \Illuminate\Database\Eloquent\Collection
     {
-        if ($upload->status === CatalogUploadStatus::Completed) {
+
+        // Only process rows whose mapped data is still empty.
+        // This prevents a retried chunk from processing rows that already completed.
+
+        return CatalogUploadRow::where('catalog_upload_id', $this->catalogUploadId)
+
+            ->where('id', '>=', $this->firstRowId)
+
+            ->where('id', '<=', $this->lastRowId)
+
+            ->orderBy('id')
+
+            ->get()
+
+            ->filter(fn (Model $row) => empty($row->data));
+    }
+
+    private function buildContext(CatalogUpload $upload): void
+    {
+
+        $this->columnToFieldKey = $this->buildColumnToFieldKey($upload);
+
+        $this->activeFields = VitFieldDefinition::active()
+
+            ->keyBy('field_key');
+
+        $this->rangeFieldKeys = $this->buildRangeFieldKeys($upload);
+
+        $this->lookupMaps = $this->buildLookupMaps();
+
+        $weightMapping = $upload->columnMappings
+
+            ->firstWhere('field_key', 'item_weight_in_pounds');
+
+        $this->weightUnit = $weightMapping
+
+            && ! empty($weightMapping->source_separator)
+
+            ? (string) $weightMapping->source_separator
+
+            : WeightUnitConverter::DEFAULT_UNIT;
+    }
+
+    private function processRow(
+
+        CatalogUpload $upload,
+
+        CatalogItemProcessor $itemProcessor,
+
+        CatalogRowValidator $validator,
+
+        CatalogUploadRow $stagedRow,
+
+        array $rowCells
+
+    ): array {
+
+        $sourceRowNumber = $stagedRow->row_number;
+
+        $mappedData = $this->mapRow(
+
+            $rowCells,
+
+            $this->columnToFieldKey,
+
+            $this->activeFields,
+
+            $upload->columnMappings,
+
+            $this->rangeFieldKeys,
+
+            $this->lookupMaps,
+
+            $this->isVitFileImport,
+
+            $this->weightUnit
+
+        );
+
+        $validationResult = $this->validateMappedRow(
+
+            $upload,
+
+            $validator,
+
+            $this->activeFields,
+
+            $mappedData,
+
+            $sourceRowNumber
+
+        );
+
+        if ($validationResult['status'] !== 'valid') {
+
+            $this->persistProcessedRow(
+
+                $stagedRow,
+
+                $mappedData,
+
+                $validationResult
+
+            );
+
+            return [
+
+                'created' => 0,
+
+                'updated' => 0,
+
+                'unchanged' => 0,
+
+                'success' => 0,
+
+                'invalid' => 1,
+
+            ];
+        }
+
+        $this->persistProcessedRow(
+
+            $stagedRow,
+
+            $mappedData,
+
+            $validationResult
+
+        );
+
+        $result = $this->processValidRow(
+
+            $upload,
+
+            $upload->vendor,
+
+            $itemProcessor,
+
+            $stagedRow
+
+        );
+
+        // A valid row can still be rejected when its SKU belongs to another catalog.
+        // Treat that processor-level rejection as an invalid row.
+
+        if ($result['cross_catalog_rejected'] ?? false) {
+
+            return [
+
+                'created' => 0,
+
+                'updated' => 0,
+
+                'unchanged' => 0,
+
+                'success' => 0,
+
+                'invalid' => 1,
+
+            ];
+        }
+
+        return [
+
+            'created' => $result['created'],
+
+            'updated' => $result['updated'],
+
+            'unchanged' => $result['unchanged'],
+
+            'success' => 1,
+
+            'invalid' => 0,
+
+        ];
+    }
+
+    private function mapRow(
+
+        array $rowCells,
+
+        $columnToFieldKey,
+
+        $activeFields,
+
+        $columnMappings,
+
+        array $rangeFieldKeys,
+
+        array $lookupMaps = [],
+
+        bool $isVitFileImport = false,
+
+        string $weightUnit = WeightUnitConverter::DEFAULT_UNIT
+
+    ): array {
+
+        $mappedData = [];
+
+        foreach ($rowCells as $colIndex => $rawValue) {
+
+            $fieldKey = $columnToFieldKey->get($colIndex);
+
+            if (! $fieldKey) {
+
+                continue;
+            }
+
+            $field = $activeFields->get($fieldKey);
+
+            $mapping = $columnMappings->firstWhere('column_index', $colIndex);
+
+            if ($field && $field->is_multi_value) {
+
+                $this->mapMultiValueField($mappedData, $fieldKey, $field, $mapping, $rawValue, $rangeFieldKeys);
+
+                continue;
+            }
+
+            if ($this->isCategoryField($fieldKey)) {
+
+                $mappedData['category'] = $this->resolveLookupId((string) $rawValue, $lookupMaps['category'] ?? []);
+
+                continue;
+            }
+
+            if ($fieldKey === 'unit_of_measure') {
+
+                $mappedData[$fieldKey] = $this->resolveLookupId(
+
+                    (string) $rawValue,
+
+                    $lookupMaps['unit_of_measure']['description'] ?? [],
+
+                    $lookupMaps['unit_of_measure']['code'] ?? []
+
+                );
+
+                continue;
+            }
+
+            $mappedData[$fieldKey] = $this->normalizeScalar($rawValue);
+        }
+
+        $this->applyVitAwareTransforms($mappedData, $isVitFileImport, $weightUnit);
+
+        return $mappedData;
+    }
+
+    private function applyVitAwareTransforms(array &$mappedData, bool $isVitFileImport, string $weightUnit): void
+    {
+
+        if (array_key_exists('item_weight_in_pounds', $mappedData) && ! $isVitFileImport && $weightUnit !== WeightUnitConverter::DEFAULT_UNIT && is_numeric($mappedData['item_weight_in_pounds'])) {
+
+            $mappedData['item_weight_in_pounds'] = WeightUnitConverter::toPounds((float) $mappedData['item_weight_in_pounds'], $weightUnit);
+        }
+
+        if ($isVitFileImport && isset($mappedData['short_description']) && is_string($mappedData['short_description']) && $mappedData['short_description'] !== '') {
+
+            $parsed = $this->parseAppendedQuantityPerUnit($mappedData['short_description']);
+
+            if ($parsed !== null) {
+
+                [$name, $quantity] = $parsed;
+
+                if ($name !== '') {
+
+                    $mappedData['short_description'] = $name;
+                }
+
+                if (! array_key_exists('quantity_per_unit', $mappedData) || $mappedData['quantity_per_unit'] === null || $mappedData['quantity_per_unit'] === '') {
+
+                    $mappedData['quantity_per_unit'] = $quantity;
+                }
+            }
+        }
+    }
+
+    private function parseAppendedQuantityPerUnit(string $value): ?array
+    {
+
+        if (! preg_match('/^(?<name>.+),\s*(?<qty>\d+(?:\.\d+)?)\s*(?<word>[^,\/]*)(?:\/(?<uom>[^,]*))?$/u', $value, $matches)) {
+
+            return null;
+        }
+
+        return [trim($matches['name']), $matches['qty']];
+    }
+
+    private function isCategoryField(string $fieldKey): bool
+    {
+
+        return in_array($fieldKey, ['category', 'product_commodity_type'], true);
+    }
+
+    private function mapMultiValueField(array &$mappedData, string $fieldKey, object $field, ?object $mapping, mixed $rawValue, array $rangeFieldKeys): void
+    {
+
+        if (in_array($fieldKey, $rangeFieldKeys, true) && $mapping && ! empty($mapping->source_column_name)) {
+
+            $this->mapRangeValue($mappedData, $fieldKey, $field, $mapping, $rawValue);
+
+            return;
+        }
+
+        $vendorSeparator = $this->getVendorSourceSeparator($mapping);
+
+        if ($field->is_key_value) {
+
+            $mappedData[$fieldKey] = $this->parseMultiValueKeyValue((string) $rawValue, $vendorSeparator);
+
+            return;
+        }
+
+        $mappedData[$fieldKey] = $this->splitMultiValue((string) $rawValue, $vendorSeparator);
+    }
+
+    private function mapRangeValue(array &$mappedData, string $fieldKey, object $field, object $mapping, mixed $rawValue): void
+    {
+
+        $value = $this->sanitizeValue($rawValue);
+
+        $key = $this->sanitizeValue(trim($mapping->source_column_name));
+
+        if ($value === null || $value === '' || $key === '') {
+
+            return;
+        }
+
+        if ($field->is_key_value) {
+
+            $mappedData[$fieldKey][] = ['key' => $key, 'value' => $value];
+
+            return;
+        }
+
+        $mappedData[$fieldKey][] = $value;
+    }
+
+    private function validateMappedRow(
+
+        CatalogUpload $upload,
+
+        CatalogRowValidator $validator,
+
+        $activeFields,
+
+        array $mappedData,
+
+        int $sourceRowNumber
+
+    ): array {
+
+        $result = $validator->validate($activeFields, $mappedData);
+
+        $blockingErrors = $result['errors'] ?? [];
+
+        $warnings = $result['warnings'] ?? [];
+
+        $status = empty($blockingErrors) ? 'valid' : 'invalid';
+
+        if ($status === 'valid' && $this->skuBelongsToAnotherCatalog($upload, $mappedData['dealer_sku'] ?? null)) {
+
+            $blockingErrors[] = ['field_key' => 'dealer_sku', 'message' => CatalogItemProcessor::CROSS_CATALOG_SKU_ERROR];
+
+            $status = 'invalid';
+        }
+
+        if ($status === 'invalid') {
+
+            Log::info('ProcessValidatedRowsJob: validation failed for row', [
+
+                'upload_id' => $upload->id,
+
+                'row_number' => $sourceRowNumber,
+
+                'blocking_errors' => $blockingErrors,
+
+                'warnings' => $warnings,
+
+            ]);
+        }
+
+        return ['status' => $status, 'errors' => $blockingErrors, 'warnings' => $warnings];
+    }
+
+    private function persistProcessedRow(
+
+        CatalogUploadRow $stagedRow,
+
+        array $mappedData,
+
+        array $validationResult
+
+    ): void {
+
+        $stagedRow->update([
+
+            'data' => $mappedData,
+
+            'status' => $validationResult['status'],
+
+            'errors' => $this->buildValidationErrors($validationResult),
+
+        ]);
+    }
+
+    private function processValidRow(
+
+        CatalogUpload $upload,
+
+        $vendor,
+
+        CatalogItemProcessor $itemProcessor,
+
+        CatalogUploadRow $catalogUploadRow
+
+    ): array {
+
+        try {
+
+            return DB::transaction(function () use ($upload, $vendor, $itemProcessor, $catalogUploadRow) {
+
+                return $itemProcessor->processRow($upload, $vendor, $catalogUploadRow);
+            });
+        } catch (Throwable $e) {
+
+            $dealerSku = $catalogUploadRow->data['dealer_sku'] ?? null;
+
+            Log::error('ProcessValidatedRowsJob: row processing failed', [
+
+                'upload_id' => $upload->id,
+
+                'source_row_number' => $catalogUploadRow->row_number,
+
+                'dealer_sku' => $dealerSku,
+
+                'error' => $e->getMessage(),
+
+            ]);
+
+            return [
+
+                'created' => 0,
+
+                'updated' => 0,
+
+                'unchanged' => 0,
+
+            ];
+        }
+    }
+
+    private function buildValidationErrors(array $validationResult): ?array
+    {
+
+        $warnings = $validationResult['warnings'];
+
+        $errors = $validationResult['errors'];
+
+        if (empty($warnings) && empty($errors)) {
+
+            return null;
+        }
+
+        return [
+
+            'warnings' => $warnings,
+
+            'errors' => $errors,
+
+        ];
+    }
+
+    private function finalizeChunk(CatalogUpload $upload, array $counts): void
+    {
+
+        if ($counts['success'] > 0) {
+
+            CatalogUpload::whereKey($upload->id)->increment('success_rows', $counts['success']);
+        }
+
+        if ($counts['invalid'] > 0) {
+
+            CatalogUpload::whereKey($upload->id)->increment('invalid_rows', $counts['invalid']);
+        }
+
+        if ($counts['created'] > 0) {
+
+            CatalogUpload::whereKey($upload->id)->increment('created_rows', $counts['created']);
+        }
+
+        if ($counts['updated'] > 0) {
+
+            CatalogUpload::whereKey($upload->id)->increment('updated_rows', $counts['updated']);
+        }
+
+        if ($counts['unchanged'] > 0) {
+
+            CatalogUpload::whereKey($upload->id)->increment('unchanged_rows', $counts['unchanged']);
+        }
+
+        $this->completeUploadIfDone($upload);
+    }
+
+    private function completeUploadIfDone(CatalogUpload $upload): void
+    {
+
+        $row = CatalogUpload::whereKey($upload->id)
+
+            ->first(['id', 'total_rows', 'success_rows', 'invalid_rows', 'status']);
+
+        if ($row === null) {
+
+            return;
+        }
+
+        $processed = ($row->success_rows ?? 0) + ($row->invalid_rows ?? 0);
+
+        if (
+
+            $row->total_rows === null
+
+            || $processed < $row->total_rows
+
+        ) {
+
+            return; // Other child jobs still have rows to process.
+
+        }
+
+        // Atomic compare-and-set ensures only one child finalizes a concurrent upload.
+
+        $completed = CatalogUpload::whereKey($upload->id)
+
+            ->whereIn('status', [
+
+                CatalogUploadStatus::Processing,
+
+                CatalogUploadStatus::ProcessingItems,
+
+            ])
+
+            ->update([
+
+                'status' => CatalogUploadStatus::Completed,
+
+                'processing_completed_at' => now(),
+
+            ]);
+
+        if ($completed > 0) {
+
+            $this->dispatchValidationReport($upload);
+        }
+    }
+
+    private function dispatchValidationReport(CatalogUpload $upload): void
+    {
+
+        try {
+
+            $fresh = CatalogUpload::with(['client'])->findOrFail($upload->id);
+
+            (new CatalogValidationReportService)
+
+                ->sendValidationReportIfNeeded($fresh);
+        } catch (Throwable $e) {
+
+            Log::warning(
+
+                'ProcessValidatedRowsJob: completion succeeded but validation '
+
+                    .'report dispatch failed for upload '
+
+                    .$upload->id
+
+                    .': '
+
+                    .$e->getMessage()
+
+            );
+        }
+    }
+
+    private function skuBelongsToAnotherCatalog(CatalogUpload $upload, $dealerSku): bool
+    {
+
+        if ($dealerSku === null || trim((string) $dealerSku) === '') {
+
             return false;
         }
 
-        if ($upload->status === CatalogUploadStatus::ProcessingItems) {
-            $processingTimeout = (int) config(
-                'catalog.processing_timeout_minutes',
-                60
-            );
+        return CatalogItem::where('vendor_id', $upload->vendor_id)
 
-            $isStale = $upload->processing_started_at
-                && $upload->processing_started_at
-                ->addMinutes($processingTimeout)
-                ->isPast();
+            ->where('dealer_sku', trim((string) $dealerSku))
 
-            if (!$isStale && $upload->processing_started_at !== null) {
-                return false;
-            }
-        }
+            ->where('catalog_id', '!=', $upload->catalog_id)
 
-        return true;
+            ->exists();
     }
-    /**
-     * Atomically claim the upload for item processing.
-     */
-    private function claimUpload(CatalogUpload $upload): bool
+
+    private function buildColumnToFieldKey(CatalogUpload $upload): Collection
     {
-        return DB::transaction(function () use ($upload) {
-            $updated = CatalogUpload::where('id', $upload->id)
-                ->whereIn('status', [
-                    CatalogUploadStatus::Processing,
-                    CatalogUploadStatus::ProcessingItems,
-                ])
-                ->update([
-                    'status' => CatalogUploadStatus::ProcessingItems,
-                    'processing_started_at' => now(),
-                ]);
 
-            return $updated > 0;
-        });
+        return $upload->columnMappings->mapWithKeys(fn ($m) => [$m->column_index => $m->field_key]);
     }
 
-    /**
-     * Process all valid rows, commit the transaction, then complete the
-     * upload (sending the validation report email first if required).
-     */
-    private function processUpload(
-        CatalogUpload $upload,
-        CatalogItemProcessor $itemProcessor,
-        CatalogValidationReportService $reportService
-    ): void {
-        $vendor = $upload->vendor;
+    private function buildRangeFieldKeys(CatalogUpload $upload): array
+    {
 
-        $createdCount = 0;
-        $updatedCount = 0;
-        $unchangedCount = 0;
+        return $upload->columnMappings->groupBy('field_key')->filter(fn ($g) => $g->count() > 1)->keys()->all();
+    }
 
-        $validRows = $upload->rows()->where('status', 'valid');
+    private function buildLookupMaps(): array
+    {
 
-        $validRows->chunkById(500, function ($rows) use (
-            $upload,
-            $vendor,
-            $itemProcessor,
-            &$createdCount,
-            &$updatedCount,
-            &$unchangedCount
-        ) {
-            DB::beginTransaction();
+        return [
 
-            try {
-                foreach ($rows as $row) {
-                    $result = $itemProcessor->processRow(
-                        $upload,
-                        $vendor,
-                        $row
-                    );
+            'category' => $this->buildLookupMap(CommodityType::query()->pluck('id', 'name')),
 
-                    $createdCount += $result['created'];
-                    $updatedCount += $result['updated'];
-                    $unchangedCount += $result['unchanged'];
-                }
+            'unit_of_measure' => [
 
-                DB::commit();
-            } catch (Throwable $e) {
-                DB::rollBack();
+                'description' => $this->buildLookupMap(UnitOfMeasure::query()->pluck('id', 'description')),
 
-                Log::error('ProcessValidatedRowsJob: batch failed and was rolled back', [
-                    'upload_id' => $upload->id,
-                    'error' => $e->getMessage(),
-                ]);
+                'code' => $this->buildLookupMap(UnitOfMeasure::query()->pluck('id', 'code')),
 
-                throw $e;
+            ],
+
+        ];
+    }
+
+    private function buildLookupMap($idsByName): array
+    {
+
+        $map = [];
+
+        foreach ($idsByName as $name => $id) {
+
+            if ($name === null) {
+
+                continue;
             }
-        });
 
-        $emailSent = $reportService->sendValidationReportIfNeeded($upload);
+            $normalized = $this->normalizeForLookup((string) $name);
 
-        if ($emailSent) {
-            $this->completeUpload(
-                $upload,
-                $createdCount,
-                $updatedCount,
-                $unchangedCount
-            );
+            if ($normalized === '' || isset($map[$normalized])) {
+
+                continue;
+            }
+
+            $map[$normalized] = $id;
         }
+
+        return $map;
     }
 
-    /**
-     * Mark the upload as completed and store processing statistics.
-     */
-    private function completeUpload(
-        CatalogUpload $upload,
-        int $createdCount,
-        int $updatedCount,
-        int $unchangedCount
-    ): void {
-        $upload->update([
-            'status' => CatalogUploadStatus::Completed,
-            'total_rows' => $upload->rows()->count(),
-            'success_rows' =>
-            $createdCount
-                + $updatedCount
-                + $unchangedCount,
-            'created_rows' => $createdCount,
-            'updated_rows' => $updatedCount,
-            'unchanged_rows' => $unchangedCount,
-            'invalid_rows' =>
-            $upload->rows()
-                ->where('status', 'invalid')
-                ->count(),
-            'processing_completed_at' => now(),
-        ]);
+    private function resolveLookupId(string $rawValue, array ...$maps): ?int
+    {
+
+        $normalized = $this->normalizeForLookup($rawValue);
+
+        if ($normalized === '') {
+
+            return null;
+        }
+
+        foreach ($maps as $map) {
+
+            if (isset($map[$normalized])) {
+
+                return $map[$normalized];
+            }
+        }
+
+        return null;
     }
 
-    /**
-     * Handle a processing failure.
-     */
-    private function handleProcessingFailure(
-        CatalogUpload $upload,
-        Throwable $e
-    ): void {
-        Log::error(
-            'ProcessValidatedRowsJob: processing failed',
-            [
-                'upload_id' => $upload->id,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]
-        );
+    private function normalizeForLookup(string $value): string
+    {
 
-        $upload->update([
-            'status' => CatalogUploadStatus::Failed,
-            'failure_reason' => Str::limit(
-                'Row processing failed: ' . $e->getMessage(),
-                5000
-            ),
-            'processing_completed_at' => now(),
-        ]);
+        return strtolower(trim($value));
+    }
+
+    private function normalizeScalar(mixed $value): mixed
+    {
+
+        return is_string($value) ? $this->sanitizeValue($value) : $value;
+    }
+
+    private function parseMultiValueKeyValue(string $rawValue, string $separator): array
+    {
+
+        if (trim($rawValue) === '') {
+
+            return [];
+        }
+
+        $result = [];
+
+        foreach (explode($separator, $rawValue) as $part) {
+
+            $trimmed = trim($part);
+
+            if ($trimmed === '') {
+
+                continue;
+            }
+
+            $pos = strpos($trimmed, '=');
+
+            if ($pos === false) {
+
+                continue;
+            }
+
+            $key = $this->sanitizeValue(trim(substr($trimmed, 0, $pos)));
+
+            $value = $this->sanitizeValue(trim(substr($trimmed, $pos + 1)));
+
+            if ($key === '' || $value === '') {
+
+                continue;
+            }
+
+            $result[] = ['key' => $key, 'value' => $value];
+        }
+
+        return $result;
+    }
+
+    private function splitMultiValue(string $rawValue, string $separator): array
+    {
+
+        if (trim($rawValue) === '') {
+
+            return [];
+        }
+
+        return array_values(array_filter(
+
+            array_map(fn ($v) => $this->sanitizeValue($v), explode($separator, $rawValue)),
+
+            fn ($v) => $v !== ''
+
+        ));
+    }
+
+    private function sanitizeValue(mixed $value): mixed
+    {
+
+        return is_string($value) ? trim($value) : $value;
+    }
+
+    private function getVendorSourceSeparator(?object $mapping): string
+    {
+
+        if ($mapping && ! empty($mapping->source_separator)) {
+
+            return $mapping->source_separator;
+        }
+
+        return ',';
     }
 }

@@ -668,7 +668,7 @@
                         Start over
                     </button>
 
-                    <button wire:click="confirmMapping" wire:loading.attr="disabled"
+                    <button wire:click="confirmMapping" wire:loading.attr="disabled" wire:target="confirmMapping"
                         class="inline-flex items-center justify-center gap-2 px-6 py-2.5 text-sm font-semibold text-white rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition bg-slate-900 hover:bg-slate-800">
                         <span wire:loading.remove wire:target="confirmMapping">
                             Process file &rarr;

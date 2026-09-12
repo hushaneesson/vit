@@ -81,6 +81,35 @@ class VendorCatalogUpload extends Component
 
     protected $listeners = ['pollUploadStatus' => 'refreshStatus'];
 
+    public ?int $uploadId = null;
+
+    public function mount(?int $uploadId = null): void
+    {
+        $this->uploadId = $uploadId;
+
+        if ($this->uploadId) {
+            $upload = CatalogUpload::find($this->uploadId);
+
+            if ($upload && $upload->status === CatalogUploadStatus::Completed) {
+                $this->catalogUploadId = $upload->id;
+                $this->catalogId = $upload->catalog_id;
+                $this->step = 'summary';
+                $this->validationReportEmailed = !is_null($upload->validation_report_emailed_at);
+                $this->validationReportFailed = false;
+                $this->progress = [
+                    'status' => $upload->status,
+                    'total_rows' => $upload->total_rows,
+                    'success_rows' => $upload->success_rows,
+                    'created_rows' => $upload->created_rows ?? 0,
+                    'updated_rows' => $upload->updated_rows ?? 0,
+                    'unchanged_rows' => $upload->unchanged_rows ?? 0,
+                    'invalid_rows' => $upload->invalid_rows ?? 0,
+                    'failure_reason' => $upload->failure_reason,
+                ];
+            }
+        }
+    }
+
     public function rules(): array
     {
         return [

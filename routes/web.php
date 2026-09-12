@@ -56,5 +56,7 @@ Route::prefix('vendor')->name('vendor.')->group(function () {
             ->name('catalog-images.show');
 
         Route::get('catalog/{catalogId}/upload', [CatalogItemController::class, 'renderUpload'])->name('catalog-upload');
+
+        Route::get('catalog/{catalogId}/upload/{catalogUpload}/summary', [CatalogItemController::class, 'renderUploadSummary'])->name('catalog-upload.summary');
     });
 });

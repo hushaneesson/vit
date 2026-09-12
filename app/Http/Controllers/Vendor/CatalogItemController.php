@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Vendor;
 use App\Http\Controllers\Controller;
 use App\Models\Catalog;
 use App\Models\CatalogItem;
+use App\Models\CatalogUpload;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -50,6 +51,15 @@ class CatalogItemController extends Controller
     {
         return view('vendor.catalog-items.upload', [
             'catalogId' => $catalogId,
+            'uploadId' => null,
+        ]);
+    }
+
+    public function renderUploadSummary(int $catalogId, CatalogUpload $catalogUpload)
+    {
+        return view('vendor.catalog-items.upload', [
+            'catalogId' => $catalogId,
+            'uploadId' => $catalogUpload->id,
         ]);
     }
 
