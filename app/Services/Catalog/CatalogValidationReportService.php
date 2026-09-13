@@ -5,9 +5,9 @@ namespace App\Services\Catalog;
 use App\Models\CatalogUpload;
 use App\Models\CatalogUploadRow;
 use App\Notifications\CatalogUploadValidationReportNotification;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
-use Illuminate\Support\Str;
 use Throwable;
 
 /**
@@ -47,7 +47,7 @@ class CatalogValidationReportService
                 ->get([
                     'row_number',
                     'errors',
-                ]);
+                ])->values();
 
             $warningRows = $upload->rows()
                 ->where('status', 'valid')
@@ -56,7 +56,7 @@ class CatalogValidationReportService
                 ->get([
                     'row_number',
                     'errors',
-                ]);
+                ])->values();
 
             $warningRows = $warningRows->filter(function (CatalogUploadRow $row) {
                 $payload = is_string($row->errors)
@@ -65,7 +65,24 @@ class CatalogValidationReportService
 
                 return is_array($payload)
                     && !empty($payload['warnings'] ?? []);
-            });
+            })->values();
+
+            $failedRows = $failedRows
+                ->map(fn (CatalogUploadRow $row): array => [
+                    'row_number' => $row->row_number,
+                    'errors' => is_string($row->errors) ? json_decode($row->errors, true) : $row->errors,
+                ])
+                ->all();
+
+            $warningRows = $warningRows instanceof Collection ? $warningRows->values() : collect($warningRows)->values();
+            $warningCount = $warningRows->count();
+
+            $warningRows = $warningRows
+                ->map(fn (CatalogUploadRow $row): array => [
+                    'row_number' => $row->row_number,
+                    'errors' => is_string($row->errors) ? json_decode($row->errors, true) : $row->errors,
+                ])
+                ->all();
 
             Notification::route('mail', $client->email)
                 ->notify(
@@ -73,9 +90,9 @@ class CatalogValidationReportService
                         catalogName: 'Upload #' . $upload->id,
                         processedAt: $upload->processing_completed_at,
                         totalErrors: $upload->invalid_rows,
-                        totalWarnings: $warningRows->count(),
-                        errors: $failedRows,
-                        warnings: $warningRows,
+                        totalWarnings: $warningCount,
+                        errors: collect($failedRows),
+                        warnings: collect($warningRows),
                     )
                 );
 

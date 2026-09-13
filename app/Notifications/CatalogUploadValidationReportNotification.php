@@ -29,8 +29,8 @@ class CatalogUploadValidationReportNotification extends Notification implements 
      * @param  string|null  $processedAt  ISO date/time when processing completed
      * @param  int  $totalErrors         Total number of error rows
      * @param  int  $totalWarnings       Total number of warning rows (reserved for future use)
-     * @param  Collection<int, object>  $errors  Failed rows with row_number and errors properties
-     * @param  Collection<int, object>  $warnings  Warning rows (reserved for future use)
+     * @param  Collection<int, array|object>  $errors  Failed rows with row_number and errors entries
+     * @param  Collection<int, array|object>  $warnings  Warning rows (reserved for future use)
      */
     public function __construct(
         protected ?string $catalogName,
@@ -70,8 +70,9 @@ class CatalogUploadValidationReportNotification extends Notification implements 
             $mail->line('');
 
             foreach ($this->errors as $row) {
-                $rowNumber = $row->row_number ?? '?';
-                $messages = $this->renderMessagesFromPayload($row->errors, 'errors');
+                $rowNumber = is_array($row) ? ($row['row_number'] ?? '?') : ($row->row_number ?? '?');
+                $payload = is_array($row) ? ($row['errors'] ?? null) : ($row->errors ?? null);
+                $messages = $this->renderMessagesFromPayload($payload, 'errors');
                 $mail->line("- **Row {$rowNumber}:** {$messages}");
             }
 
@@ -84,8 +85,9 @@ class CatalogUploadValidationReportNotification extends Notification implements 
             $mail->line('');
 
             foreach ($this->warnings as $row) {
-                $rowNumber = $row->row_number ?? '?';
-                $messages = $this->renderMessagesFromPayload($row->errors, 'warnings');
+                $rowNumber = is_array($row) ? ($row['row_number'] ?? '?') : ($row->row_number ?? '?');
+                $payload = is_array($row) ? ($row['errors'] ?? null) : ($row->errors ?? null);
+                $messages = $this->renderMessagesFromPayload($payload, 'warnings');
                 $mail->line("- **Row {$rowNumber}:** {$messages}");
             }
 
