@@ -57,8 +57,6 @@ class UploadCatalogSubmissionToVit implements ShouldQueue
                     'vit_api_response' => $response->json() ?? ['raw' => $response->body()],
                 ]);
 
-                Log::info('VIT upload completed for catalog submission ' . $submission->id);
-
                 $this->notifySuccess($submission);
 
                 return;

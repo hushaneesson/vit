@@ -58,14 +58,6 @@ class CatalogItemProcessor
     ): array {
         $data = $this->attributeBuilder->prepareRowData($row);
 
-        Log::info('CatalogItemProcessor: processing row', [
-            'upload_id' => $upload->id,
-            'row_number' => $row->row_number,
-            'row_status' => $row->status,
-            'row_errors' => $row->errors,
-            'dealer_sku' => $data['dealer_sku'] ?? null,
-        ]);
-
         $attrs = $this->attributeBuilder->buildAttributes($data, $vendor);
 
         // Associate every item produced by this upload with the catalog the

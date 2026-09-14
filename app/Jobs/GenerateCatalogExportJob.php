@@ -86,7 +86,7 @@ class GenerateCatalogExportJob implements ShouldQueue
             ]);
 
             /*
-             * Ready for Review notification is sent ONLY here — after the
+             * Ready for Review notification is sent ONLY after the
              * Excel has been generated, stored, and the submission marked
              * ready_for_review. A failed export rethrows before this line,
              * so the notification can never be sent for a failed export.

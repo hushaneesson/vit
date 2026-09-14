@@ -516,21 +516,6 @@ class ProcessValidatedRowsJob implements ShouldQueue
             $status = 'invalid';
         }
 
-        if ($status === 'invalid') {
-
-            Log::info('ProcessValidatedRowsJob: validation failed for row', [
-
-                'upload_id' => $upload->id,
-
-                'row_number' => $sourceRowNumber,
-
-                'blocking_errors' => $blockingErrors,
-
-                'warnings' => $warnings,
-
-            ]);
-        }
-
         return ['status' => $status, 'errors' => $blockingErrors, 'warnings' => $warnings];
     }
 

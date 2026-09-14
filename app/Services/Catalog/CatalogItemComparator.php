@@ -197,11 +197,6 @@ class CatalogItemComparator
             return false;
         }
 
-        Log::info('Catalog import: detected changes for SKU', [
-            'sku' => $sku,
-            'changes' => $detectedChanges,
-        ]);
-
         return true;
     }
 }

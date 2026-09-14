@@ -61,13 +61,6 @@ class ProcessCatalogUploadJob implements ShouldQueue
 
             $dispatched = $this->dispatchChunks($upload, $context);
 
-            Log::info('ProcessCatalogUploadJob: finished dispatching row chunks', [
-
-                'upload_id' => $upload->id,
-
-                'jobs_dispatched' => $dispatched,
-
-            ]);
         } catch (Throwable $e) {
 
             $this->handleFailure($upload, $e);
@@ -76,14 +69,6 @@ class ProcessCatalogUploadJob implements ShouldQueue
         } finally {
 
             $this->cleanupTemporaryFile($temporaryPath);
-
-            Log::info('ProcessCatalogUploadJob process completed', [
-
-                'upload_id' => $upload->id,
-
-                'temporary_path' => $temporaryPath,
-
-            ]);
         }
     }
 
