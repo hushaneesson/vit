@@ -310,8 +310,7 @@ class CatalogExportService
 
         return "inbound/{$folderName}/"
             . "{$fileStem}-"
-            . now()->format('Ymd-His')
-            . '-' . Str::lower(Str::random(8))
+            . now()->format('Y-m-d_H-i-s')
             . '.xlsx';
     }
 
@@ -509,6 +508,20 @@ class CatalogExportService
             } else {
                 $formattedAppend =
                     (string) $appendedValue;
+            }
+
+                        /*
+             * Avoid duplicating the quantity/unit text if the target field
+             * already contains it (e.g. a description that already ends with
+             * "10 Cases/CS"). A simple substring match on the formatted
+             * append string is safe here because $formattedAppend is a
+             * fully-formed, structured value rather than a bare keyword.
+             */
+            if (
+                $targetValue !== ''
+                && mb_strpos($targetValue, $formattedAppend) !== false
+            ) {
+                continue;
             }
 
             $values[$targetKey] = $targetValue !== ''

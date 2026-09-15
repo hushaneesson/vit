@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Enums\CatalogUploadStatus;
 use App\Models\CatalogUpload;
 use App\Models\CatalogUploadRow;
+use App\Notifications\CatalogImportFailedNotification;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -72,6 +73,71 @@ class ProcessCatalogUploadJob implements ShouldQueue
         }
     }
 
+    /**
+     * Queue failure lifecycle: runs when the parent job exhausts its attempts
+     * (tries=1, so on the first exception — including exceptions thrown before
+     * the handle() try block, e.g. loadUpload/markUploadAsProcessing, timeouts,
+     * or worker kills where the inline catch never runs).
+     *
+     * Only the parent marks the whole upload Failed. Idempotent and never
+     * overwrites a Completed upload. No validation-report email is sent here.
+     */
+    public function failed(Throwable $exception): void
+    {
+        $upload = CatalogUpload::find($this->catalogUploadId);
+
+        if (! $upload) {
+            return;
+        }
+
+        // Never overwrite a Completed upload (e.g. late failure callback).
+        if ($upload->status === CatalogUploadStatus::Completed) {
+            return;
+        }
+
+        // Already handled by the inline catch in handle().
+        if ($upload->status === CatalogUploadStatus::Failed) {
+            return;
+        }
+
+        $failureReason = Str::limit($exception->getMessage(), 5000);
+
+        $upload->update([
+            'status' => CatalogUploadStatus::Failed,
+            'failure_reason' => $failureReason,
+            'processing_completed_at' => now(),
+        ]);
+
+        Log::error('ProcessCatalogUploadJob: processing failed', [
+            'upload_id' => $upload->id,
+            'error' => $exception->getMessage(),
+        ]);
+
+        $this->sendFailureNotification($upload, $failureReason);
+    }
+
+    private function sendFailureNotification(CatalogUpload $upload, string $failureReason): void
+    {
+        try {
+            $client = $upload->client;
+
+            if (! $client || ! $client->email) {
+                return;
+            }
+
+            $client->notify(new CatalogImportFailedNotification(
+                catalogId: $upload->catalog_id,
+                catalogUploadId: $upload->id,
+                failureReason: Str::limit($failureReason, 500),
+            ));
+        } catch (Throwable $e) {
+            Log::warning(
+                'Failed to send catalog import failure email for upload '
+                .$upload->id.': '.$e->getMessage()
+            );
+        }
+    }
+
     private function loadUpload(): CatalogUpload
     {
 
@@ -128,11 +194,14 @@ class ProcessCatalogUploadJob implements ShouldQueue
     private function dispatchChunks(CatalogUpload $upload, array $context): int
     {
 
+        // child jobs are dispatched only after all rows have been staged and total_rows + ProcessingItems are persisted.
+        // This invariant ensures that the parent job can be retried without risk of double-processing any rows.
+
         $filePath = $context['localPath'];
 
         $fileType = $upload->file_type;
 
-        $dispatched = 0;
+        $chunkRanges = [];
 
         $stagedTotal = 0;
 
@@ -179,19 +248,27 @@ class ProcessCatalogUploadJob implements ShouldQueue
 
                     if (count($rows) >= self::READ_CHUNK_SIZE) {
 
-                        $stagedTotal += $this->stageAndDispatch($upload, $rows);
+                        [$stagedCount, $range] = $this->stageRows($upload, $rows);
+
+                        $stagedTotal += $stagedCount;
+
+                        if ($range !== null) {
+                            $chunkRanges[] = $range;
+                        }
 
                         $rows = [];
-
-                        $dispatched++;
                     }
                 }
 
                 if (! empty($rows)) {
 
-                    $stagedTotal += $this->stageAndDispatch($upload, $rows);
+                    [$stagedCount, $range] = $this->stageRows($upload, $rows);
 
-                    $dispatched++;
+                    $stagedTotal += $stagedCount;
+
+                    if ($range !== null) {
+                        $chunkRanges[] = $range;
+                    }
                 }
             } finally {
 
@@ -241,11 +318,15 @@ class ProcessCatalogUploadJob implements ShouldQueue
 
                         if (count($rows) >= self::READ_CHUNK_SIZE) {
 
-                            $stagedTotal += $this->stageAndDispatch($upload, $rows);
+                            [$stagedCount, $range] = $this->stageRows($upload, $rows);
+
+                            $stagedTotal += $stagedCount;
+
+                            if ($range !== null) {
+                                $chunkRanges[] = $range;
+                            }
 
                             $rows = [];
-
-                            $dispatched++;
                         }
                     }
 
@@ -254,9 +335,13 @@ class ProcessCatalogUploadJob implements ShouldQueue
 
                 if (! empty($rows)) {
 
-                    $stagedTotal += $this->stageAndDispatch($upload, $rows);
+                    [$stagedCount, $range] = $this->stageRows($upload, $rows);
 
-                    $dispatched++;
+                    $stagedTotal += $stagedCount;
+
+                    if ($range !== null) {
+                        $chunkRanges[] = $range;
+                    }
                 }
             } finally {
 
@@ -268,13 +353,14 @@ class ProcessCatalogUploadJob implements ShouldQueue
             }
         }
 
-        // Set the staged-row count so child jobs can determine when processing is complete.
-
         CatalogUpload::whereKey($upload->id)
 
-            ->update(['total_rows' => $stagedTotal]);
+            ->update([
+                'total_rows' => $stagedTotal,
+                'status' => CatalogUploadStatus::ProcessingItems,
+            ]);
 
-        if ($dispatched === 0) {
+        if ($stagedTotal === 0) {
 
             // Complete header-only or empty uploads without waiting for child jobs.
 
@@ -291,12 +377,40 @@ class ProcessCatalogUploadJob implements ShouldQueue
                 'processing_completed_at' => now(),
 
             ]);
+
+            return 0;
+        }
+
+        $dispatched = 0;
+
+        foreach ($chunkRanges as [$firstRowId, $lastRowId]) {
+
+            ProcessValidatedRowsJob::dispatch(
+
+                $upload->id,
+
+                $firstRowId,
+
+                $lastRowId,
+
+                $this->isVitFileImport
+
+            )->onQueue('imports');
+
+            $dispatched++;
         }
 
         return $dispatched;
     }
 
-    private function stageAndDispatch(CatalogUpload $upload, array $rows): int
+    /**
+     * Persist one 500-row staging chunk and return [rowCount, [firstId, lastId]].
+     * Dispatch of the corresponding child job happens later, only after ALL
+     * chunks are staged and total_rows + ProcessingItems are persisted.
+     *
+     * @return array{0: int, 1: array{0: int, 1: int}|null}
+     */
+    private function stageRows(CatalogUpload $upload, array $rows): array
     {
 
         $firstRowId = null;
@@ -339,19 +453,11 @@ class ProcessCatalogUploadJob implements ShouldQueue
             throw $e;
         }
 
-        ProcessValidatedRowsJob::dispatch(
+        if ($firstRowId === null || $lastRowId === null) {
+            return [0, null];
+        }
 
-            $upload->id,
-
-            $firstRowId,
-
-            $lastRowId,
-
-            $this->isVitFileImport
-
-        )->onQueue('imports');
-
-        return count($rows);
+        return [count($rows), [$firstRowId, $lastRowId]];
     }
 
     private function resolveLocalPath(string $disk, string $filePath): array
@@ -463,15 +569,24 @@ class ProcessCatalogUploadJob implements ShouldQueue
 
         ]);
 
+        $failureReason = Str::limit($e->getMessage(), 5000);
+
         $upload->update([
 
             'status' => CatalogUploadStatus::Failed,
 
-            'failure_reason' => Str::limit($e->getMessage(), 5000),
+            'failure_reason' => $failureReason,
 
             'processing_completed_at' => now(),
 
         ]);
+
+        // Parent-staging failure email. Intentionally separate from the
+        // >10-row validation report: a staging failure never reaches the
+        // completion path, so no validation report or completion
+        // notification is sent. failed() skips re-sending because the
+        // status is already Failed by then.
+        $this->sendFailureNotification($upload, $failureReason);
     }
 
     private function cleanupTemporaryFile(?string $temporaryPath): void

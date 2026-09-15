@@ -41,6 +41,7 @@ return new class extends Migration
             $table->unsignedInteger('success_rows')->default(0);
             $table->unsignedInteger('created_rows')->default(0);
             $table->unsignedInteger('invalid_rows')->default(0);
+            $table->unsignedInteger('failed_rows')->default(0);
             $table->unsignedInteger('updated_rows')->default(0);
             $table->unsignedInteger('unchanged_rows')->default(0);
 

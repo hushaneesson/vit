@@ -28,7 +28,7 @@ return new class extends Migration
             $table->json('data'); // { "dealer_sku": "ABC-123", "name": "...", ... } keyed by field_key
             $table->json('raw_data')->nullable(); // original unmapped row values, kept for debugging/support
 
-            $table->enum('status', ['valid', 'invalid'])->default('valid');
+            $table->enum('status', ['valid', 'invalid' , 'failed'])->default('valid');
             $table->json('errors')->nullable(); // [{ "field_key": "list_price", "message": "..." }]
 
             $table->timestamps();

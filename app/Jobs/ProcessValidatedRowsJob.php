@@ -100,6 +100,8 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
             'invalid' => 0,
 
+            'failed' => 0,
+
         ];
 
         foreach ($stagedRows as $stagedRow) {
@@ -129,6 +131,8 @@ class ProcessValidatedRowsJob implements ShouldQueue
             $counts['success'] += $rowCounts['success'];
 
             $counts['invalid'] += $rowCounts['invalid'];
+
+            $counts['failed'] += $rowCounts['failed'] ?? 0;
         }
 
         $this->finalizeChunk($upload, $counts);
@@ -205,6 +209,43 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
     ): array {
 
+        try {
+            return $this->processRowInner(
+                $upload,
+                $itemProcessor,
+                $validator,
+                $stagedRow,
+                $rowCells
+            );
+        } catch (Throwable $e) {
+
+            $this->markRowFailed($stagedRow, $e);
+
+            return [
+                'created' => 0,
+                'updated' => 0,
+                'unchanged' => 0,
+                'success' => 0,
+                'invalid' => 0,
+                'failed' => 1,
+            ];
+        }
+    }
+
+    private function processRowInner(
+
+        CatalogUpload $upload,
+
+        CatalogItemProcessor $itemProcessor,
+
+        CatalogRowValidator $validator,
+
+        CatalogUploadRow $stagedRow,
+
+        array $rowCells
+
+    ): array {
+
         $sourceRowNumber = $stagedRow->row_number;
 
         $mappedData = $this->mapRow(
@@ -265,6 +306,8 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
                 'invalid' => 1,
 
+                'failed' => 0,
+
             ];
         }
 
@@ -290,6 +333,25 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
         );
 
+        if ($result['processing_failed'] ?? false) {
+
+            return [
+
+                'created' => 0,
+
+                'updated' => 0,
+
+                'unchanged' => 0,
+
+                'success' => 0,
+
+                'invalid' => 0,
+
+                'failed' => 1,
+
+            ];
+        }
+
         // A valid row can still be rejected when its SKU belongs to another catalog.
         // Treat that processor-level rejection as an invalid row.
 
@@ -307,6 +369,8 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
                 'invalid' => 1,
 
+                'failed' => 0,
+
             ];
         }
 
@@ -321,6 +385,8 @@ class ProcessValidatedRowsJob implements ShouldQueue
             'success' => 1,
 
             'invalid' => 0,
+
+            'failed' => 0,
 
         ];
     }
@@ -574,16 +640,44 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
             ]);
 
+            // The item transaction rolled back (or failed before any mutation),
+            // so no item change persists — but see the ambiguity note in
+            // markRowFailed(): an exception thrown outside the processor's own
+            // transaction boundary is still possible. Record the row as failed
+            // so it reaches a terminal state either way.
+            $this->markRowFailed($catalogUploadRow, $e);
+
             return [
-
                 'created' => 0,
-
                 'updated' => 0,
-
                 'unchanged' => 0,
-
+                'processing_failed' => true,
             ];
         }
+    }
+
+    /**
+     * Record a system processing failure for a row. Uses a namespaced
+     * 'processing' section inside the existing errors JSON column so failed
+     * rows stay distinguishable from vendor validation errors and never
+     * match the validation report's errors/warnings queries. Also marks data
+     * non-empty so the row is terminally distinguishable from a staged row
+     * and is skipped by loadStagedRows() on retry.
+     */
+    private function markRowFailed(CatalogUploadRow $stagedRow, Throwable $e): void
+    {
+        $stagedRow->update([
+            'data' => array_merge($stagedRow->data ?? [], ['_processing_failed' => true]),
+            'status' => CatalogUploadRow::STATUS_FAILED,
+            'errors' => [
+                'processing' => [
+                    [
+                        'field_key' => '_system',
+                        'message' => mb_substr($e->getMessage() ?: get_class($e), 0, 2000),
+                    ],
+                ],
+            ],
+        ]);
     }
 
     private function buildValidationErrors(array $validationResult): ?array
@@ -635,6 +729,11 @@ class ProcessValidatedRowsJob implements ShouldQueue
             CatalogUpload::whereKey($upload->id)->increment('unchanged_rows', $counts['unchanged']);
         }
 
+        if (($counts['failed'] ?? 0) > 0) {
+
+            CatalogUpload::whereKey($upload->id)->increment('failed_rows', $counts['failed']);
+        }
+
         $this->completeUploadIfDone($upload);
     }
 
@@ -643,14 +742,14 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
         $row = CatalogUpload::whereKey($upload->id)
 
-            ->first(['id', 'total_rows', 'success_rows', 'invalid_rows', 'status']);
+            ->first(['id', 'total_rows', 'success_rows', 'invalid_rows', 'failed_rows', 'status']);
 
         if ($row === null) {
 
             return;
         }
 
-        $processed = ($row->success_rows ?? 0) + ($row->invalid_rows ?? 0);
+        $processed = ($row->success_rows ?? 0) + ($row->invalid_rows ?? 0) + ($row->failed_rows ?? 0);
 
         if (
 

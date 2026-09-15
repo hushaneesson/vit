@@ -163,7 +163,8 @@
         {{-- STEP 2: Column mapping                                        --}}
         {{-- ============================================================ --}}
         @if ($step === 'mapping')
-            <div class="p-4 bg-white border rounded-xl sm:p-8 border-slate-200">
+            <div class="p-4 bg-white border rounded-xl sm:p-8 border-slate-200"
+                wire:loading.class="pointer-events-none opacity-60" wire:target="confirmMapping">
                 <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                     <div class="min-w-0">
                         <h2 class="text-lg font-semibold sm:text-xl text-slate-900">Match your columns</h2>

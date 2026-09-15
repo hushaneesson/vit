@@ -6,41 +6,50 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
-use Illuminate\Support\Collection;
 
 /**
  * Sent to the vendor client when a catalog upload completes and there are
  * more validation messages than can reasonably be displayed on-screen.
  *
- * The report contains every validation error (and in the future, warnings)
- * grouped and formatted for email delivery. The UI shows a truncated
- * summary and directs the user here for the full details.
+ * The email presents an aggregated summary of the recorded validation
+ * messages (message type + affected row count) and links to the detailed
+ * report screen for the full row-level details.
  *
- * This notification is designed to be extended later with a $warnings
- * collection — the report builder already supports grouping by "Errors"
- * and "Warnings" headings, and will skip any section that is empty.
+ * Errors and warnings are separate sections; each is skipped when empty.
+ * Processing failures are never included here.
  */
 class CatalogUploadValidationReportNotification extends Notification implements ShouldQueue
 {
     use Queueable;
 
     /**
+     * The email presents an aggregated summary of the recorded validation
+     * messages (message type + affected row count). Individual row-level
+     * errors remain stored on CatalogUploadRow and are not included here.
+     *
      * @param  string|null  $catalogName  The name of the uploaded catalog
-     * @param  string|null  $processedAt  ISO date/time when processing completed
-     * @param  int  $totalErrors         Total number of error rows
-     * @param  int  $totalWarnings       Total number of warning rows (reserved for future use)
-     * @param  Collection<int, array|object>  $errors  Failed rows with row_number and errors entries
-     * @param  Collection<int, array|object>  $warnings  Warning rows (reserved for future use)
+     * @param  int  $rowsProcessed  Total rows staged for this upload
+     * @param  int  $successRows  Rows processed successfully
+     * @param  int  $totalErrors  Total number of error rows
+     * @param  int  $totalWarnings  Total number of warning rows
+     * @param  array<int, array{label: string, count: int}>  $errorSummary  Aggregated error messages
+     * @param  array<int, array{label: string, count: int}>  $warningSummary  Aggregated warning messages
+     * @param  int|null  $catalogId  Catalog id used to build the detailed report link
+     * @param  int|null  $catalogUploadId  Upload id used to build the detailed report link
      */
     public function __construct(
         protected ?string $catalogName,
-        protected ?string $processedAt,
+        protected int $rowsProcessed,
+        protected int $successRows,
         protected int $totalErrors,
         protected int $totalWarnings,
-        protected Collection $errors,
-        protected Collection $warnings,
+        protected array $errorSummary,
+        protected array $warningSummary,
+        protected ?int $catalogId = null,
+        protected ?int $catalogUploadId = null,
     ) {
-        $this->onQueue('notifications');}
+        $this->onQueue('notifications');
+    }
 
     public function via(object $notifiable): array
     {
@@ -51,80 +60,57 @@ class CatalogUploadValidationReportNotification extends Notification implements 
     {
         $mail = (new MailMessage)
             ->subject('Catalog Upload Validation Report')
-            ->greeting('Catalog Upload Validation Report');
+            ->greeting('Catalog Upload Validation Report')
+            ->line('Your catalog upload has completed processing, but some rows could not be processed.')
+            ->line('')
+            ->line('**Rows processed:** '.number_format($this->rowsProcessed))
+            ->line('**Successful rows:** '.number_format($this->successRows));
 
-        // Processed date/time
-        $processedAt = $this->processedAt
-            ? \Carbon\Carbon::parse($this->processedAt)->format('Y-m-d H:i:s T')
-            : now()->format('Y-m-d H:i:s T');
-        $mail->line('**Processed at:** ' . $processedAt);
+        if ($this->totalErrors > 0) {
+            $mail->line('**Rows with errors:** '.number_format($this->totalErrors));
 
-        // Summary counts
-        $mail->line('**Total error rows:** ' . $this->totalErrors);
-        $mail->line('**Total warning rows:** ' . $this->totalWarnings);
-        $mail->line('');
+            if (! empty($this->errorSummary)) {
+                $mail->line('')
+                    ->line('**Error summary:**')
+                    ->line('');
 
-        // Error details
-        if ($this->errors->isNotEmpty()) {
-            $mail->line('## Errors');
-            $mail->line('');
-
-            foreach ($this->errors as $row) {
-                $rowNumber = is_array($row) ? ($row['row_number'] ?? '?') : ($row->row_number ?? '?');
-                $payload = is_array($row) ? ($row['errors'] ?? null) : ($row->errors ?? null);
-                $messages = $this->renderMessagesFromPayload($payload, 'errors');
-                $mail->line("- **Row {$rowNumber}:** {$messages}");
+                foreach ($this->errorSummary as $entry) {
+                    $mail->line($this->summaryLine($entry));
+                }
             }
-
-            $mail->line('');
         }
 
-        // Warning details
-        if ($this->warnings->isNotEmpty()) {
-            $mail->line('## Warnings');
-            $mail->line('');
+        if ($this->totalWarnings > 0) {
+            $mail->line('**Warnings:** '.number_format($this->totalWarnings));
 
-            foreach ($this->warnings as $row) {
-                $rowNumber = is_array($row) ? ($row['row_number'] ?? '?') : ($row->row_number ?? '?');
-                $payload = is_array($row) ? ($row['errors'] ?? null) : ($row->errors ?? null);
-                $messages = $this->renderMessagesFromPayload($payload, 'warnings');
-                $mail->line("- **Row {$rowNumber}:** {$messages}");
+            if (! empty($this->warningSummary)) {
+                $mail->line('')
+                    ->line('**Warning summary:**')
+                    ->line('');
+
+                foreach ($this->warningSummary as $entry) {
+                    $mail->line($this->summaryLine($entry));
+                }
             }
-
-            $mail->line('');
         }
 
-        $mail->line('Please review the above issues and re-upload a corrected file.');
-        $mail->salutation('— VIT System');
+        $mail->line('')
+            ->line('Please correct the affected rows and upload the catalog again.');
 
-        return $mail;
+        return $mail->salutation('— VIT System');
     }
 
-    private function renderMessagesFromPayload(mixed $payload, string $section): string
+    /**
+     * Format one aggregated summary entry, e.g.
+     * "• Missing required field \"Item Name\": 1,492 rows".
+     *
+     * @param  array{label?: string, count?: int}  $entry
+     */
+    private function summaryLine(array $entry): string
     {
-        if (is_string($payload)) {
-            $decoded = json_decode($payload, true);
-            if (is_array($decoded) && !empty($decoded[$section] ?? [])) {
-                return collect($decoded[$section])
-                    ->pluck('message')
-                    ->filter()
-                    ->implode('; ');
-            }
+        $label = (string) ($entry['label'] ?? '');
+        $count = (int) ($entry['count'] ?? 0);
 
-            return $payload;
-        }
-
-        if (is_array($payload) && !empty($payload[$section] ?? [])) {
-            return collect($payload[$section])
-                ->pluck('message')
-                ->filter()
-                ->implode('; ');
-        }
-
-        if (is_array($payload)) {
-            return collect($payload)->pluck('message')->filter()->implode('; ');
-        }
-
-        return (string) $payload;
+        return '• '.$label.': '.number_format($count).' '.($count === 1 ? 'row' : 'rows');
     }
 }
