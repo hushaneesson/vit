@@ -11,18 +11,30 @@ use PhpOffice\PhpSpreadsheet\Reader\Xlsx as XlsxReader;
 use PhpOffice\PhpSpreadsheet\Reader\Xls as XlsReader;
 
 /**
- * Detects whether an uploaded workbook is a VIT-generated catalog export
- * (stamped by CatalogExportService) and, if so, builds the automatic column
+ * Detects whether an uploaded file is a VIT-generated catalog export
+ * (produced by CatalogExportService) and, if so, builds the automatic column
  * mappings that let the upload bypass the manual mapper UI.
  *
  * Detection is intentional and conservative:
  *
  *   Valid VIT marker  +  Expected VIT headers  =  eligible for auto-mapping
+ *   (XLSX / XLS only)
  *
- * A workbook is only auto-mapped when BOTH the marker (custom document
- * property) and every expected export header are present. Anything else
- * (missing marker, version mismatch, missing/renamed/duplicated headers) falls
- * back to the normal mapper flow.
+ *   Expected VIT headers                       =  eligible for auto-mapping
+ *   (CSV only)
+ *
+ * An XLSX/XLS workbook is only auto-mapped when BOTH the marker (custom
+ * document property) and every expected export header are present. Anything
+ * else (missing marker, version mismatch, missing/renamed/duplicated headers)
+ * falls back to the normal mapper flow.
+ *
+ * CSV files cannot carry workbook custom properties, so a VIT CSV is
+ * recognized by its export header signature alone: every expected VIT export
+ * header must be present exactly once (case-insensitive, order-independent).
+ * Those headers come from the same VitFieldDefinition::exportableFields()
+ * list that CatalogExportService writes, so the generated CSV matches without
+ * any extra marker or format change. A CSV that does not carry the complete
+ * set of expected headers falls back to the normal mapper flow.
  *
  * Only fields that are both frontend-importable (VitFieldDefinition::
  * frontendVisible) AND part of the VIT export structure (exportableFields)
@@ -44,11 +56,15 @@ class VitExportFileDetector
      */
     public function detect(string $disk, string $path, string $fileType, array $headerRow): ?array
     {
-        if (! in_array($fileType, ['xlsx', 'xls'], true)) {
+        if (! in_array($fileType, ['csv', 'xlsx', 'xls'], true)) {
             return null;
         }
 
-        if (! $this->hasValidVitMarker($disk, $path, $fileType)) {
+        // CSV has no place to store the workbook custom properties that mark a
+        // VIT XLSX/XLS export, so CSV recognition relies on the export header
+        // signature enforced by buildAutoMappings() instead. XLSX/XLS keep the
+        // stricter marker + header requirement.
+        if ($fileType !== 'csv' && ! $this->hasValidVitMarker($disk, $path, $fileType)) {
             return null;
         }
 

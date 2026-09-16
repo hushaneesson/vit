@@ -692,7 +692,7 @@ class CatalogItemForm extends Component
             $value = trim((string) ($classification['value'] ?? ''));
 
             if ($type !== '' && $value !== '') {
-                $classificationsClean[] = "{$type}={$value}";
+                $classificationsClean[] = ['key' => $type, 'value' => $value];
             }
         }
 
