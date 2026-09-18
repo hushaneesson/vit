@@ -659,14 +659,17 @@
                 @endif --}}
 
                 <div class="flex flex-col-reverse gap-3 mt-6 sm:flex-row sm:items-center sm:justify-between">
-                    <button wire:click="startOver" wire:loading.attr="disabled"
+                    <button wire:click="startOver" wire:loading.attr="disabled" wire:target="startOver"
                         class="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"
-                            stroke-width="2">
-                            <path stroke-linecap="round" stroke-linejoin="round"
-                                d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" />
-                        </svg>
-                        Start over
+                        <span class="flex items-center gap-1.5" wire:loading.remove wire:target="startOver">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                                stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" />
+                            </svg>
+                            Start over
+                        </span>
+                        <span wire:loading wire:target="startOver">Starting over&hellip;</span>
                     </button>
 
                     <button wire:click="confirmMapping" wire:loading.attr="disabled" wire:target="confirmMapping"
@@ -695,7 +698,22 @@
                         </path>
                     </svg>
                 </div>
-                <h2 class="mt-4 text-lg font-semibold sm:text-xl text-slate-900">Processing your file&hellip;</h2>
+                @php
+                    $uploadStatusValue = $progress['status'] instanceof \App\Enums\CatalogUploadStatus
+                        ? $progress['status']->value
+                        : $progress['status'];
+                    $processedRows = ($progress['success_rows'] ?? 0) + ($progress['invalid_rows'] ?? 0);
+                    $processPercent = ($progress['total_rows'] ?? 0) > 0
+                        ? min(100, (int) round($processedRows / $progress['total_rows'] * 100))
+                        : 0;
+                @endphp
+                <h2 class="mt-4 text-lg font-semibold sm:text-xl text-slate-900">
+                    @if ($uploadStatusValue === 'queued')
+                        Your file is waiting to be processed&hellip;
+                    @else
+                        Processing your file&hellip;
+                    @endif
+                </h2>
                 <p class="max-w-sm mx-auto mt-1 text-sm text-slate-500">
                     This may take a few minutes for larger files. You can leave this page &mdash; we'll keep working
                     in the background.
@@ -730,8 +748,13 @@
                 </div>
 
                 <div class="w-full h-2 mt-6 overflow-hidden rounded-full bg-slate-100">
-                    <div class="h-full rounded-full bg-slate-900 animate-pulse" style="width: 60%"></div>
+                    <div class="h-full rounded-full transition-all duration-500 {{ $processPercent > 0 ? 'bg-emerald-500' : 'bg-slate-900 animate-pulse' }}"
+                        style="width: {{ max($processPercent, 2) }}%"></div>
                 </div>
+
+                @if (($progress['total_rows'] ?? 0) > 0)
+                    <p class="mt-2 text-xs font-medium text-slate-500">{{ $processPercent }}% processed</p>
+                @endif
 
                 <p class="mt-4 text-xs text-slate-400">
                     We'll show your results automatically when processing is complete.
@@ -859,6 +882,11 @@
                                 </span>
                                 <span class="text-xs text-rose-500">{{ $totalMessages }} row(s)</span>
                             </div>
+                            <p class="px-4 py-2 text-xs text-rose-600 border-b border-rose-100 bg-rose-50/50">
+                                These rows did not pass validation and were skipped &mdash; fix the listed issue and
+                                upload the file again. Rows with a &ldquo;processing error&rdquo; reason indicate a
+                                system problem rather than a problem with your data.
+                            </p>
                             <div class="overflow-x-auto overflow-y-auto max-h-48">
                                 <table class="w-full min-w-[420px] text-sm border-collapse">
                                     <thead class="sticky top-0 bg-slate-50">
@@ -941,6 +969,11 @@
                                 </span>
                                 <span class="text-xs text-rose-500">{{ $totalMessages }} total row(s)</span>
                             </div>
+                            <p class="px-4 py-2 text-xs text-rose-600 border-b border-rose-100 bg-rose-50/50">
+                                These rows did not pass validation and were skipped &mdash; fix the listed issue and
+                                upload the file again. Rows with a &ldquo;processing error&rdquo; reason indicate a
+                                system problem rather than a problem with your data.
+                            </p>
                             <div class="overflow-x-auto overflow-y-auto max-h-48">
                                 <table class="w-full min-w-[420px] text-sm border-collapse">
                                     <thead class="sticky top-0 bg-slate-50">
@@ -978,7 +1011,7 @@
 
                 <div
                     class="flex flex-col-reverse gap-3 mt-6 sm:flex-row sm:flex-wrap sm:items-center sm:justify-center">
-                    <a href="{{ route('vendor.catalog.index') }}"
+                    <a href="{{ $catalogId ? route('vendor.catalog.items', ['catalog' => $catalogId]) : route('vendor.catalog.index') }}"
                         class="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-semibold text-slate-900 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition">
                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"
                             stroke-width="2">
@@ -988,9 +1021,10 @@
                         View my catalog
                     </a>
 
-                    <button wire:click="startOver" wire:loading.attr="disabled"
+                    <button wire:click="startOver" wire:loading.attr="disabled" wire:target="startOver"
                         class="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-slate-900 rounded-lg hover:bg-slate-800 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                        Upload another file
+                        <span wire:loading.remove wire:target="startOver">Upload another file</span>
+                        <span wire:loading wire:target="startOver">Starting over&hellip;</span>
                     </button>
                 </div>
             </div>
@@ -1009,11 +1043,12 @@
                 </div>
                 <h2 class="mt-4 text-lg font-semibold sm:text-xl text-rose-600">Something went wrong</h2>
                 <p class="max-w-sm mx-auto mt-1 text-sm text-slate-600">
-                    Catalog import failed due to an unexpected error. Please review your file and try again.
+                    {{ $progress['failure_reason'] ?? 'Catalog import failed due to an unexpected error. Please review your file and try again.' }}
                 </p>
-                <button wire:click="startOver" wire:loading.attr="disabled"
+                <button wire:click="startOver" wire:loading.attr="disabled" wire:target="startOver"
                     class="inline-flex items-center justify-center w-full gap-2 px-5 py-2.5 mt-6 text-sm font-semibold text-slate-900 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition disabled:opacity-50 disabled:cursor-not-allowed sm:w-auto">
-                    Try again
+                    <span wire:loading.remove wire:target="startOver">Try again</span>
+                    <span wire:loading wire:target="startOver">Starting over&hellip;</span>
                 </button>
             </div>
         @endif
