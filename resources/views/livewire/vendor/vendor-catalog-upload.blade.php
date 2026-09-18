@@ -610,12 +610,6 @@
                                                 @endif
                                             </div>
                                         @endif
-
-                                        @if (isset($this->separatorValidationErrors[$field->field_key]))
-                                            <p class="mt-1 text-xs text-rose-600">
-                                                {{ $this->separatorValidationErrors[$field->field_key] }}
-                                            </p>
-                                        @endif
                                     </td>
 
                                 </tr>
@@ -715,7 +709,7 @@
                     @endif
                 </h2>
                 <p class="max-w-sm mx-auto mt-1 text-sm text-slate-500">
-                    This may take a few minutes for larger files. You can leave this page &mdash; we'll keep working
+                    This may take a few minutes for larger files. You can leave this page; we'll keep working
                     in the background.
                 </p>
 
@@ -882,10 +876,9 @@
                                 </span>
                                 <span class="text-xs text-rose-500">{{ $totalMessages }} row(s)</span>
                             </div>
-                            <p class="px-4 py-2 text-xs text-rose-600 border-b border-rose-100 bg-rose-50/50">
-                                These rows did not pass validation and were skipped &mdash; fix the listed issue and
-                                upload the file again. Rows with a &ldquo;processing error&rdquo; reason indicate a
-                                system problem rather than a problem with your data.
+                            <p class="px-4 py-2 text-xs border-b text-rose-600 border-rose-100 bg-rose-50/50">
+                                These rows did not pass validation and were skipped; fix the listed issue and
+                                upload the file again.
                             </p>
                             <div class="overflow-x-auto overflow-y-auto max-h-48">
                                 <table class="w-full min-w-[420px] text-sm border-collapse">
@@ -969,10 +962,9 @@
                                 </span>
                                 <span class="text-xs text-rose-500">{{ $totalMessages }} total row(s)</span>
                             </div>
-                            <p class="px-4 py-2 text-xs text-rose-600 border-b border-rose-100 bg-rose-50/50">
-                                These rows did not pass validation and were skipped &mdash; fix the listed issue and
-                                upload the file again. Rows with a &ldquo;processing error&rdquo; reason indicate a
-                                system problem rather than a problem with your data.
+                            <p class="px-4 py-2 text-xs border-b text-rose-600 border-rose-100 bg-rose-50/50">
+                                These rows did not pass validation and were skipped; fix the listed issue and
+                                upload the file again.
                             </p>
                             <div class="overflow-x-auto overflow-y-auto max-h-48">
                                 <table class="w-full min-w-[420px] text-sm border-collapse">

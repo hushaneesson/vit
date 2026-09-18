@@ -37,7 +37,7 @@
                         </thead>
                         <tbody class="bg-white divide-y divide-gray-200">
                             @foreach ($catalogs as $catalog)
-                                <tr @click="window.location='{{ route('vendor.catalog.items', $catalog) }}'"
+                                <tr onclick="window.location='{{ route('vendor.catalog.items', $catalog) }}'"
                                     class="text-sm cursor-pointer hover:bg-gray-50">
                                     <td class="px-6 py-4 font-medium text-gray-900">{{ $catalog->name }}</td>
                                     <td class="px-6 py-4 text-gray-500">{{ $catalog->items_count }}</td>

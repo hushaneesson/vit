@@ -3,6 +3,7 @@
 namespace App\Livewire\Vendor;
 
 use App\Enums\CatalogUploadStatus;
+use App\Exceptions\UnsupportedCsvEncodingException;
 use App\Jobs\ProcessCatalogUploadJob;
 use App\Models\CatalogUpload;
 use App\Models\CatalogUploadColumnMapping;
@@ -252,7 +253,18 @@ class VendorCatalogUpload extends Component
             'status' => CatalogUploadStatus::Uploaded,
         ]);
 
-        $inspection = $inspector->inspect(self::DISK, $storedPath, $fileType);
+        try {
+            $inspection = $inspector->inspect(self::DISK, $storedPath, $fileType);
+        } catch (UnsupportedCsvEncodingException $e) {
+            // Encoding could not be safely normalized. Remove the row we just
+            // created so no orphan upload remains, show the vendor-facing
+            // message, and stay on the upload step.
+            $upload->delete();
+
+            $this->addError('file', $e->getMessage());
+
+            return;
+        }
 
         $this->catalogUploadId = $upload->id;
         $this->columns = $inspection['columns'];

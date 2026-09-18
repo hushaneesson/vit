@@ -231,14 +231,10 @@ class CatalogItemAttributeBuilder
 
             'boolean' => is_bool($rawValue)
                 ? $rawValue
-                : (
-                    in_array(
-                        strtolower((string) $rawValue),
-                        ['true', 'false', '1', '0', 'yes', 'no'],
-                        true
-                    )
-                    ? (bool) $rawValue
-                    : false
+                : in_array(
+                    strtolower((string) $rawValue),
+                    ['true', '1', 'yes'],
+                    true
                 ),
 
             default => (string) $rawValue,
