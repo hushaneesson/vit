@@ -6,6 +6,7 @@ use App\Enums\CatalogUploadStatus;
 use App\Models\CatalogItem;
 use App\Models\CatalogUpload;
 use App\Models\CatalogUploadRow;
+use App\Models\ClassificationType;
 use App\Models\CommodityType;
 use App\Models\UnitOfMeasure;
 use App\Services\Catalog\CatalogItemProcessor;
@@ -48,6 +49,29 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
     private array $lookupMaps;
 
+    /**
+     * The map is keyed by the value the database returned, so a lookup only
+     * ever hits when the database value is byte-identical to the SKU being
+     * checked. That keeps the answer correct under any collation: a
+     * byte-equal value always compares equal, while a value that differs
+     * only by case/accent is never treated as a hit and instead falls back
+     * to the legacy per-row query.
+     *
+     * @var array<string, CatalogItem>
+     */
+    private array $existingItemsBySku = [];
+
+    /** @var array<string, true> */
+    private array $requestedSkuKeys = [];
+
+    private bool $preloadProvedAbsentForRequestedSkus = false;
+
+    private bool $existingItemsPreloaded = false;
+
+    private ?ClassificationType $unspscClassificationType = null;
+
+    private bool $unspscTypeResolved = false;
+
     private string $weightUnit;
 
     public function __construct(
@@ -72,7 +96,11 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
         $this->buildContext($upload);
 
+        $this->resolveUnspscClassificationTypeIfMapped();
+
         $stagedRows = $this->loadStagedRows();
+
+        $this->preloadExistingItems($upload, $stagedRows);
 
         $counts = $this->rowCounts([]);
 
@@ -105,8 +133,126 @@ class ProcessValidatedRowsJob implements ShouldQueue
             ->where('id', '>=', $this->firstRowId)
             ->where('id', '<=', $this->lastRowId)
             ->orderBy('id')
+            // A3: only the columns the processing flow uses. The in-PHP
+            // empty($row->data) retry filter below is intentionally unchanged.
+            ->select([
+                'id',
+                'catalog_upload_id',
+                'row_number',
+                'raw_data',
+                'data',
+                'status',
+                'errors',
+            ])
             ->get()
             ->filter(fn (Model $row) => empty($row->data));
+    }
+
+    private function preloadExistingItems(CatalogUpload $upload, $stagedRows): void
+    {
+        $this->existingItemsBySku = [];
+        $this->requestedSkuKeys = [];
+        $this->preloadProvedAbsentForRequestedSkus = false;
+        $this->existingItemsPreloaded = true;
+
+        $skuKeys = [];
+
+        foreach ($stagedRows as $row) {
+            $cells = $row->raw_data ?? [];
+
+            if (! is_array($cells)) {
+                continue;
+            }
+
+            foreach ($cells as $colIndex => $rawValue) {
+                if (($this->columnToFieldKey->get($colIndex) ?? null) !== 'dealer_sku') {
+                    continue;
+                }
+
+                $sku = trim((string) $rawValue);
+
+                if ($sku === '') {
+                    continue;
+                }
+
+                $skuKeys[$sku] = true;
+            }
+        }
+
+        $this->requestedSkuKeys = $skuKeys;
+
+        if ($skuKeys === []) {
+            return;
+        }
+
+        $items = CatalogItem::query()
+            ->select(['id', 'vendor_id', 'dealer_sku', 'catalog_id'])
+            ->where('vendor_id', $upload->vendor_id)
+            ->whereIn('dealer_sku', array_keys($skuKeys))
+            ->get();
+
+        foreach ($items as $item) {
+            // (vendor_id, dealer_sku) is unique, so there is at most one row
+            // per exact key; first-wins mirrors the legacy ->first() pick.
+            $this->existingItemsBySku[$item->dealer_sku] ??= $item;
+        }
+
+        // Zero rows back for a non-empty key set is the only outcome that
+        // proves absence for every requested SKU under any collation.
+        $this->preloadProvedAbsentForRequestedSkus = $items->isEmpty();
+    }
+
+    /**
+     * Byte-exact preload hit, or null when the preload does not contain this
+     * exact SKU (which may mean "does not exist" or "cannot be answered
+     * without querying").
+     */
+    private function preloadedExistingItem(?string $sku): ?CatalogItem
+    {
+        if ($sku === null || $sku === '') {
+            return null;
+        }
+
+        return $this->existingItemsBySku[$sku] ?? null;
+    }
+
+    /**
+     * True when the SKU was part of the preload query and the preload proved
+     * that no catalog item exists for this vendor + dealer_sku. Only used to
+     * skip the processor's otherwise identical lookup; any SKU that was not
+     * requested, or whose batch contained matches, falls back to the legacy
+     * query.
+     */
+    private function skuProvenAbsent(?string $sku): bool
+    {
+        if (! $this->existingItemsPreloaded || $sku === null || $sku === '') {
+            return false;
+        }
+
+        return $this->preloadProvedAbsentForRequestedSkus
+            && isset($this->requestedSkuKeys[$sku]);
+    }
+
+    /**
+     * A2: resolve the UNSPSC ClassificationType once per job execution instead
+     * of once per row. Uploads without a column mapped to unspsc_code cannot
+     * produce UNSPSC data, so they skip the lookup entirely.
+     */
+    private function resolveUnspscClassificationTypeIfMapped(): void
+    {
+        if ($this->unspscTypeResolved) {
+            return;
+        }
+
+        $this->unspscTypeResolved = true;
+
+        if (! $this->columnToFieldKey->contains('unspsc_code')) {
+            return;
+        }
+
+        $this->unspscClassificationType = ClassificationType::query()
+            ->where('key', 'UNSPSC')
+            ->first();
     }
 
     private function buildContext(CatalogUpload $upload): void
@@ -181,7 +327,7 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
         $this->persistProcessedRow($stagedRow, $mappedData, $validationResult);
 
-        $result = $this->processValidRow($upload, $upload->vendor, $itemProcessor, $stagedRow);
+        $result = $this->processValidRow($upload, $upload->vendor, $itemProcessor, $stagedRow, $mappedData);
 
         if ($result['processing_failed'] ?? false) {
             return $this->rowCounts(['failed' => 1]);
@@ -344,11 +490,23 @@ class ProcessValidatedRowsJob implements ShouldQueue
         ]);
     }
 
-    private function processValidRow(CatalogUpload $upload, $vendor, CatalogItemProcessor $itemProcessor, CatalogUploadRow $catalogUploadRow): array
+    private function processValidRow(CatalogUpload $upload, $vendor, CatalogItemProcessor $itemProcessor, CatalogUploadRow $catalogUploadRow, array $mappedData): array
     {
+        $mappedDealerSku = $mappedData['dealer_sku'] ?? null;
+        $skuKey = ($mappedDealerSku === null || $mappedDealerSku === '') ? null : trim((string) $mappedDealerSku);
+
+        $existingItemProvenAbsent = $skuKey !== null && $this->skuProvenAbsent($skuKey);
+
         try {
-            return DB::transaction(function () use ($upload, $vendor, $itemProcessor, $catalogUploadRow) {
-                return $itemProcessor->processRow($upload, $vendor, $catalogUploadRow);
+            return DB::transaction(function () use ($upload, $vendor, $itemProcessor, $catalogUploadRow, $existingItemProvenAbsent) {
+                return $itemProcessor->processRow(
+                    $upload,
+                    $vendor,
+                    $catalogUploadRow,
+                    $this->unspscClassificationType,
+                    $this->unspscTypeResolved,
+                    $existingItemProvenAbsent
+                );
             });
         } catch (Throwable $e) {
             $dealerSku = $catalogUploadRow->data['dealer_sku'] ?? null;
@@ -376,14 +534,6 @@ class ProcessValidatedRowsJob implements ShouldQueue
         }
     }
 
-    /**
-     * Record a system processing failure for a row. Uses a namespaced
-     * 'processing' section inside the existing errors JSON column so failed
-     * rows stay distinguishable from vendor validation errors and never
-     * match the validation report's errors/warnings queries. Also marks data
-     * non-empty so the row is terminally distinguishable from a staged row
-     * and is skipped by loadStagedRows() on retry.
-     */
     private function markRowFailed(CatalogUploadRow $stagedRow, Throwable $e): void
     {
         $stagedRow->update([
@@ -495,8 +645,26 @@ class ProcessValidatedRowsJob implements ShouldQueue
             return false;
         }
 
+        $sku = trim((string) $dealerSku);
+
+        $preloadedItem = $this->preloadedExistingItem($sku);
+
+        if ($preloadedItem !== null) {
+            return (int) $preloadedItem->catalog_id !== (int) $upload->catalog_id;
+        }
+
+        /*
+         * The preload only reports absence when it was asked about this SKU
+         * and returned zero rows for the whole batch. That result is
+         * collation-independent, because a matching row would have been
+         * returned by the same comparison used below.
+         */
+        if ($this->skuProvenAbsent($sku)) {
+            return false;
+        }
+
         return CatalogItem::where('vendor_id', $upload->vendor_id)
-            ->where('dealer_sku', trim((string) $dealerSku))
+            ->where('dealer_sku', $sku)
             ->where('catalog_id', '!=', $upload->catalog_id)
             ->exists();
     }

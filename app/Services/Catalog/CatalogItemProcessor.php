@@ -4,6 +4,7 @@ namespace App\Services\Catalog;
 
 use App\Models\CatalogItem;
 use App\Models\CatalogUpload;
+use App\Models\ClassificationType;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -49,12 +50,24 @@ class CatalogItemProcessor
     /**
      * Process one validated upload row.
      *
+     * The optional context parameters let a batch caller (the chunked import
+     * job) hand down reference data it has already resolved, so the same
+     * lookups are not repeated for every row. Every parameter defaults to the
+     * original per-row behavior, so existing callers are unaffected.
+     *
+     * @param  ?ClassificationType  $unspscType  Pre-resolved UNSPSC classification type.
+     * @param  bool  $unspscTypeResolved  True when $unspscType is authoritative (null = type missing).
+     * @param  bool  $existingItemProvenAbsent  True only when the caller proved that no catalog
+     *                                          item exists for this vendor + dealer_sku.
      * @return array{created: int, updated: int, unchanged: int, cross_catalog_rejected?: bool}
      */
     public function processRow(
         CatalogUpload $upload,
         $vendor,
-        $row
+        $row,
+        ?ClassificationType $unspscType = null,
+        bool $unspscTypeResolved = false,
+        bool $existingItemProvenAbsent = false
     ): array {
         $data = $this->attributeBuilder->prepareRowData($row);
 
@@ -77,7 +90,7 @@ class CatalogItemProcessor
          * have added their values.
          */
         $this->classificationProcessor->addCountryOfOriginClassification($attrs);
-        $this->classificationProcessor->addUnspscClassification($attrs);
+        $this->classificationProcessor->addUnspscClassification($attrs, $unspscType, $unspscTypeResolved);
         $this->classificationProcessor->addMsdsClassification($attrs);
         $this->classificationProcessor->addHierarchyClassification($attrs);
         $this->classificationProcessor->normalizeClassificationsAttribute($attrs);
@@ -90,10 +103,20 @@ class CatalogItemProcessor
         $sellerSku = $attrs['dealer_sku'] ?? null;
 
         if ($sellerSku) {
-            $existing = $this->findExistingItem(
-                $vendor->id,
-                $sellerSku
-            );
+            /*
+             * The chunked import job proves absence in bulk once per chunk, so
+             * its create-path rows skip this lookup. A SKU that was preloaded
+             * and found to exist still resolves here, because the update path
+             * needs a fully hydrated model to compare against. The
+             * unique-violation recovery inside createItem() remains the
+             * authoritative race safety net either way.
+             */
+            $existing = $existingItemProvenAbsent
+                ? null
+                : $this->findExistingItem(
+                    $vendor->id,
+                    $sellerSku
+                );
 
             if ($existing) {
                 /*
