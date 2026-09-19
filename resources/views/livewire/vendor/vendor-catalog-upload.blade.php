@@ -770,10 +770,16 @@
                             <div class="text-lg font-semibold text-amber-700">{{ $progress['updated_rows'] }}</div>
                         </div>
                     @endif
-                    @if ($progress['invalid_rows'] > 0)
+                    @if (($progress['invalid_rows'] ?? 0) > 0)
                         <div class="text-center">
                             <div class="text-xs font-medium uppercase text-rose-600">Errors</div>
                             <div class="text-lg font-semibold text-rose-700">{{ $progress['invalid_rows'] }}</div>
+                        </div>
+                    @endif
+                    @if (($progress['failed_rows'] ?? 0) > 0)
+                        <div class="text-center">
+                            <div class="text-xs font-medium uppercase text-rose-600">System errors</div>
+                            <div class="text-lg font-semibold text-rose-700">{{ $progress['failed_rows'] }}</div>
                         </div>
                     @endif
                 </div>
@@ -896,7 +902,7 @@
                 @endif
 
                 {{-- Failed rows --}}
-                @if ($progress['invalid_rows'] > 0 && $this->failedRows->isNotEmpty())
+                @if (($progress['invalid_rows'] > 0 || ($progress['failed_rows'] ?? 0) > 0) && $this->failedRows->isNotEmpty())
                     @php
                         $totalMessages = $this->failedRows->count();
                         $showFullTable = $totalMessages <= 10;

@@ -71,6 +71,7 @@ class VendorCatalogUpload extends Component
         'updated_rows' => 0,
         'unchanged_rows' => 0,
         'invalid_rows' => 0,
+        'failed_rows' => 0,
         'failure_reason' => null,
     ];
 
@@ -105,6 +106,7 @@ class VendorCatalogUpload extends Component
                     'updated_rows' => $upload->updated_rows ?? 0,
                     'unchanged_rows' => $upload->unchanged_rows ?? 0,
                     'invalid_rows' => $upload->invalid_rows ?? 0,
+                    'failed_rows' => $upload->failed_rows ?? 0,
                     'failure_reason' => $upload->failure_reason,
                 ];
             } elseif ($upload && $upload->status === CatalogUploadStatus::Failed) {
@@ -122,6 +124,7 @@ class VendorCatalogUpload extends Component
                     'updated_rows' => $upload->updated_rows ?? 0,
                     'unchanged_rows' => $upload->unchanged_rows ?? 0,
                     'invalid_rows' => $upload->invalid_rows ?? 0,
+                    'failed_rows' => $upload->failed_rows ?? 0,
                     'failure_reason' => $upload->failure_reason,
                 ];
             }
@@ -732,11 +735,27 @@ class VendorCatalogUpload extends Component
             return collect();
         }
 
+        /*
+         * System-error rows (status = failed, produced when a child chunk
+         * exhausts its retries) must surface in the same failed-rows report
+         * as validation errors. Their payload uses the `_system` key rather
+         * than `errors`, so it is normalized here into the same `errors`
+         * shape the summary blade already renders.
+         */
         return \App\Models\CatalogUploadRow::where('catalog_upload_id', $this->catalogUploadId)
-            ->where('status', 'invalid')
+            ->whereIn('status', ['invalid', 'failed'])
             ->whereNotNull('errors')
             ->orderBy('row_number')
-            ->get(['row_number', 'errors']);
+            ->get(['row_number', 'errors', 'status'])
+            ->map(function ($row) {
+                $payload = is_string($row->errors) ? json_decode($row->errors, true) : $row->errors;
+
+                if (is_array($payload) && isset($payload[\App\Jobs\ProcessValidatedRowsJob::SYSTEM_ERROR_FIELD])) {
+                    $row->errors = ['errors' => $payload[\App\Jobs\ProcessValidatedRowsJob::SYSTEM_ERROR_FIELD]];
+                }
+
+                return $row;
+            });
     }
 
     #[Computed]
@@ -774,6 +793,7 @@ class VendorCatalogUpload extends Component
             'updated_rows' => $upload->updated_rows ?? 0,
             'unchanged_rows' => $upload->unchanged_rows ?? 0,
             'invalid_rows' => $upload->invalid_rows ?? 0,
+            'failed_rows' => $upload->failed_rows ?? 0,
             'failure_reason' => $upload->failure_reason,
         ];
 
@@ -789,7 +809,7 @@ class VendorCatalogUpload extends Component
     public function startOver(): void
     {
         $this->reset(['file', 'catalogUploadId', 'columns', 'sampleRows', 'mapping', 'suggestedIndexes', 'suggestionsFinalized', 'currentFileSignature', 'rangeStarts', 'rangeEnds', 'separators', 'weightUnit']);
-        $this->progress = ['status' => null, 'total_rows' => 0, 'success_rows' => 0, 'created_rows' => 0, 'updated_rows' => 0, 'unchanged_rows' => 0, 'invalid_rows' => 0, 'failure_reason' => null];
+        $this->progress = ['status' => null, 'total_rows' => 0, 'success_rows' => 0, 'created_rows' => 0, 'updated_rows' => 0, 'unchanged_rows' => 0, 'invalid_rows' => 0, 'failed_rows' => 0, 'failure_reason' => null];
         $this->step = 'upload';
     }
 

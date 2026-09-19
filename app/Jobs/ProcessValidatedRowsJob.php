@@ -23,13 +23,26 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Throwable;
 
 class ProcessValidatedRowsJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries = 1;
+    /**
+     * Retry a chunk that was interrupted (timeout, worker death, transient
+     * infrastructure fault) a bounded number of times before escalating.
+     * 3 attempts mirrors the parent ProcessCatalogUploadJob retry policy.
+     */
+    public int $tries = 3;
+
+    /**
+     * System-error marker used by markRowFailed() / recordSystemFailure() so
+     * the validation-report builder can classify a row as a processing failure
+     * distinct from a vendor validation error.
+     */
+    public const SYSTEM_ERROR_FIELD = '_system';
 
     private int $catalogUploadId;
 
@@ -115,6 +128,107 @@ class ProcessValidatedRowsJob implements ShouldQueue
         }
 
         $this->finalizeChunk($upload, $counts);
+    }
+
+    /**
+     * Retry boundary. Laravel invokes this after the final attempt is
+     * exhausted (including timeouts and worker kills that never enter the
+     * handle() try/catch). It guarantees the chunk's rows never stay at
+     * status='valid' and the upload always reaches a terminal state.
+     *
+     * Per the design: the parent ProcessCatalogUploadJob owns upload-level
+     * Failed; this child only records system errors on its stranded rows and
+     * then asks the normal completion check whether the upload as a whole is
+     * done. Later chunks are untouched.
+     */
+    public function failed(Throwable $exception): void
+    {
+        try {
+            $upload = CatalogUpload::find($this->catalogUploadId);
+
+            if ($upload === null) {
+                return;
+            }
+
+            $this->recordSystemFailure($upload, $exception);
+        } catch (Throwable $e) {
+            Log::warning('ProcessValidatedRowsJob: failed() bookkeeping error', [
+                'upload_id' => $this->catalogUploadId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Mark every row in this chunk's range that is still 'valid' (i.e. not yet
+     * processed) as a system processing error, so completeUploadIfDone() can
+     * count it toward completion. Already-invalid / already-failed rows are
+     * left untouched (idempotent for retries).
+     */
+    private function recordSystemFailure(CatalogUpload $upload, Throwable $exception): void
+    {
+        $failureMessage = 'System error while processing this row. The system was unable to complete processing after multiple attempts.';
+
+        $chunkRows = DB::table('catalog_upload_rows')
+            ->where('catalog_upload_id', $upload->id)
+            ->where('id', '>=', $this->firstRowId)
+            ->where('id', '<=', $this->lastRowId);
+
+        $markedCount = $chunkRows
+            ->where('status', CatalogUploadRow::STATUS_VALID)
+            ->update([
+                'status' => CatalogUploadRow::STATUS_FAILED,
+                'errors' => json_encode([
+                    self::SYSTEM_ERROR_FIELD => [
+                        [
+                            'field_key' => '_system',
+                            'message' => $failureMessage,
+                        ],
+                    ],
+                ]),
+                'data' => json_encode(['_processing_failed' => true]),
+            ]);
+
+        $strayCount = DB::table('catalog_upload_rows')
+            ->where('catalog_upload_id', $upload->id)
+            ->where('id', '>=', $this->firstRowId)
+            ->where('id', '<=', $this->lastRowId)
+            ->whereNull('data')
+            ->count();
+
+        if ($strayCount > 0) {
+            DB::table('catalog_upload_rows')
+                ->where('catalog_upload_id', $upload->id)
+                ->where('id', '>=', $this->firstRowId)
+                ->where('id', '<=', $this->lastRowId)
+                ->whereNull('data')
+                ->update([
+                    'status' => CatalogUploadRow::STATUS_FAILED,
+                    'errors' => json_encode([
+                        self::SYSTEM_ERROR_FIELD => [
+                            [
+                                'field_key' => '_system',
+                                'message' => $failureMessage,
+                            ],
+                        ],
+                    ]),
+                    'data' => json_encode(['_processing_failed' => true]),
+                ]);
+        }
+
+        /*
+         * failed_rows must advance by the number of rows this dead chunk
+         * actually converted to system errors (not a constant 1), otherwise
+         * completeUploadIfDone() sees processed < total_rows forever and the
+         * upload stays in Processing indefinitely.
+         */
+        $systemErrorCount = $markedCount + $strayCount;
+
+        if ($systemErrorCount > 0) {
+            CatalogUpload::whereKey($upload->id)->increment('failed_rows', $systemErrorCount);
+        }
+
+        $this->completeUploadIfDone($upload);
     }
 
     private function loadUpload(): CatalogUpload

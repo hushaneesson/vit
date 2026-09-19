@@ -19,8 +19,9 @@ use Throwable;
  * Only the presentation is aggregated. Every individual row-level error stays
  * stored on CatalogUploadRow; the email summarises them by message type and
  * affected row count instead of listing each row. Processing failures
- * (CatalogUploadRow::STATUS_FAILED) are system errors and are deliberately
- * excluded from this vendor validation report.
+ * (CatalogUploadRow::STATUS_FAILED, produced when a child chunk exhausts its
+ * retries) are included in the error summary under their user-safe system
+ * message so vendors are told the rows were skipped by a system problem.
  */
 class CatalogValidationReportService
 {
@@ -33,6 +34,7 @@ class CatalogValidationReportService
     {
         if (
             $upload->invalid_rows <= 10
+            && (int) ($upload->failed_rows ?? 0) === 0
             || $upload->validation_report_emailed_at
         ) {
             return true;
@@ -96,7 +98,11 @@ class CatalogValidationReportService
     private function buildSummaries(CatalogUpload $upload): array
     {
         $rows = $upload->rows()
-            ->whereIn('status', [CatalogUploadRow::STATUS_INVALID, CatalogUploadRow::STATUS_VALID])
+            ->whereIn('status', [
+                CatalogUploadRow::STATUS_INVALID,
+                CatalogUploadRow::STATUS_VALID,
+                CatalogUploadRow::STATUS_FAILED,
+            ])
             ->whereNotNull('errors')
             ->orderBy('row_number')
             ->get([
@@ -119,6 +125,24 @@ class CatalogValidationReportService
 
             if ($row->status === CatalogUploadRow::STATUS_INVALID) {
                 foreach ($payload['errors'] ?? [] as $entry) {
+                    $label = $this->friendlyLabel((string) ($entry['message'] ?? ''));
+
+                    if ($label !== '') {
+                        $errorCounts[$label] = ($errorCounts[$label] ?? 0) + 1;
+                    }
+                }
+
+                continue;
+            }
+
+            /*
+             * System processing failures (status = failed) carry their
+             * user-safe message under the `_system` key instead of `errors`.
+             * They join the error summary so the vendor sees that the rows
+             * were skipped by a system problem, not a validation problem.
+             */
+            if ($row->status === CatalogUploadRow::STATUS_FAILED) {
+                foreach ($payload['_system'] ?? [] as $entry) {
                     $label = $this->friendlyLabel((string) ($entry['message'] ?? ''));
 
                     if ($label !== '') {
