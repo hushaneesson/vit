@@ -19,6 +19,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use RuntimeException;
 use Throwable;
 
 class ProcessCatalogUploadJob implements ShouldQueue
@@ -42,24 +43,26 @@ class ProcessCatalogUploadJob implements ShouldQueue
     {
         $upload = $this->loadUpload();
 
-        $this->markUploadAsProcessing($upload);
-
-        CatalogUploadRow::where('catalog_upload_id', $upload->id)->delete();
-
-        $temporaryPath = null;
-
         try {
-            $context = $this->buildProcessingContext($upload);
+            $this->markUploadAsProcessing($upload);
 
-            $temporaryPath = $context['temporary_path'];
+            CatalogUploadRow::where('catalog_upload_id', $upload->id)->delete();
 
-            $this->dispatchChunks($upload, $context, $rowReader);
+            $temporaryPath = null;
+
+            try {
+                $context = $this->buildProcessingContext($upload);
+
+                $temporaryPath = $context['temporary_path'];
+
+                $this->dispatchChunks($upload, $context, $rowReader);
+            } finally {
+                $this->cleanupTemporaryFile($temporaryPath ?? null);
+            }
         } catch (Throwable $e) {
             $this->handleFailure($upload, $e);
 
             throw $e;
-        } finally {
-            $this->cleanupTemporaryFile($temporaryPath);
         }
     }
 
@@ -361,7 +364,19 @@ class ProcessCatalogUploadJob implements ShouldQueue
 
         if ($disk !== 'local') {
             $temporaryPath = tempnam(sys_get_temp_dir(), 'catalog_upload_');
-            file_put_contents($temporaryPath, Storage::disk($disk)->get($filePath));
+
+            if ($temporaryPath === false) {
+                throw new RuntimeException('Could not complete catalog upload. Please try again later or contact administrators.');
+            }
+
+            try {
+                file_put_contents($temporaryPath, Storage::disk($disk)->get($filePath));
+            } catch (Throwable $e) {
+                $this->cleanupTemporaryFile($temporaryPath);
+
+                throw $e;
+            }
+
             $localPath = $temporaryPath;
         }
 
