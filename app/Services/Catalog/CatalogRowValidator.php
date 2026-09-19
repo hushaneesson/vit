@@ -61,6 +61,29 @@ class CatalogRowValidator
                 continue;
             }
 
+            // Conditional check: if this field's trigger is active, the
+            // conditional field must be present in the row. This must run
+            // BEFORE the empty-value skip below: a missing conditional value
+            // is exactly what we need to warn about.
+            if ($definition->conditional_on_field && $definition->conditional_on_value) {
+                $triggerValue = $rowData[$definition->conditional_on_field] ?? null;
+                if ($this->matchesCondition($triggerValue, $definition->conditional_on_value)) {
+                    // Trigger is active — check if the dependent field has a value
+                    $dependentKey = $definition->field_key;
+                    $dependentValue = $rowData[$dependentKey] ?? null;
+                    if (is_null($dependentValue) || $dependentValue === '' || $dependentValue === []) {
+                        $triggerLabel = $fieldDefinitions
+                            ->firstWhere('field_key', $definition->conditional_on_field)
+                            ->web_app_label ?? $definition->conditional_on_field;
+
+                        $warnings[] = [
+                            'field_key' => $dependentKey,
+                            'message' => "Required when '{$triggerLabel}' is set: '{$definition->web_app_label}'.",
+                        ];
+                    }
+                }
+            }
+
             // Skip further checks if the value is empty
             if ($isEmpty) {
                 continue;
@@ -73,23 +96,6 @@ class CatalogRowValidator
                     'field_key' => $definition->field_key,
                     'message' => $typeError,
                 ];
-            }
-
-            // Conditional check: if this field's trigger is active, the
-            // conditional field must be present in the row.
-            if ($definition->conditional_on_field && $definition->conditional_on_value) {
-                $triggerValue = $rowData[$definition->conditional_on_field] ?? null;
-                if ($this->matchesCondition($triggerValue, $definition->conditional_on_value)) {
-                    // Trigger is active — check if the dependent field has a value
-                    $dependentKey = $definition->field_key;
-                    $dependentValue = $rowData[$dependentKey] ?? null;
-                    if (is_null($dependentValue) || $dependentValue === '' || $dependentValue === []) {
-                        $warnings[] = [
-                            'field_key' => $dependentKey,
-                            'message' => "Required when '{$definition->web_app_label}' is set: '{$definition->web_app_label}'.",
-                        ];
-                    }
-                }
             }
         }
 

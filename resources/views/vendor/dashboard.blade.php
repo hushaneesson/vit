@@ -56,7 +56,7 @@
                                     @if ($submission->isDownloadable())
                                         <a href="{{ route('vendor.catalog-submissions.download', $submission) }}"
                                             class="btn btn-primary text-xs px-3 py-1.5">
-                                            Download Excel
+                                            Download File
                                         </a>
                                     @endif
                                 </td>

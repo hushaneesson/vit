@@ -10,6 +10,12 @@ class CatalogUploadRow extends Model
 {
     use HasFactory;
 
+    public const STATUS_VALID = 'valid';
+
+    public const STATUS_INVALID = 'invalid';
+
+    public const STATUS_FAILED = 'failed';
+
     protected $fillable = [
         'catalog_upload_id',
         'row_number',

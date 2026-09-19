@@ -49,7 +49,7 @@ class CatalogItemProcessor
     /**
      * Process one validated upload row.
      *
-     * @return array{created: int, updated: int, unchanged: int}
+     * @return array{created: int, updated: int, unchanged: int, cross_catalog_rejected?: bool}
      */
     public function processRow(
         CatalogUpload $upload,
@@ -117,10 +117,12 @@ class CatalogItemProcessor
                         ],
                     ]);
 
+                    // Signal the rejection to the caller so the row is counted
                     return [
                         'created' => 0,
                         'updated' => 0,
                         'unchanged' => 0,
+                        'cross_catalog_rejected' => true,
                     ];
                 }
 

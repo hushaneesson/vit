@@ -66,12 +66,9 @@
         @if ($step === 'upload')
             <div class="p-4 bg-white border rounded-xl sm:p-8 border-slate-200">
                 <h2 class="text-lg font-semibold sm:text-xl text-slate-900">Upload your product catalog</h2>
-                {{-- <p class="mt-1 text-sm text-slate-500">
-                    Please Upload your file and We'll help you match the columns in the next step.
-                </p> --}}
 
-                {{-- Upload requirements notice --}}
-                <div class="flex gap-3 p-4 mt-4 border rounded-lg border-sky-200">
+                {{-- Vendor-facing guide: what to prepare and what happens next. --}}
+                <div class="flex gap-3 p-4 mt-4 border rounded-lg border-sky-200 bg-sky-50">
                     <div class="flex items-center justify-center flex-shrink-0 rounded-full w-9 h-9">
                         <svg class="w-5 h-5 text-sky-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"
                             stroke-width="2">
@@ -79,91 +76,130 @@
                                 d="M12 9v3.75m0 3.75h.008v.008H12v-.008ZM21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
                         </svg>
                     </div>
+
                     <div class="text-sm text-slate-700">
-                        <p class="font-semibold text-slate-900">Please review before uploading</p>
+                        <p class="font-semibold text-slate-900">How catalog import works</p>
+
+                        <p class="mt-1">
+                            Have your product list ready in <span class="font-medium">CSV, XLS, or XLSX</span> format
+                            with column headers in the first row. The maximum file size is <span class="font-medium">50
+                                MB</span>.
+                        </p>
+
+                        <p class="mt-3 font-semibold text-slate-900">Before you upload</p>
+
                         <ul class="pl-4 mt-2 space-y-1.5 list-disc">
                             <li>
-                                We only accept files in <span class="font-medium">CSV, XLS, or XLSX</span> format.
+                                Make sure your file has a header row with column names to make mapping easier.
                             </li>
                             <li>
-                                If a product attribute spans multiple columns (for example, several specification
-                                columns), those columns must be positioned consecutively, in a single block. You
-                                will select this block as a range in the mapping step.
+                                If a product attribute uses multiple columns, keep those columns together in one
+                                consecutive block or range.
+                                You will select this range during mapping.
                             </li>
                             <li>
-                                If your file is in a different format, such as PDF or Word, please convert it to
-                                CSV or XLSX first. <a href="https://cloudconvert.com" target="_blank"
-                                    rel="noopener noreferrer"
-                                    class="font-medium underline hover:text-slate-900">CloudConvert</a> is a free
-                                online tool that can perform this conversion.
+                                If your file is in another format, such as PDF or Word, convert it to CSV or XLSX first.
+                                <a href="https://cloudconvert.com" target="_blank" rel="noopener noreferrer"
+                                    class="font-medium underline hover:text-slate-900">CloudConvert</a>
+                                is a free online tool you can use for this.
                             </li>
                         </ul>
+
+                        <p class="mt-3 font-semibold text-slate-900">How it works</p>
+
+                        <ol class="pl-5 mt-2 space-y-1 list-decimal">
+                            <li>Upload your file.</li>
+                            <li>Map your columns to our catalog fields.</li>
+                            <li>Then we will process and uploadyour catalog items.</li>
+                            </li>
+                        </ol>
                     </div>
                 </div>
 
-                {{-- Drop zone --}}
-                <label for="catalog-file" @class([
-                    'relative flex flex-col items-center justify-center gap-2 px-4 py-8 mt-4 text-center transition border-2 border-dashed rounded-lg cursor-pointer sm:px-6 sm:py-12',
-                    'border-emerald-400 bg-emerald-50/40' => $file,
-                    'border-slate-300 hover:border-slate-400 hover:bg-slate-50' => !$file,
-                ])>
-                    @if ($file)
-                        <div class="flex items-center justify-center w-12 h-12 rounded-full bg-emerald-100">
-                            <svg class="w-6 h-6 text-emerald-600" fill="none" viewBox="0 0 24 24"
-                                stroke="currentColor" stroke-width="2">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+
+                <div x-data="{ isDragging: false }">
+                    <label for="catalog-file" @class([
+                        'relative flex flex-col items-center justify-center gap-2 px-4 py-8 mt-4 text-center transition border-2 border-dashed rounded-lg cursor-pointer sm:px-6 sm:py-12',
+                        'border-emerald-400 bg-emerald-50/40' => $file,
+                        'border-slate-300 hover:border-slate-400 hover:bg-slate-50' => !$file,
+                    ]) @dragover.prevent="isDragging = true"
+                        @dragleave.prevent="isDragging = false"
+                        @drop.prevent="isDragging = false; $refs.catalogFileInput.files = $event.dataTransfer.files; $refs.catalogFileInput.dispatchEvent(new Event('change', { bubbles: true }))"
+                        :class="isDragging && 'border-slate-500 bg-slate-50'">
+                        @if ($file)
+                            <div class="flex items-center justify-center w-12 h-12 rounded-full bg-emerald-100">
+                                <svg class="w-6 h-6 text-emerald-600" fill="none" viewBox="0 0 24 24"
+                                    stroke="currentColor" stroke-width="2">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                </svg>
+                            </div>
+                            <span
+                                class="px-2 text-sm font-semibold break-all text-slate-900">{{ $file->getClientOriginalName() }}</span>
+                            <span class="text-xs text-slate-500">Click to choose a different file</span>
+                        @else
+                            <svg class="w-8 h-8 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                                stroke-width="1.5">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 7.5 12 3m0 0L7.5 7.5M12 3v13.5" />
                             </svg>
+                            <span class="text-sm font-medium text-center text-slate-900">Click to browse, or drag a file
+                                here</span>
+                            <span class="text-xs text-slate-500">CSV, XLS, or XLSX &middot; up to 50MB</span>
+                        @endif
+
+                        <input x-ref="catalogFileInput" id="catalog-file" type="file" wire:model="file"
+                            accept=".csv,.xls,.xlsx" class="sr-only" />
+                    </label>
+                    <p x-show="isDragging" class="mt-1 text-xs text-slate-500">Drop the file to select it.</p>
+
+                    <div class="flex flex-wrap items-center gap-4 mt-4">
+                        <button wire:click="uploadFile" wire:loading.attr="disabled" wire:target="uploadFile"
+                            @disabled(!$file)
+                            class="inline-flex items-center justify-center w-full gap-2 px-5 py-2.5 text-sm font-semibold text-white rounded-lg whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed transition sm:w-auto
+               {{ $file ? 'bg-slate-900 hover:bg-slate-800' : 'bg-slate-400' }}">
+
+                            <span wire:loading.remove wire:target="uploadFile">
+                                Continue to mapping &rarr;
+                            </span>
+
+                            <span wire:loading wire:target="uploadFile"
+                                class="inline-flex items-center gap-2 whitespace-nowrap">
+                                Processing&hellip;
+                                <svg class="flex-shrink-0 w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"
+                                    aria-hidden="true">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10"
+                                        stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor"
+                                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                </svg>
+                            </span>
+                        </button>
+
+                        <div wire:loading wire:target="file"
+                            class="flex items-center gap-2 text-sm text-slate-500 whitespace-nowrap">
+                            <svg class="flex-shrink-0 w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"
+                                aria-hidden="true">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"
+                                    stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor"
+                                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                            </svg>
+                            Reading file &hellip;
                         </div>
-                        <span
-                            class="px-2 text-sm font-semibold break-all text-slate-900">{{ $file->getClientOriginalName() }}</span>
-                        <span class="text-xs text-slate-500">Click to choose a different file</span>
-                    @else
-                        <svg class="w-8 h-8 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"
-                            stroke-width="1.5">
-                            <path stroke-linecap="round" stroke-linejoin="round"
-                                d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 7.5 12 3m0 0L7.5 7.5M12 3v13.5" />
-                        </svg>
-                        <span class="text-sm font-medium text-center text-slate-900">Click to browse, or drag a file
-                            here</span>
-                        <span class="text-xs text-slate-500">CSV, XLS, or XLSX &middot; up to 50MB</span>
-                    @endif
-
-                    <input id="catalog-file" type="file" wire:model="file" accept=".csv,.xls,.xlsx"
-                        class="sr-only" />
-                </label>
-
-                <div class="flex flex-wrap items-center gap-4 mt-4">
-                    <button wire:click="uploadFile" wire:loading.attr="disabled" wire:target="uploadFile"
-                        @disabled(!$file)
-                        class="inline-flex items-center justify-center w-full gap-2 px-5 py-2.5 text-sm font-semibold text-white rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition sm:w-auto
-                                   {{ $file ? 'bg-slate-900 hover:bg-slate-800' : 'bg-slate-400' }}">
-                        <span wire:loading.remove wire:target="uploadFile">Continue to mapping &rarr;</span>
-                        <span wire:loading wire:target="uploadFile">Processing file&hellip;</span>
-                    </button>
-
-                    <div wire:loading wire:target="file" class="flex items-center gap-2 text-sm text-slate-500">
-                        <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"
-                                stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor"
-                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z">
-                            </path>
-                        </svg>
-                        Reading file &hellip;
                     </div>
-                </div>
 
-                @error('file')
-                    <p class="mt-3 text-sm text-rose-600">{{ $message }}</p>
-                @enderror
-            </div>
+                    @error('file')
+                        <p class="mt-3 text-sm text-rose-600">{{ $message }}</p>
+                    @enderror
+                </div>
         @endif
 
         {{-- ============================================================ --}}
         {{-- STEP 2: Column mapping                                        --}}
         {{-- ============================================================ --}}
         @if ($step === 'mapping')
-            <div class="p-4 bg-white border rounded-xl sm:p-8 border-slate-200">
+            <div class="p-4 bg-white border rounded-xl sm:p-8 border-slate-200"
+                wire:loading.class="pointer-events-none opacity-60" wire:target="confirmMapping">
                 <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                     <div class="min-w-0">
                         <h2 class="text-lg font-semibold sm:text-xl text-slate-900">Match your columns</h2>
@@ -609,12 +645,6 @@
                                                 @endif
                                             </div>
                                         @endif
-
-                                        @if (isset($this->separatorValidationErrors[$field->field_key]))
-                                            <p class="mt-1 text-xs text-rose-600">
-                                                {{ $this->separatorValidationErrors[$field->field_key] }}
-                                            </p>
-                                        @endif
                                     </td>
 
                                 </tr>
@@ -658,14 +688,17 @@
                 @endif --}}
 
                 <div class="flex flex-col-reverse gap-3 mt-6 sm:flex-row sm:items-center sm:justify-between">
-                    <button wire:click="startOver" wire:loading.attr="disabled"
+                    <button wire:click="startOver" wire:loading.attr="disabled" wire:target="startOver"
                         class="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"
-                            stroke-width="2">
-                            <path stroke-linecap="round" stroke-linejoin="round"
-                                d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" />
-                        </svg>
-                        Start over
+                        <span class="flex items-center gap-1.5" wire:loading.remove wire:target="startOver">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                                stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" />
+                            </svg>
+                            Start over
+                        </span>
+                        <span wire:loading wire:target="startOver">Starting over&hellip;</span>
                     </button>
 
                     <button wire:click="confirmMapping" wire:loading.attr="disabled" wire:target="confirmMapping"
@@ -694,9 +727,26 @@
                         </path>
                     </svg>
                 </div>
-                <h2 class="mt-4 text-lg font-semibold sm:text-xl text-slate-900">Processing your file&hellip;</h2>
+                @php
+                    $uploadStatusValue =
+                        $progress['status'] instanceof \App\Enums\CatalogUploadStatus
+                            ? $progress['status']->value
+                            : $progress['status'];
+                    $processedRows = ($progress['success_rows'] ?? 0) + ($progress['invalid_rows'] ?? 0);
+                    $processPercent =
+                        ($progress['total_rows'] ?? 0) > 0
+                            ? min(100, (int) round(($processedRows / $progress['total_rows']) * 100))
+                            : 0;
+                @endphp
+                <h2 class="mt-4 text-lg font-semibold sm:text-xl text-slate-900">
+                    @if ($uploadStatusValue === 'queued')
+                        Your file is waiting to be processed&hellip;
+                    @else
+                        Processing your file&hellip;
+                    @endif
+                </h2>
                 <p class="max-w-sm mx-auto mt-1 text-sm text-slate-500">
-                    This may take a few minutes for larger files. You can leave this page &mdash; we'll keep working
+                    This may take a few minutes for larger files. You can leave this page; we'll keep working
                     in the background.
                 </p>
 
@@ -729,8 +779,13 @@
                 </div>
 
                 <div class="w-full h-2 mt-6 overflow-hidden rounded-full bg-slate-100">
-                    <div class="h-full rounded-full bg-slate-900 animate-pulse" style="width: 60%"></div>
+                    <div class="h-full rounded-full transition-all duration-500 {{ $processPercent > 0 ? 'bg-emerald-500' : 'bg-slate-900 animate-pulse' }}"
+                        style="width: {{ max($processPercent, 2) }}%"></div>
                 </div>
+
+                @if (($progress['total_rows'] ?? 0) > 0)
+                    <p class="mt-2 text-xs font-medium text-slate-500">{{ $processPercent }}% processed</p>
+                @endif
 
                 <p class="mt-4 text-xs text-slate-400">
                     We'll show your results automatically when processing is complete.
@@ -858,6 +913,10 @@
                                 </span>
                                 <span class="text-xs text-rose-500">{{ $totalMessages }} row(s)</span>
                             </div>
+                            <p class="px-4 py-2 text-xs border-b text-rose-600 border-rose-100 bg-rose-50/50">
+                                These rows did not pass validation and were skipped; fix the listed issue and
+                                upload the file again.
+                            </p>
                             <div class="overflow-x-auto overflow-y-auto max-h-48">
                                 <table class="w-full min-w-[420px] text-sm border-collapse">
                                     <thead class="sticky top-0 bg-slate-50">
@@ -940,6 +999,10 @@
                                 </span>
                                 <span class="text-xs text-rose-500">{{ $totalMessages }} total row(s)</span>
                             </div>
+                            <p class="px-4 py-2 text-xs border-b text-rose-600 border-rose-100 bg-rose-50/50">
+                                These rows did not pass validation and were skipped; fix the listed issue and
+                                upload the file again.
+                            </p>
                             <div class="overflow-x-auto overflow-y-auto max-h-48">
                                 <table class="w-full min-w-[420px] text-sm border-collapse">
                                     <thead class="sticky top-0 bg-slate-50">
@@ -977,7 +1040,7 @@
 
                 <div
                     class="flex flex-col-reverse gap-3 mt-6 sm:flex-row sm:flex-wrap sm:items-center sm:justify-center">
-                    <a href="{{ route('vendor.catalog.index') }}"
+                    <a href="{{ $catalogId ? route('vendor.catalog.items', ['catalog' => $catalogId]) : route('vendor.catalog.index') }}"
                         class="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-semibold text-slate-900 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition">
                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"
                             stroke-width="2">
@@ -987,9 +1050,10 @@
                         View my catalog
                     </a>
 
-                    <button wire:click="startOver" wire:loading.attr="disabled"
+                    <button wire:click="startOver" wire:loading.attr="disabled" wire:target="startOver"
                         class="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-slate-900 rounded-lg hover:bg-slate-800 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                        Upload another file
+                        <span wire:loading.remove wire:target="startOver">Upload another file</span>
+                        <span wire:loading wire:target="startOver">Starting over&hellip;</span>
                     </button>
                 </div>
             </div>
@@ -1008,11 +1072,12 @@
                 </div>
                 <h2 class="mt-4 text-lg font-semibold sm:text-xl text-rose-600">Something went wrong</h2>
                 <p class="max-w-sm mx-auto mt-1 text-sm text-slate-600">
-                    Catalog import failed due to an unexpected error. Please review your file and try again.
+                    {{ $progress['failure_reason'] ?? 'Catalog import failed due to an unexpected error. Please review your file and try again.' }}
                 </p>
-                <button wire:click="startOver" wire:loading.attr="disabled"
+                <button wire:click="startOver" wire:loading.attr="disabled" wire:target="startOver"
                     class="inline-flex items-center justify-center w-full gap-2 px-5 py-2.5 mt-6 text-sm font-semibold text-slate-900 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition disabled:opacity-50 disabled:cursor-not-allowed sm:w-auto">
-                    Try again
+                    <span wire:loading.remove wire:target="startOver">Try again</span>
+                    <span wire:loading wire:target="startOver">Starting over&hellip;</span>
                 </button>
             </div>
         @endif

@@ -3,16 +3,17 @@
 namespace App\Services\Catalog;
 
 use Illuminate\Support\Facades\Storage;
-use OpenSpout\Reader\CSV\Options as CsvOptions;
-use OpenSpout\Reader\CSV\Reader as OpenSpoutCsvReader;
 use OpenSpout\Reader\ReaderInterface;
-use OpenSpout\Reader\XLSX\Reader as OpenSpoutXlsxReader;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Reader\IReadFilter;
 use PhpOffice\PhpSpreadsheet\Reader\IReader;
 
 class CatalogFileInspectionService
 {
+    public function __construct(
+        private readonly OpenSpoutRowReader $rowReader = new OpenSpoutRowReader()
+    ) {}
+
     /**
      * Read just the header row + a handful of sample rows, for the
      * column-mapping screen. Does NOT load the whole file into memory -
@@ -67,12 +68,7 @@ class CatalogFileInspectionService
         // This avoids materializing a multi-MB worksheet just to re-derive headers
         // we already have in memory.
         if ($headerRow !== null) {
-            $headerRow = array_map(
-                fn($value) => is_string($value) ? trim($value) : $value,
-                $headerRow
-            );
-
-            return $this->signatureFromHeaders($headerRow);
+            return $this->signatureFromHeaders($this->trimHeaderValues($headerRow));
         }
 
         $pathResult = $this->resolveLocalPath($disk, $path);
@@ -119,50 +115,20 @@ class CatalogFileInspectionService
         string $fileType,
         int $sampleRows
     ): array {
-        $headers = [];
-        $sampleData = [];
-        $headerWidth = 0;
-        $rowCount = 0;
+        $read = $this->withOpenSpoutSheet(
+            $fileType,
+            $localPath,
+            fn (object $sheet) => $this->readOpenSpoutRows($sheet, $sampleRows)
+        );
 
-        $reader = $this->makeOpenSpoutReader($fileType);
-
-        try {
-            $reader->open($localPath);
-
-            $sheet = $this->openFirstSheet($reader);
-
-            if ($sheet === null) {
-                return ['columns' => [], 'sample_rows' => []];
-            }
-
-            foreach ($sheet->getRowIterator() as $row) {
-                $rowCells = $this->extractOpenSpoutRowCells($row);
-
-                if ($rowCount === 0) {
-                    // Header row.
-                    $headers = array_map(
-                        fn($value) => is_string($value) ? trim($value) : $value,
-                        $rowCells
-                    );
-                    $headerWidth = count($headers);
-                } elseif ($rowCount <= $sampleRows) {
-                    $sampleData[] = $rowCells;
-                } else {
-                    // Already collected header + requested samples.
-                    break;
-                }
-
-                $rowCount++;
-            }
-        } finally {
-            $reader->close();
+        if ($read === null) {
+            return ['columns' => [], 'sample_rows' => []];
         }
 
+        ['headers' => $headers, 'sample_data' => $sampleData, 'header_width' => $headerWidth] = $read;
+
         // Drop fully-empty trailing columns some exports leave behind.
-        $lastNonEmptyIndex = $this->lastNonEmptyColumnIndex($headers);
-        $headers = array_values(
-            array_slice($headers, 0, $lastNonEmptyIndex + 1)
-        );
+        [$headers, $lastNonEmptyIndex] = $this->trimHeaderAndGetLastIndex($headers);
 
         // Pad each sample row to the header width, then trim to the same range.
         $sampleData = array_map(
@@ -185,6 +151,40 @@ class CatalogFileInspectionService
     }
 
     /**
+     * Read the header row + up to $sampleRows data rows from an
+     * already-opened OpenSpout sheet. Row-collection logic only, no
+     * trimming — inspectOpenSpout() does that once the reader is closed.
+     *
+     * @return array{headers: list<mixed>, sample_data: list<array<int,mixed>>, header_width: int}
+     */
+    private function readOpenSpoutRows(object $sheet, int $sampleRows): array
+    {
+        $headers = [];
+        $sampleData = [];
+        $headerWidth = 0;
+        $rowCount = 0;
+
+        foreach ($sheet->getRowIterator() as $row) {
+            $rowCells = $this->rowReader->extractRowCells($row);
+
+            if ($rowCount === 0) {
+                // Header row.
+                $headers = $this->trimHeaderValues($rowCells);
+                $headerWidth = count($headers);
+            } elseif ($rowCount <= $sampleRows) {
+                $sampleData[] = $rowCells;
+            } else {
+                // Already collected header + requested samples.
+                break;
+            }
+
+            $rowCount++;
+        }
+
+        return ['headers' => $headers, 'sample_data' => $sampleData, 'header_width' => $headerWidth];
+    }
+
+    /**
      * Inspect a legacy .xls file using PhpSpreadsheet (the same read-filter
      * strategy as before; only the first N+1 rows are loaded).
      *
@@ -196,33 +196,14 @@ class CatalogFileInspectionService
      */
     private function inspectLegacy(string $localPath, int $sampleRows): array
     {
-        $reader = $this->makeReader('xls');
-        $reader->setReadDataOnly(true);
-
-        // Only read the first N+1 rows (header + samples) to keep this fast
-        // even on large .xls files.
-        $reader->setReadFilter(
-            $this->createRowRangeFilter(1, $sampleRows + 1)
-        );
-
-        $spreadsheet = $reader->load($localPath);
-
-        // Explicitly use the FIRST worksheet. Multi-sheet workbooks must be
-        // processed from Sheet 1 only; getActiveSheet() could return a
-        // different sheet.
-        $sheet = $spreadsheet->getSheet(0);
+        $sheet = $this->loadLegacySheet($localPath, $sampleRows + 1);
         $rows = $sheet->toArray(null, true, true, false);
 
-        $headerRow = array_map(
-            fn($value) => is_string($value) ? trim($value) : $value,
-            $rows[0] ?? []
-        );
-
+        $headerRow = $this->trimHeaderValues($rows[0] ?? []);
         $sampleData = array_slice($rows, 1, $sampleRows);
 
         // Drop fully-empty trailing columns some Excel exports leave behind.
-        $lastNonEmptyIndex = $this->lastNonEmptyColumnIndex($headerRow);
-        $headerRow = array_slice($headerRow, 0, $lastNonEmptyIndex + 1);
+        [$headerRow, $lastNonEmptyIndex] = $this->trimHeaderAndGetLastIndex($headerRow);
         $sampleData = array_map(
             fn($row) => array_slice($row, 0, $lastNonEmptyIndex + 1),
             $sampleData
@@ -243,33 +224,39 @@ class CatalogFileInspectionService
      */
     private function readHeaderRowLegacy(string $localPath): array
     {
+        $sheet = $this->loadLegacySheet($localPath, 1);
+        $row = $sheet->toArray(null, true, true, false)[0] ?? [];
+
+        return $this->trimHeaderValues($row);
+    }
+
+    /**
+     * Load a legacy .xls file with a read filter limited to rows [1, $maxRow]
+     * (PhpSpreadsheet only parses the allowed rows, so this stays fast even
+     * on large .xls files). Shared by inspectLegacy() (header + sample rows)
+     * and readHeaderRowLegacy() (row 1 only), which previously each built
+     * their own reader/filter/load sequence.
+     *
+     * Always returns the FIRST worksheet explicitly (never
+     * getActiveSheet()), so multi-sheet workbooks are read consistently
+     * regardless of which sheet the workbook marks as active.
+     */
+    private function loadLegacySheet(string $localPath, int $maxRow)
+    {
         $reader = $this->makeReader('xls');
         $reader->setReadDataOnly(true);
-
-        $reader->setReadFilter(
-            $this->createRowRangeFilter(1, 1)
-        );
+        $reader->setReadFilter($this->createRowRangeFilter(1, $maxRow));
 
         $spreadsheet = $reader->load($localPath);
 
-        // Use the first worksheet explicitly rather than getActiveSheet(),
-        // so the signature is stable regardless of which sheet the workbook
-        // marks as active.
-        $sheet = $spreadsheet->getSheet(0);
-        $row = $sheet->toArray(null, true, true, false)[0] ?? [];
-
-        return array_map(
-            fn($value) => is_string($value) ? trim($value) : $value,
-            $row
-        );
+        return $spreadsheet->getSheet(0);
     }
 
     /**
      * Build a PhpSpreadsheet read filter limited to an inclusive row range.
-     * Shared by inspectLegacy() (header + sample rows) and
-     * readHeaderRowLegacy() (row 1 only), so there's a single filter
-     * implementation for "only read these rows" rather than two
-     * hand-written copies.
+     * Shared by loadLegacySheet(), so there's a single filter
+     * implementation for "only read these rows" rather than hand-written
+     * copies per caller.
      */
     private function createRowRangeFilter(int $minRow, int $maxRow): IReadFilter
     {
@@ -289,8 +276,7 @@ class CatalogFileInspectionService
     private function signatureFromHeaders(array $headerRow): ?string
     {
         // Drop fully-empty trailing columns
-        $lastNonEmptyIndex = $this->lastNonEmptyColumnIndex($headerRow);
-        $headerRow = array_slice($headerRow, 0, $lastNonEmptyIndex + 1);
+        [$headerRow, ] = $this->trimHeaderAndGetLastIndex($headerRow);
 
         // Normalize: lowercase, trim, drop empties, sort for stability
         $normalized = collect($headerRow)
@@ -375,6 +361,32 @@ class CatalogFileInspectionService
     }
 
     /**
+     * Trim trailing fully-empty columns from a header row and return both
+     * the trimmed row and the index it was cut at. Several callers
+     * (inspectOpenSpout, inspectLegacy) need that index again afterward to
+     * trim their sample rows to the same width, so it's returned alongside
+     * the trimmed row instead of being recomputed.
+     *
+     * @return array{0: list<mixed>, 1: int}
+     */
+    private function trimHeaderAndGetLastIndex(array $headerRow): array
+    {
+        $lastNonEmptyIndex = $this->lastNonEmptyColumnIndex($headerRow);
+
+        return [array_slice($headerRow, 0, $lastNonEmptyIndex + 1), $lastNonEmptyIndex];
+    }
+
+    /**
+     * Trim each string cell in a row; non-string values pass through
+     * unchanged. Every header-reading path normalizes the same way, so this
+     * replaces what used to be five identical inline array_map closures.
+     */
+    private function trimHeaderValues(array $row): array
+    {
+        return array_map(fn($value) => is_string($value) ? trim($value) : $value, $row);
+    }
+
+    /**
      * Read only the header row (row 1) using OpenSpout's streaming reader,
      * stopping immediately after the first row. Uses the first worksheet
      * explicitly, matching the "Sheet 1 only" rule.
@@ -387,17 +399,7 @@ class CatalogFileInspectionService
         string $localPath,
         string $fileType
     ): array {
-        $reader = $this->makeOpenSpoutReader($fileType);
-
-        try {
-            $reader->open($localPath);
-
-            $sheet = $this->openFirstSheet($reader);
-
-            if ($sheet === null) {
-                return [];
-            }
-
+        $header = $this->withOpenSpoutSheet($fileType, $localPath, function (object $sheet) {
             $rowIterator = $sheet->getRowIterator();
             $rowIterator->rewind();
 
@@ -405,24 +407,39 @@ class CatalogFileInspectionService
                 return [];
             }
 
-            $header = $this->extractOpenSpoutRowCells(
-                $rowIterator->current()
-            );
+            return $this->rowReader->extractRowCells($rowIterator->current());
+        });
+
+        return $this->trimHeaderValues($header ?? []);
+    }
+
+    /**
+     * Open the given file with the right OpenSpout reader, hand its first
+     * worksheet to $callback, and guarantee the reader is closed afterward
+     * (even if $callback throws). Returns null without invoking $callback
+     * if the workbook has no worksheets. Centralizes the open/close
+     * lifecycle shared by inspectOpenSpout() and readHeaderRowOpenSpout().
+     */
+    private function withOpenSpoutSheet(string $fileType, string $localPath, callable $callback): mixed
+    {
+        $reader = $this->rowReader->makeReader($fileType, $localPath);
+
+        try {
+            $reader->open($localPath);
+
+            $sheet = $this->openFirstSheet($reader);
+
+            return $sheet === null ? null : $callback($sheet);
         } finally {
             $reader->close();
         }
-
-        return array_map(
-            fn($value) => is_string($value) ? trim($value) : $value,
-            $header
-        );
     }
 
     /**
      * Return the first worksheet of an already-open OpenSpout reader, or
      * null if the workbook has no worksheets. Centralizes the "always
-     * Sheet 1" rule so inspectOpenSpout() and readHeaderRowOpenSpout()
-     * don't each re-implement the sheet-iterator boilerplate.
+     * Sheet 1" rule so withOpenSpoutSheet() doesn't re-implement the
+     * sheet-iterator boilerplate itself.
      */
     private function openFirstSheet(ReaderInterface $reader): ?object
     {
@@ -430,63 +447,5 @@ class CatalogFileInspectionService
         $sheetIterator->rewind();
 
         return $sheetIterator->current();
-    }
-
-    /**
-     * Instantiate the correct OpenSpout reader for the file type and apply
-     * the options needed to reproduce the previous PhpSpreadsheet behavior:
-     *
-     *   CSV: comma delimiter, double-quote enclosure, UTF-8 encoding.
-     *        OpenSpout normalizes UTF-8 input, so the encoding is set
-     *        explicitly here for clarity.
-     *
-     * @param string $fileType 'xlsx' | 'csv'
-     * @return ReaderInterface
-     *
-     * @throws \InvalidArgumentException For unsupported file types.
-     */
-    private function makeOpenSpoutReader(string $fileType): ReaderInterface
-    {
-        return match ($fileType) {
-            'csv' => (function () {
-                $options = new CsvOptions();
-                $options->FIELD_DELIMITER = ',';
-                $options->FIELD_ENCLOSURE = '"';
-                $options->ENCODING = 'UTF-8';
-
-                return new OpenSpoutCsvReader($options);
-            })(),
-
-            'xlsx' => new OpenSpoutXlsxReader(),
-
-            default => throw new \InvalidArgumentException(
-                "Unsupported file type: {$fileType}"
-            ),
-        };
-    }
-
-
-    /**
-     * Extract a row's cells preserving their zero-based column indexes (the
-     * keys OpenSpout uses, matching A=0,B=1...). Dates are formatted
-     * to strings, following the same convention as the streaming job..
-     *
-     * @return array<int,mixed>
-     */
-    private function extractOpenSpoutRowCells(object $row): array
-    {
-        $cells = [];
-
-        foreach ($row->getCells() as $colIndex => $cell) {
-            $value = $cell->getValue();
-
-            if ($value instanceof \DateTimeInterface) {
-                $value = $value->format('Y-m-d H:i:s');
-            }
-
-            $cells[$colIndex] = $value;
-        }
-
-        return $cells;
     }
 }
