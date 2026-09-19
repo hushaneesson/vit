@@ -40,6 +40,8 @@ class ProcessValidatedRowsJob implements ShouldQueue
 
     private Collection $columnToFieldKey;
 
+    private Collection $columnMappingsByIndex;
+
     private Collection $activeFields;
 
     private array $rangeFieldKeys;
@@ -110,6 +112,8 @@ class ProcessValidatedRowsJob implements ShouldQueue
     private function buildContext(CatalogUpload $upload): void
     {
         $this->columnToFieldKey = $this->buildColumnToFieldKey($upload);
+
+        $this->columnMappingsByIndex = $upload->columnMappings->keyBy('column_index');
 
         $this->activeFields = VitFieldDefinition::active()->keyBy('field_key');
 
@@ -197,11 +201,6 @@ class ProcessValidatedRowsJob implements ShouldQueue
         ]);
     }
 
-    /**
-     * $columnMappings varies by upload; everything else this needs
-     * (column->field map, active fields, range keys, lookup maps, VIT flag,
-     * weight unit) is invariant for the life of this job and lives on $this.
-     */
     private function mapRow(array $rowCells, $columnMappings): array
     {
         $mappedData = [];
@@ -214,7 +213,7 @@ class ProcessValidatedRowsJob implements ShouldQueue
             }
 
             $field = $this->activeFields->get($fieldKey);
-            $mapping = $columnMappings->firstWhere('column_index', $colIndex);
+            $mapping = $this->columnMappingsByIndex->get($colIndex);
 
             if ($field && $field->is_multi_value) {
                 $this->mapMultiValueField($mappedData, $fieldKey, $field, $mapping, $rawValue, $this->rangeFieldKeys);
