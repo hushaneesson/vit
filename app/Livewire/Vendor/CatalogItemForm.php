@@ -592,7 +592,7 @@ class CatalogItemForm extends Component
                     ->ignore($this->catalogItemId),
             ],
             'replacementSkus' => ['nullable', 'array', 'max:4'],
-            'replacementSkus.*' => ['nullable', 'string', 'max:255', 'exists:catalog_items:dealer_sku'],
+            'replacementSkus.*' => ['nullable', 'string', 'max:255', 'exists:catalog_items,dealer_sku'],
             'manufacturerSku' => ['nullable', 'string', 'max:255'],
 
             'productCategory' => ['required', Rule::exists('commodity_types', 'id')],

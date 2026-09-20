@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Catalog;
 use App\Models\CatalogItem;
 use App\Models\Client;
 use App\Models\ClassificationType;
@@ -31,24 +32,34 @@ class CatalogItemFormTest extends TestCase
 
     protected function seedReferenceData(): array
     {
-        $level1 = ProductHierarchy::create(['level' => 1, 'name' => 'Office Supplies', 'path' => 'Office Supplies', 'active' => true]);
-        $level2 = ProductHierarchy::create(['level' => 2, 'name' => 'Paper Products', 'path' => 'Office Supplies!Paper Products', 'parent_id' => $level1->id, 'active' => true]);
+        $level1 = ProductHierarchy::create(['level' => 1, 'name' => 'Office Supplies']);
+        $level2 = ProductHierarchy::create(['level' => 2, 'name' => 'Paper Products', 'parent_id' => $level1->id]);
         $level3 = ProductHierarchy::create([
             'level' => 3,
             'name' => 'Copy Paper',
-            'path' => 'Office Supplies!Paper Products!Copy Paper',
             'parent_id' => $level2->id,
             'hierarchy_number' => '10001',
-            'active' => true,
         ]);
 
-        CommodityType::create(['name' => 'Use the name of Category Level 2', 'sort_order' => 0, 'active' => true]);
-        UnitOfMeasure::create(['code' => 'RM', 'description' => 'Ream', 'sort_order' => 0, 'active' => true]);
-        CountryCode::create(['code' => 'US', 'name' => 'United States', 'active' => true]);
-        ClassificationType::create(['key' => 'UNSPSC', 'label' => 'UNSPSC Code', 'is_always_required' => true, 'active' => true, 'sort_order' => 0]);
-        ClassificationType::create(['key' => 'Country of Origin', 'label' => 'Country of Origin', 'is_always_required' => true, 'active' => true, 'sort_order' => 1]);
+        $commodityType = CommodityType::firstOrCreate(
+            ['name' => 'Use the name of Category Level 2'],
+            ['approved' => true],
+        );
+        $unitOfMeasure = UnitOfMeasure::firstOrCreate(
+            ['code' => 'RM'],
+            ['description' => 'Ream', 'active' => true],
+        );
+        CountryCode::firstOrCreate(['code' => 'US'], ['name' => 'United States']);
+        $unspscType = ClassificationType::firstOrCreate(
+            ['key' => 'UNSPSC'],
+            ['label' => 'UNSPSC Code', 'is_always_required' => true],
+        );
+        ClassificationType::firstOrCreate(
+            ['key' => 'Country of Origin'],
+            ['label' => 'Country of Origin', 'is_always_required' => true],
+        );
 
-        return compact('level1', 'level2', 'level3');
+        return compact('level1', 'level2', 'level3', 'commodityType', 'unitOfMeasure', 'unspscType');
     }
 
     protected function actingAsClient(Vendor $vendor): Client
@@ -66,25 +77,42 @@ class CatalogItemFormTest extends TestCase
         return $client;
     }
 
+    private function createExistingItem(Vendor $vendor, Catalog $catalog, string $dealerSku): CatalogItem
+    {
+        return CatalogItem::create([
+            'vendor_id' => $vendor->id,
+            'catalog_id' => $catalog->id,
+            'name' => $dealerSku,
+            'dealer_sku' => $dealerSku,
+        ]);
+    }
+
     public function test_vendor_can_add_a_catalog_item_with_standard_and_complex_fields(): void
     {
         Storage::fake('local');
         Notification::fake();
 
-        $this->seedReferenceData();
         $vendor = Vendor::create(['name' => 'XYZ Company', 'status' => 'active']);
         $this->actingAsClient($vendor);
+        $catalog = Catalog::create(['vendor_id' => $vendor->id, 'name' => 'Main']);
 
-        Livewire::test(CatalogItemForm::class)
+        $reference = $this->seedReferenceData();
+
+        // Replacement SKUs must reference existing dealer SKUs.
+        $this->createExistingItem($vendor, $catalog, 'SKU-000');
+        $this->createExistingItem($vendor, $catalog, 'SKU-000A');
+
+        Livewire::test(CatalogItemForm::class, ['catalogId' => $catalog->id])
             ->set('name', 'Premium Copy Paper')
             ->set('sellerSku', 'SKU-001')
             ->set('replacementSkus', ['SKU-000', 'SKU-000A'])
             ->set('manufacturerSku', 'MFG-001')
-            ->set('productTypeOrFamily', 'Paper Products')
+            ->set('productCategory', (string) $reference['commodityType']->id)
+            ->set('hierarchy', (string) $reference['level3']->id)
             ->set('description', 'A long description of copy paper.')
-            ->set('unitOfMeasure', 'RM')
+            ->set('unitOfMeasure', (string) $reference['unitOfMeasure']->id)
             ->set('quantityPerUnit', '10')
-            ->set('newImages', [UploadedFile::fake()->image('primary.jpg')])
+            ->set('newImages', [UploadedFile::fake()->image('primary.jpg', 400, 400)])
             ->set('manufacturer', 'Acme Corp')
             ->set('brandName', 'Acme')
             ->set('searchTerms', ['paper', 'copy paper'])
@@ -93,15 +121,14 @@ class CatalogItemFormTest extends TestCase
             ->set('itemWeight', '5.5')
             ->set('sellingPoints', ['Bright white', 'Acid free'])
             ->set('specifications', [['key' => 'Color', 'value' => 'White'], ['key' => 'Sheets', 'value' => '500']])
-            ->set('unspscCode', '14111507')
-            ->set('classifications', ['UNSPSC=14111507'])
+            ->set('classifications', [['key' => 'UNSPSC', 'value' => '14111507'], ['key' => 'Country of Origin', 'value' => 'US']])
             ->call('save')
             ->assertHasNoErrors()
-            ->assertRedirect(route('vendor.catalog.index', ['catalog' => 'Premium Copy Paper']));
+            ->assertRedirect(route('vendor.catalog.items', ['catalog' => $catalog->id]));
 
-        $this->assertDatabaseCount('catalog_items', 1);
+        $this->assertDatabaseCount('catalog_items', 3);
 
-        $item = CatalogItem::first();
+        $item = CatalogItem::where('dealer_sku', 'SKU-001')->first();
         $this->assertSame($vendor->id, $item->vendor_id);
         $this->assertSame('SKU-001', $item->dealer_sku);
         $this->assertSame(['SKU-000', 'SKU-000A'], $item->replacement_sku);
@@ -120,27 +147,31 @@ class CatalogItemFormTest extends TestCase
         // One image embedded/stored
         $this->assertCount(1, $item->images);
 
-        Notification::assertNothingSent();
+        Notification::assertSentTimes(NewClassificationTypeNotification::class, 0);
+        Notification::assertSentTimes(NewHierarchyPathNotification::class, 0);
     }
 
     public function test_replacement_skus_are_limited_to_four_values(): void
     {
         Storage::fake('local');
 
-        $this->seedReferenceData();
         $vendor = Vendor::create(['name' => 'XYZ Company', 'status' => 'active']);
         $this->actingAsClient($vendor);
+        $catalog = Catalog::create(['vendor_id' => $vendor->id, 'name' => 'Main']);
 
-        Livewire::test(CatalogItemForm::class)
+        $reference = $this->seedReferenceData();
+
+        Livewire::test(CatalogItemForm::class, ['catalogId' => $catalog->id])
             ->set('name', 'Premium Copy Paper')
             ->set('sellerSku', 'SKU-001')
             ->set('replacementSkus', ['SKU-000', 'SKU-000A', 'SKU-000B', 'SKU-000C', 'SKU-000D'])
             ->set('manufacturerSku', 'MFG-001')
-            ->set('productTypeOrFamily', 'Paper Products')
+            ->set('productCategory', (string) $reference['commodityType']->id)
+            ->set('hierarchy', (string) $reference['level3']->id)
             ->set('description', 'A long description of copy paper.')
-            ->set('unitOfMeasure', 'RM')
+            ->set('unitOfMeasure', (string) $reference['unitOfMeasure']->id)
             ->set('quantityPerUnit', '10')
-            ->set('newImages', [UploadedFile::fake()->image('primary.jpg')])
+            ->set('newImages', [UploadedFile::fake()->image('primary.jpg', 400, 400)])
             ->set('manufacturer', 'Acme Corp')
             ->set('brandName', 'Acme')
             ->set('searchTerms', ['paper', 'copy paper'])
@@ -149,8 +180,7 @@ class CatalogItemFormTest extends TestCase
             ->set('itemWeight', '5.5')
             ->set('sellingPoints', ['Bright white', 'Acid free'])
             ->set('specifications', [['key' => 'Color', 'value' => 'White'], ['key' => 'Sheets', 'value' => '500']])
-            ->set('unspscCode', '14111507')
-            ->set('classifications', ['UNSPSC=14111507'])
+            ->set('classifications', [['key' => 'UNSPSC', 'value' => '14111507'], ['key' => 'Country of Origin', 'value' => 'US']])
             ->call('save')
             ->assertHasErrors(['replacementSkus' => 'max']);
     }
@@ -160,26 +190,34 @@ class CatalogItemFormTest extends TestCase
         Storage::fake('local');
         Notification::fake();
 
-        ProductHierarchy::create(['level' => 1, 'name' => 'Tech', 'path' => 'Tech', 'active' => true]);
-        ProductHierarchy::create(['level' => 2, 'name' => 'Computers', 'path' => 'Tech!Computers', 'active' => true]);
-        ProductHierarchy::create(['level' => 3, 'name' => 'Laptops', 'path' => 'Tech!Computers!Laptops', 'active' => true]);
+        ProductHierarchy::create(['level' => 1, 'name' => 'Tech']);
+        ProductHierarchy::create(['level' => 2, 'name' => 'Computers']);
+        $laptops = ProductHierarchy::create(['level' => 3, 'name' => 'Laptops']);
 
-        CommodityType::create(['name' => 'Technology', 'sort_order' => 0, 'active' => true]);
-        UnitOfMeasure::create(['code' => 'EA', 'description' => 'Each', 'sort_order' => 0, 'active' => true]);
-        CountryCode::create(['code' => 'US', 'name' => 'United States', 'active' => true]);
+        $commodityType = CommodityType::firstOrCreate(
+            ['name' => 'Technology'],
+            ['approved' => true],
+        );
+        $unitOfMeasure = UnitOfMeasure::firstOrCreate(
+            ['code' => 'EA'],
+            ['description' => 'Each', 'active' => true],
+        );
+        CountryCode::firstOrCreate(['code' => 'US'], ['name' => 'United States']);
 
         $vendor = Vendor::create(['name' => 'XYZ Company', 'status' => 'active']);
         $this->actingAsClient($vendor);
+        $catalog = Catalog::create(['vendor_id' => $vendor->id, 'name' => 'Main']);
 
-        Livewire::test(CatalogItemForm::class)
+        Livewire::test(CatalogItemForm::class, ['catalogId' => $catalog->id])
             ->set('name', 'Laptop')
             ->set('sellerSku', 'SKU-100')
             ->set('manufacturerSku', 'MFG-100')
-            ->set('productTypeOrFamily', 'Technology')
+            ->set('productCategory', (string) $commodityType->id)
+            ->set('hierarchy', (string) $laptops->id)
             ->set('description', 'A laptop.')
-            ->set('unitOfMeasure', 'EA')
+            ->set('unitOfMeasure', (string) $unitOfMeasure->id)
             ->set('quantityPerUnit', '1')
-            ->set('newImages', [UploadedFile::fake()->image('primary.jpg')])
+            ->set('newImages', [UploadedFile::fake()->image('primary.jpg', 400, 400)])
             ->set('manufacturer', 'Acme Corp')
             ->set('brandName', 'Acme')
             ->set('searchTerms', ['laptop'])
@@ -188,8 +226,7 @@ class CatalogItemFormTest extends TestCase
             ->set('itemWeight', '4.0')
             ->set('sellingPoints', ['Fast'])
             ->set('specifications', [['key' => 'RAM', 'value' => '16GB']])
-            ->set('unspscCode', '43211503')
-            ->set('classifications', ['UNSPSC=43211503'])
+            ->set('classifications', [['key' => 'UNSPSC', 'value' => '43211503'], ['key' => 'Country of Origin', 'value' => 'US']])
             ->call('save')
             ->assertHasNoErrors();
 
@@ -206,8 +243,11 @@ class CatalogItemFormTest extends TestCase
         $vendorA = Vendor::create(['name' => 'Vendor A', 'status' => 'active']);
         $vendorB = Vendor::create(['name' => 'Vendor B', 'status' => 'active']);
 
+        $catalogB = Catalog::create(['vendor_id' => $vendorB->id, 'name' => 'Vendor B Catalog']);
+
         $itemB = CatalogItem::create([
             'vendor_id' => $vendorB->id,
+            'catalog_id' => $catalogB->id,
             'name' => 'Test Item B',
             'description' => 'Desc',
             'dealer_sku' => 'B-SKU-1',
@@ -227,8 +267,11 @@ class CatalogItemFormTest extends TestCase
         $clientOne = Client::create(['vendor_id' => $vendor->id, 'name' => 'Client One', 'email' => 'one@example.com', 'status' => 'active']);
         $clientTwo = Client::create(['vendor_id' => $vendor->id, 'name' => 'Client Two', 'email' => 'two@example.com', 'status' => 'active']);
 
+        $sharedCatalog = Catalog::create(['vendor_id' => $vendor->id, 'name' => 'Shared Catalog']);
+
         CatalogItem::create([
             'vendor_id' => $vendor->id,
+            'catalog_id' => $sharedCatalog->id,
             'name' => 'Shared Item',
             'description' => 'Desc',
             'dealer_sku' => 'SKU-SHARED-1',
@@ -238,7 +281,7 @@ class CatalogItemFormTest extends TestCase
 
         $this->actingAs($clientTwo, 'client');
 
-        $this->get(route('vendor.catalog.index', ['catalog' => 'Shared Catalog']))
+        $this->get(route('vendor.catalog.items', ['catalog' => $sharedCatalog]))
             ->assertOk()
             ->assertSee('SKU-SHARED-1');
     }
