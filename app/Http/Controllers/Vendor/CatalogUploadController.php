@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\CatalogUploadStatus;
+use App\Exceptions\UnsupportedCsvEncodingException;
 use App\Jobs\ProcessCatalogUploadJob;
 use App\Models\CatalogUpload;
 use App\Models\CatalogUploadColumnMapping;
@@ -31,7 +32,7 @@ class CatalogUploadController extends Controller
             'file' => ['required', 'file', 'mimes:csv,txt,xlsx,xls', 'max:51200'], // 50MB
         ]);
 
-        $client = Auth::guard('client')->user();
+        $client = $this->currentClient();
         $file = $request->file('file');
         $extension = strtolower($file->getClientOriginalExtension());
         $fileType = $extension === 'txt' ? 'csv' : $extension;
@@ -48,7 +49,19 @@ class CatalogUploadController extends Controller
             'status' => CatalogUploadStatus::Uploaded,
         ]);
 
-        $inspection = $this->inspector->inspect(self::DISK, $storedPath, $fileType);
+        try {
+            $inspection = $this->inspector->inspect(self::DISK, $storedPath, $fileType);
+        } catch (UnsupportedCsvEncodingException $e) {
+            // Encoding could not be safely normalized. Remove the row we just
+            // created so no orphan upload remains, and return the vendor-facing
+            // message as a validation error.
+            $upload->delete();
+
+            return response()->json([
+                'message' => $e->getMessage(),
+                'errors' => ['file' => [$e->getMessage()]],
+            ], 422);
+        }
 
         $upload->update(['status' => CatalogUploadStatus::Mapping]);
 
@@ -148,9 +161,14 @@ class CatalogUploadController extends Controller
         return response()->json($rows);
     }
 
+    private function currentClient()
+    {
+        return Auth::guard('client')->user();
+    }
+
     private function authorizeUploadOwnership(CatalogUpload $catalogUpload): void
     {
-        $client = Auth::guard('client')->user();
+        $client = $this->currentClient();
 
         abort_unless($catalogUpload->client_id === $client->id, 403);
     }
@@ -169,10 +187,25 @@ class CatalogUploadController extends Controller
             ->toArray();
     }
 
+    /**
+     * Base query for a vendor's active mapping templates. suggestedTemplate()
+     * and saveMappingTemplate() both start here before adding their own
+     * filters, instead of each retyping vendor_id + active conditions.
+     */
+    private function activeTemplatesForVendor(int $vendorId)
+    {
+        return VendorMappingTemplate::where('vendor_id', $vendorId)
+            ->where('active', true);
+    }
+
+    private function normalizeColumnName(?string $value): string
+    {
+        return Str::lower(trim((string) $value));
+    }
+
     private function suggestedTemplate(int $vendorId, array $columns): ?array
     {
-        $template = VendorMappingTemplate::where('vendor_id', $vendorId)
-            ->where('active', true)
+        $template = $this->activeTemplatesForVendor($vendorId)
             ->with('fields')
             ->latest()
             ->first();
@@ -184,10 +217,10 @@ class CatalogUploadController extends Controller
         // Match template fields back to the newly-uploaded file's columns by
         // name (case-insensitive), since column order can shift between
         // exports even for the same vendor.
-        $normalizedColumns = collect($columns)->map(fn($c) => Str::lower(trim((string) $c)));
+        $normalizedColumns = collect($columns)->map(fn($c) => $this->normalizeColumnName($c));
 
         $suggestions = $template->fields->mapWithKeys(function ($field) use ($normalizedColumns) {
-            $index = $normalizedColumns->search(Str::lower(trim($field->source_column_name)));
+            $index = $normalizedColumns->search($this->normalizeColumnName($field->source_column_name));
 
             return $index === false ? [] : [$index => $field->field_key];
         });
@@ -215,8 +248,7 @@ class CatalogUploadController extends Controller
         );
 
         // Find an existing template for this vendor + file signature
-        $template = VendorMappingTemplate::where('vendor_id', $catalogUpload->vendor_id)
-            ->where('active', true)
+        $template = $this->activeTemplatesForVendor($catalogUpload->vendor_id)
             ->whereNotNull('file_signature')
             ->where('file_signature', $fileSignature)
             ->latest()

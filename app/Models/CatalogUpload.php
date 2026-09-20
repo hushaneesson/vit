@@ -26,6 +26,7 @@ class CatalogUpload extends Model
         'success_rows',
         'created_rows',
         'invalid_rows',
+        'failed_rows',
         'updated_rows',
         'unchanged_rows',
         'failure_reason',

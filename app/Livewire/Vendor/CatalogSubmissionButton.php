@@ -253,6 +253,30 @@ class CatalogSubmissionButton extends Component
         }
     }
 
+    #[Computed]
+    public function pendingSubmissionStatus(): ?array
+    {
+        $submission = $this->existingPendingSubmission;
+
+        if (! $submission) {
+            return null;
+        }
+
+        return [
+            'id' => $submission->id,
+            'status' => $submission->status,
+            'processing_status' => $submission->processing_status,
+            'failure_reason' => $submission->failure_reason,
+            'file_path' => $submission->file_path,
+            'file_size' => $submission->file_size,
+        ];
+    }
+
+    public function refreshPendingSubmission(): void
+    {
+        $this->loadPendingSubmission();
+    }
+
     public function render()
     {
         return view('livewire.vendor.catalog-submission-button');

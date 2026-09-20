@@ -84,8 +84,18 @@ class CatalogClassificationProcessor
      * The classification key comes from ClassificationType rather than being
      * assumed by the processing layer. Replaces any existing entry with the
      * same key to prevent duplicates on repeated uploads.
+     *
+     * A batch caller may pass an already-resolved ClassificationType together
+     * with $unspscTypeResolved=true so the same reference row is not queried
+     * once per processed row. Both parameters default to the original per-call
+     * query behavior, and a resolved-but-missing type is still handled by the
+     * same early return below.
      */
-    public function addUnspscClassification(array &$attrs): void
+    public function addUnspscClassification(
+        array &$attrs,
+        ?ClassificationType $resolvedUnspscType = null,
+        bool $unspscTypeResolved = false
+    ): void
     {
         if (!array_key_exists('unspsc_code', $attrs)) {
             return;
@@ -101,9 +111,11 @@ class CatalogClassificationProcessor
             return;
         }
 
-        $unspscType = ClassificationType::query()
-            ->where('key', 'UNSPSC')
-            ->first();
+        $unspscType = $unspscTypeResolved
+            ? $resolvedUnspscType
+            : ClassificationType::query()
+                ->where('key', 'UNSPSC')
+                ->first();
 
         if ($unspscType === null) {
             return;

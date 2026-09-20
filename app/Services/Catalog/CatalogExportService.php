@@ -12,27 +12,14 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use OpenSpout\Common\Entity\Row;
 use OpenSpout\Common\Entity\Style\Style;
-use OpenSpout\Writer\XLSX\Options as XlsxWriterOptions;
-use OpenSpout\Writer\XLSX\Properties as XlsxWriterProperties;
-use OpenSpout\Writer\XLSX\Writer as XlsxWriter;
+use OpenSpout\Writer\CSV\Writer as CsvWriter;
 
 /**
- * Generates a VIT-compliant .xlsx file from catalog submission data.
+ * Generates a VIT-compliant .csv file from catalog submission data.
  *
  * Column headers and order are driven by VitFieldDefinition::exportableFields(),
- * which returns only fields that get their own column in the output Excel file.
+ * which returns only fields that get their own column in the output CSV file.
  *
- * Header text uses vit_csv_column, falling back to web_app_label.
- *
- * Values are resolved from CatalogItem using model_attribute, falling back
- * to field_key when no model_attribute is defined.
- *
- * Special handling includes:
- * - System-derived fields such as vendor_name, catalog_name and type.
- * - SKU fields that resolve from dealer_sku.
- * - Multi-value fields.
- * - Key/value fields such as specifications.
- * - Appended fields such as quantity_per_unit.
  */
 class CatalogExportService
 {
@@ -42,10 +29,7 @@ class CatalogExportService
      *
      * @return array{
      *     headers: list<string>,
-     *     multiValueFieldKeys: list<string>,
-     *     appendedFields: Collection,
-     *     unitWordField: object|null,
-     *     unitOfMeasureField: object|null
+     *     multiValueFieldKeys: list<string>
      * }
      */
     private function buildHoistedExportMetadata(): array
@@ -63,9 +47,6 @@ class CatalogExportService
                 ->where('is_multi_value', true)
                 ->pluck('field_key')
                 ->all(),
-            'appendedFields' => VitFieldDefinition::appendedFields(),
-            'unitWordField' => VitFieldDefinition::find('unit_word'),
-            'unitOfMeasureField' => VitFieldDefinition::find('unit_of_measure'),
         ];
     }
 
@@ -76,7 +57,7 @@ class CatalogExportService
      * @param list<string> $headers
      */
     private function writeHeaderRowToWriter(
-        XlsxWriter $writer,
+        CsvWriter $writer,
         array $headers
     ): void {
         $writer->addRow(
@@ -85,13 +66,10 @@ class CatalogExportService
     }
 
     /**
-     * Write item rows to an open OpenSpout writer. Values are resolved and
-     * written one item at a time, matching the previous explicit string-cell
-     * behavior (SKUs, leading zeros and numeric-looking values are never
-     * reinterpreted by Excel).
+     * Write item rows to an open OpenSpout writer.
      */
     private function writeItemsToWriter(
-        XlsxWriter $writer,
+        CsvWriter $writer,
         Collection $fields,
         iterable $items,
         Vendor $vendor,
@@ -102,9 +80,6 @@ class CatalogExportService
                 $fields,
                 $item,
                 $vendor,
-                $hoisted['appendedFields'],
-                $hoisted['unitWordField'],
-                $hoisted['unitOfMeasureField'],
                 $hoisted['multiValueFieldKeys']
             );
 
@@ -120,16 +95,8 @@ class CatalogExportService
     }
 
     /**
-     * Generate and store the Excel export from a query using OpenSpout
+     * Generate and store the CSV export from a query using OpenSpout
      * streaming.
-     *
-     * The XLSX is written incrementally by OpenSpout, which streams rows to
-     * disk rather than buffering the whole workbook in memory. The database
-     * is iterated with chunkById(500) so only one chunk of hydrated models
-     * and their eager-loaded relations is held in memory at a time, keeping
-     * memory bounded regardless of catalog size.
-     *
-     * Exports with 50,000+ rows complete with approximately constant memory.
      *
      * @param Vendor $vendor
      * @param string $catalogName
@@ -156,19 +123,10 @@ class CatalogExportService
             $disk
         );
 
-        $writer = new XlsxWriter(
-            $this->buildXlsxWriterOptions()
-        );
+        $writer = new CsvWriter();
 
         try {
             $writer->openToFile($tempPath);
-
-            try {
-                $writer->getCurrentSheet()->setName('Catalog');
-            } catch (\Throwable $e) {
-                // Sheet title is cosmetic; never fail an export over it.
-                unset($e);
-            }
 
             /*
              * Header row: same headers and order as always, bold via a
@@ -223,10 +181,10 @@ class CatalogExportService
     }
 
     /**
-     * Generate the VIT Excel file from the current CatalogItems belonging to
+     * Generate the VIT CSV file from the current CatalogItems belonging to
      * the submission's catalog.
      *
-     * @return string Relative storage path to the generated .xlsx
+     * @return string Relative storage path to the generated .csv
      */
     public function generateFromSubmission(
         CatalogSubmission $submission
@@ -310,19 +268,10 @@ class CatalogExportService
 
         return "inbound/{$folderName}/"
             . "{$fileStem}-"
-            . now()->format('Ymd-His')
-            . '-' . Str::lower(Str::random(8))
-            . '.xlsx';
+            . now()->format('Y-m-d_H-i-s')
+            . '.csv';
     }
 
-    /**
-     * Create a temporary file for the export that ends up on the same
-     * filesystem as its final destination when possible, so the final
-     * rename() in storeExportFile() stays atomic even when the OS temp
-     * directory lives on a different filesystem (e.g. Docker/Kubernetes
-     * mounted volumes). Remote disks have no local destination path, so
-     * the OS temp directory is used and the file is streamed instead.
-     */
     private function createTempFilePath(
         string $destinationPath,
         string $disk
@@ -349,35 +298,7 @@ class CatalogExportService
     }
 
     /**
-     * Build the XLSX writer options, including the VIT export marker as
-     * custom document properties.
-     *
-     * OpenSpout writes custom properties to docProps/custom.xml as
-     * vt:lpwstr values. The re-upload detector (VitExportFileDetector)
-     * parses vt:lpwstr and casts the version to int, so the marker stays
-     * fully compatible with the previous PhpSpreadsheet output.
-     */
-    private function buildXlsxWriterOptions(): XlsxWriterOptions
-    {
-        $options = new XlsxWriterOptions();
-
-        $options->setProperties(
-            new XlsxWriterProperties(
-                customProperties: [
-                    VitFieldDefinition::VIT_EXPORT_MARKER_KEY
-                    => VitFieldDefinition::VIT_EXPORT_MARKER_VALUE,
-
-                    VitFieldDefinition::VIT_EXPORT_VERSION_KEY
-                    => (string) VitFieldDefinition::VIT_EXPORT_VERSION,
-                ]
-            )
-        );
-
-        return $options;
-    }
-
-    /**
-     * Move/stream the completed XLSX into its storage destination.
+     * Move/stream the completed CSV into its storage destination.
      *
      * The temp file is never loaded into PHP memory: local disks use an
      * atomic rename and remote disks stream the file to storage.
@@ -430,23 +351,17 @@ class CatalogExportService
 
     /**
      * Resolve all field values for a single catalog item.
-     *
-     * Appended fields are applied after the normal field values have been
-     * resolved so they can modify their target field.
      */
     private function resolveAllValues(
         Collection $fields,
         object $item,
         Vendor $vendor,
-        Collection $appendedFields,
-        object $unitWordField,
-        object $unitOfMeasureField,
         array $multiValueFieldKeys
     ): array {
         $values = [];
 
         /*
-         * 1. Collect raw values for all exportable fields.
+         * Collect raw values for all exportable fields.
          */
         foreach ($fields as $field) {
             $values[$field->field_key] = $this->resolveValue(
@@ -455,65 +370,6 @@ class CatalogExportService
                 $vendor,
                 $multiValueFieldKeys
             );
-        }
-
-        /*
-         * 2. Apply appended fields such as quantity_per_unit.
-         */
-        foreach ($appendedFields as $appended) {
-            $appendedValue = $this->resolveValue(
-                $appended,
-                $item,
-                $vendor,
-                $multiValueFieldKeys
-            );
-
-            if ($appendedValue === '') {
-                continue;
-            }
-
-            $targetKey = $appended->append_to_field;
-            $targetValue = $values[$targetKey] ?? '';
-
-            /*
-             * Resolve unit_word and unit_of_measure for the full VIT format:
-             *
-             * {quantity} {unit_word}/{uom}
-             *
-             * Example:
-             * 10 Reams/CS
-             */
-            $unitWord = $this->resolveValue(
-                $unitWordField,
-                $item,
-                $vendor,
-                $multiValueFieldKeys
-            );
-
-            $uom = $this->resolveValue(
-                $unitOfMeasureField,
-                $item,
-                $vendor,
-                $multiValueFieldKeys
-            );
-
-            if ($unitWord !== '' && $uom !== '') {
-                $formattedAppend =
-                    "{$appendedValue} {$unitWord}/{$uom}";
-            } elseif ($uom !== '') {
-                /*
-                 * Fallback when no unit_word is available.
-                 */
-                $formattedAppend =
-                    "{$appendedValue} {$uom}";
-            } else {
-                $formattedAppend =
-                    (string) $appendedValue;
-            }
-
-            $values[$targetKey] = $targetValue !== ''
-                ? "{$targetValue}, {$formattedAppend}"
-                : $formattedAppend;
         }
 
         return $values;

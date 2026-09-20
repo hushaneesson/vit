@@ -4,6 +4,7 @@ namespace App\Livewire\Vendor;
 
 use App\Enums\CatalogUploadStatus;
 use App\Models\CatalogUpload;
+use App\Services\Catalog\CatalogUploadNotificationAcknowledger;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
@@ -64,9 +65,7 @@ class CatalogProcessingBanner extends Component
             return null;
         }
 
-        $notified = session('catalog_upload_notifications_shown', []);
-
-        if (in_array($completed->id, $notified)) {
+        if (CatalogUploadNotificationAcknowledger::isAcknowledged($completed->id)) {
             return null;
         }
 
@@ -94,12 +93,7 @@ class CatalogProcessingBanner extends Component
             return;
         }
 
-        $notified = session('catalog_upload_notifications_shown', []);
-
-        if (! in_array($this->completedUpload->id, $notified)) {
-            $notified[] = $this->completedUpload->id;
-            session(['catalog_upload_notifications_shown' => $notified]);
-        }
+        CatalogUploadNotificationAcknowledger::acknowledge($this->completedUpload->id);
     }
 
     public function render()
